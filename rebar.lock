@@ -1,0 +1,12 @@
+{"1.2.0",
+[{<<"hex2bin">>,{pkg,<<"hex2bin">>,<<"1.0.0">>},1},
+ {<<"sha3">>,
+  {git,"https://github.com/aeternity/erlang-sha3",
+       {ref,"b5f27a29ba1179e5907c50d7ec7aa79b2857e981"}},
+  0}]}.
+[
+{pkg_hash,[
+ {<<"hex2bin">>, <<"AAC26EAB998AE80EACEE1C7607C629AB503EBF77A62B9242BAE2B94D47DCB71E">>}]},
+{pkg_hash_ext,[
+ {<<"hex2bin">>, <<"E7012D1D9AADD26E680F0983D26FB8923707F05FAC9688F19F530FA3795E716F">>}]}
+].

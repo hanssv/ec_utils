@@ -4,7 +4,9 @@
 %%% Created     : 13 Jan 2022 by Hans Svensson
 -module(ecu_misc).
 
--export([eea/2, pcomp/1]).
+-export([eea/2,
+         hex_to_bin/1, bin_to_hex/1,
+         pcomp/1]).
 
 %% Extended Euclidean Algorithm
 eea(A, B) when ((A < 1) or (B < 1)) ->
@@ -23,3 +25,17 @@ pcomp(Fs) ->
   Parent = self(),
   Pids = [ spawn(fun() -> Parent ! {self(), F()} end) || F <- Fs ],
   [ receive {Pid, X} -> X after 500 -> error(timeout) end || Pid <- Pids ].
+
+%% Hex encode/decode
+-spec hex_to_bin(Input :: string()) -> binary().
+hex_to_bin(S) ->
+  hex_to_bin(S, []).
+hex_to_bin([], Acc) ->
+  list_to_binary(lists:reverse(Acc));
+hex_to_bin([X,Y|T], Acc) ->
+  {ok, [V], []} = io_lib:fread("~16u", [X,Y]),
+  hex_to_bin(T, [V | Acc]).
+
+-spec bin_to_hex(Input :: binary()) -> string().
+bin_to_hex(Bin) ->
+  lists:flatten([io_lib:format("~2.16.0B", [X]) || X <- binary_to_list(Bin)]).
