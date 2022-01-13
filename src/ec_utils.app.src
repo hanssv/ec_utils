@@ -1,0 +1,10 @@
+{application, ec_utils,
+ [{description, "A collection of elliptic curve utility functions"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env,[]},
+  {modules, []},
+  {licenses, ["MIT"]},
+  {links, []}
+ ]}.
