@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Basic operations (scalar arithmetics, point addition, scalar multiplication)
   for secp256k1 in pure Erlang code
+- ecdsa sign/verify
 
 
 [Unreleased]: https://github.com/hanssv/ec_utils/compare/v0.1.0...HEAD

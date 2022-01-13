@@ -4,7 +4,7 @@
 %%% Created     : 13 Jan 2022 by Hans Svensson
 -module(ecu_misc).
 
--export([eea/2]).
+-export([eea/2, pcomp/1]).
 
 %% Extended Euclidean Algorithm
 eea(A, B) when ((A < 1) or (B < 1)) ->
@@ -18,4 +18,8 @@ eea(G0, S0, T0, G1, S1, T1) ->
     Q = G0 div G1,
     eea(G1, S1, T1, G0 - (Q * G1), S0 - (Q * S1), T0 - (Q * T1)).
 
-
+%% Very rudimentary parallel computation...
+pcomp(Fs) ->
+  Parent = self(),
+  Pids = [ spawn(fun() -> Parent ! {self(), F()} end) || F <- Fs ],
+  [ receive {Pid, X} -> X after 500 -> error(timeout) end || Pid <- Pids ].
