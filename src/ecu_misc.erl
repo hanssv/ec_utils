@@ -4,9 +4,20 @@
 %%% Created     : 13 Jan 2022 by Hans Svensson
 -module(ecu_misc).
 
--export([eea/2,
+-export([eea/2, exp_mod/3,
          hex_to_bin/1, bin_to_hex/1,
          pcomp/1]).
+
+%% A^B mod P
+exp_mod(_A, 0, _P) -> 1;
+exp_mod(A, B, P) when A > 0 ->
+  binary:decode_unsigned(crypto:mod_pow(A, B, P));
+exp_mod(A, B, P) ->
+  X = exp_mod(-A, B, P),
+  case B rem 2 == 0 orelse X == 0 of
+    true  -> X;
+    false -> P - X
+  end.
 
 %% Extended Euclidean Algorithm
 eea(A, B) when ((A < 1) or (B < 1)) ->

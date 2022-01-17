@@ -79,13 +79,7 @@ p_add({X1, Y1}, {X2, Y2}) ->
   Y3 = ?SUB(?MUL(M, ?SUB(X1, X3)), Y1),
   {X3, Y3}.
 
-pow(_, 0) -> 1;
-pow(A, 1) -> A;
-pow(A, B) -> pow(A, B, 1).
-
-pow(_, 0, R)                   -> R;
-pow(A, B, R) when B rem 2 == 0 -> pow(A * A, B bsr 1, R);
-pow(A, B, R)                   -> pow(?MUL(A, A), B bsr 1, ?MUL(R, A)).
+pow(A, B) -> ecu_misc:exp_mod(A, B, ?P).
 
 %% Arithmetics in prime field P
 f_add(A, B) -> (A + B) rem ?P.
@@ -94,8 +88,7 @@ f_sub(A, B) -> (A - B + ?P) rem ?P.
 f_div(A, B) -> f_mul(A, f_inv(B)).
 
 f_inv(A) ->
-  {1, S, _T} = ecu_misc:eea(A, ?P),
-  (S + ?P) rem ?P.
+  pow(A, ?P - 2).
 
 %% Arithmetics in curve group order N
 s_add(A, B) -> (A + B) rem ?N.
