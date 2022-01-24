@@ -38,9 +38,13 @@ p() -> ?P.
 
 n() -> ?N.
 
+scalar_mul_base(<<K:256>>) ->
+  scalar_mul(K, {?X, ?Y});
 scalar_mul_base(K) ->
   scalar_mul(K, {?X, ?Y}).
 
+scalar_mul(<<K:256>>, P) ->
+  scalar_mul(K, P);
 scalar_mul(0, _P) ->
   {0, 0};
 scalar_mul(1, P) ->

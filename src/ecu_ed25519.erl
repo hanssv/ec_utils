@@ -36,7 +36,8 @@
 -export([on_curve/1, p/0, n/0, pt_eq/2,
          scalar_mul/2, scalar_mul_base/1,
          scalar_mul_noclamp/2, scalar_mul_base_noclamp/1,
-         p_add/2,
+         scalar_reduce/1,
+         p_add/2, p_sub/2, p_neg/1, p_dbl/1,
          compress/1, decompress/1,
          f_add/2, f_mul/2, f_sub/2, f_div/2, f_inv/1,
          s_add/2, s_mul/2, s_sub/2, s_div/2, s_inv/1]).
@@ -92,12 +93,18 @@ decompress(<<Y0:256/little>>) ->
     false -> to_ext_hom({?P - X, Y})
   end.
 
+p_neg({X, Y})       -> {?P - X, Y};
+p_neg({X, Y, Z, T}) -> {?P - X, Y, Z, ?P - T};
+p_neg(P)            -> p_neg(to_ext_hom(P)).
+
+p_sub(P1, P2) -> p_add(P1, p_neg(P2)).
+
 -spec p_add(X :: pt(), Y :: pt()) -> pt_hom_ext().
 p_add({X1, Y1, Z1, T1}, {X2, Y2, Z2, T2}) ->
   A = ?MUL(?SUB(Y1, X1), ?SUB(Y2, X2)),
   B = ?MUL(?ADD(Y1, X1), ?ADD(Y2, X2)),
-  C = ?MUL(?MUL(T1, T2), ?MUL(2, ?D)),
-  D = ?MUL(2, ?MUL(Z1, Z2)),
+  C = ?MUL(?MUL(T1, T2), 2 * ?D),
+  D = ?MUL(2 * Z1, Z2),
   E = ?SUB(B, A),
   F = ?SUB(D, C),
   G = ?ADD(D, C),
@@ -106,9 +113,23 @@ p_add({X1, Y1, Z1, T1}, {X2, Y2, Z2, T2}) ->
 p_add(P1, P2) ->
   p_add(to_ext_hom(P1), to_ext_hom(P2)).
 
+p_dbl({X, Y, Z, _T}) ->
+  A = ?MUL(X, X),
+  B = ?MUL(Y, Y),
+  C = ?MUL(2 * Z, Z),
+  D = ?P - A,
+  XY = X + Y,
+  E = ?SUB(?MUL(XY, XY), ?ADD(A, B)),
+  G = ?ADD(D, B),
+  F = ?SUB(G, C),
+  H = ?SUB(D, B),
+  {?MUL(E, F), ?MUL(G, H), ?MUL(F, G), ?MUL(E, H)};
+p_dbl(P) ->
+  p_dbl(to_ext_hom(P)).
+
 -spec scalar_mul_base(Scalar :: scalar() | binary()) -> pt_hom_ext().
 scalar_mul_base(<<K:256/little>>) ->
-  scalar_mul_base(K);
+  scalar_mul_(clamp(K), ?GE);
 scalar_mul_base(K) when is_integer(K), K >= 0, K < ?N ->
   scalar_mul_(clamp(K), ?GE).
 
@@ -152,21 +173,24 @@ f_inv(A) ->
   f_pow(A, ?P - 2).
 
 %% Arithmetics in curve group order N
-s_add(A, B) -> (A + B) rem ?N.
-s_mul(A, B) -> (A * B) rem ?N.
-s_sub(A, B) -> (A - B + ?N) rem ?N.
+s_add(<<A:256/little>>, <<B:256/little>>) -> <<((A + B) rem ?N):256/little>>.
+s_mul(<<A:256/little>>, <<B:256/little>>) -> <<((A * B) rem ?N):256/little>>.
+s_sub(<<A:256/little>>, <<B:256/little>>) -> <<((A - B + ?N) rem ?N):256/little>>.
 s_div(A, B) -> s_mul(A, s_inv(B)).
 
-s_inv(A) ->
+s_inv(<<A:256/little>>) ->
   {1, S, _T} = ecu_misc:eea(A, ?N),
-  (S + ?N) rem ?N.
+  <<((S + ?N) rem ?N):256/little>>.
+
+scalar_reduce(<<S:512/little>>) ->
+  <<(S rem ?N):256/little>>.
 
 %% --- internal functions
 scalar_mul_(0, _P) -> {0, 1, 1, 0};
 scalar_mul_(1, P)  -> P;
 scalar_mul_(K, P) ->
   case K rem 2 of
-    0 -> scalar_mul_(K div 2, p_add(P, P));
+    0 -> scalar_mul_(K div 2, p_dbl(P));
     1 -> p_add(P, scalar_mul_(K - 1, P))
   end.
 

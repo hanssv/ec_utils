@@ -99,18 +99,28 @@ prop_scalar_mul_noclamp() ->
     equals(E, ecu_ed25519:compress(P))
   end).
 
-xprop_scalar_enacl() ->
-  ?FORALL(S, gen_scalar(),
+prop_arithmetics1() ->
+  ?FORALL({P1, P2, P3}, {gen_point(), gen_point(), gen_point()},
   begin
-    _P = enacl:crypto_ed25519_scalarmult_base(S),
-    true
+    Res1 = ecu_ed25519:p_add(P1, ecu_ed25519:p_add(P2, P3)),
+    Res2 = ecu_ed25519:p_add(ecu_ed25519:p_add(P1, P2), P3),
+    equal_pts(Res1, Res2)
   end).
 
-xprop_scalar_ecu() ->
-  ?FORALL(S, gen_scalar(),
+prop_arithmetics2() ->
+  ?FORALL({P1, P2}, {gen_point(), gen_point()},
   begin
-    _P = ecu_ed25519:scalar_mul_base(S),
-    true
+    Res1 = ecu_ed25519:p_sub(ecu_ed25519:p_add(P1, P2), P2),
+    equal_pts(P1, Res1)
+  end).
+
+prop_dbl() ->
+  ?FORALL(P, gen_point(),
+  begin
+    A = ecu_ed25519:p_add(P, P),
+    B = ecu_ed25519:p_dbl(P),
+    ?WHENFAIL(eqc:format("~p\n  /=\n~p\n", [ecu_ed25519:to_affine(A), ecu_ed25519:to_affine(B)]),
+              ecu_ed25519:pt_eq(A, B))
   end).
 
 even(<<B:31/bytes, _:1, B2:7>>) -> <<B/bytes, 0:1, B2:7>>.
