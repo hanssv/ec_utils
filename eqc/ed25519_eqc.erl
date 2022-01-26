@@ -87,7 +87,7 @@ prop_scalar_mul() ->
   ?FORALL({S, P0}, {gen_scalar(), gen_point()},
   begin
     E = enacl:crypto_ed25519_scalarmult(S, P0),
-    P = ecu_ed25519:scalar_mul(S, even(P0)),
+    P = ecu_ed25519:scalar_mul(S, P0),
     equals(E, ecu_ed25519:compress(P))
   end).
 
@@ -95,7 +95,7 @@ prop_scalar_mul_noclamp() ->
   ?FORALL({S, P0}, {gen_scalar(), gen_point()},
   begin
     E = enacl:crypto_ed25519_scalarmult_noclamp(S, P0),
-    P = ecu_ed25519:scalar_mul_noclamp(S, ecu_ed25519:decompress(even(P0))),
+    P = ecu_ed25519:scalar_mul_noclamp(S, ecu_ed25519:decompress(P0)),
     equals(E, ecu_ed25519:compress(P))
   end).
 
@@ -122,8 +122,6 @@ prop_dbl() ->
     ?WHENFAIL(eqc:format("~p\n  /=\n~p\n", [ecu_ed25519:to_affine(A), ecu_ed25519:to_affine(B)]),
               ecu_ed25519:pt_eq(A, B))
   end).
-
-even(<<B:31/bytes, _:1, B2:7>>) -> <<B/bytes, 0:1, B2:7>>.
 
 equal_pts(P1, P2) ->
   ?WHENFAIL(eqc:format("~p\n  /=\n~p\n", [ecu_ed25519:to_affine(P1), ecu_ed25519:to_affine(P2)]),
