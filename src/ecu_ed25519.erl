@@ -141,7 +141,7 @@ scalar_mul(K, P) ->
 
 -spec scalar_mul_base_noclamp(Scalar :: scalar() | binary()) -> pt_hom_ext().
 scalar_mul_base_noclamp(<<K:256/little>>) ->
-  scalar_mul_base_noclamp(K);
+  scalar_mul_(K, ?GE);
 scalar_mul_base_noclamp(K) when is_integer(K), K >= 0, K < ?N ->
   scalar_mul_(K, ?GE).
 
