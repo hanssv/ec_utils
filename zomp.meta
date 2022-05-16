@@ -1,0 +1,17 @@
+{a_email,"zxq9@zxq9.com"}.
+{author,"Craig Everett"}.
+{c_email,[]}.
+{copyright,"Hans Svensson"}.
+{deps,[]}.
+{desc,"Helper functions for cryptography, mostly related to elliptic curves."}.
+{file_exts,[]}.
+{key_name,none}.
+{license,"MIT"}.
+{modules,[]}.
+{name,"Elliptic Curve Utils"}.
+{package_id,{"otpr","ec_utils",{0,1,0}}}.
+{prefix,none}.
+{repo_url,"https://github.com/zxq9/ec_utils"}.
+{tags,[]}.
+{type,lib}.
+{ws_url,"https://github.com/hanssv/ec_utils"}.

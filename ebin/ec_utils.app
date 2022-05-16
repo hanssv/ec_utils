@@ -1,0 +1,10 @@
+{application,ec_utils,
+             [{description,"Helper functions for cryptography, mostly related to elliptic curves."},
+              {registered,[]},
+              {included_applications,[]},
+              {applications,[stdlib,kernel]},
+              {vsn,"0.1.0"},
+              {modules,[ed25519_eqc,eddsa_eqc,ec_utils,ecu_crypto,ecu_ecdsa,
+                        ecu_ed25519,ecu_eddsa,ecu_misc,ecu_secp256k1,
+                        benchmark_tests,crypto_tests,ecdsa_tests,
+                        secp256k1_tests]}]}.

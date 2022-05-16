@@ -4,6 +4,7 @@
 %%%               Just for usage when speed isn't crucial...
 %%% Created     : 13 Jan 2022 by Hans Svensson
 -module(ecu_ed25519).
+-vsn("0.1.0").
 
 -define(P, 16#7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFED).
 -define(N, 16#1000000000000000000000000000000014DEF9DEA2F79CD65812631A5CF5D3ED).
