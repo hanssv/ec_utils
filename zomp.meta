@@ -1,6 +1,6 @@
-{a_email,[]}.
+{a_email,"hanssv@gmail.com"}.
 {author,"Hans Svensson"}.
-{c_email,[]}.
+{c_email,"hanssv@gmail.com"}.
 {copyright,"Hans Svensson"}.
 {deps,[]}.
 {desc,"Helper functions for cryptography, mostly related to elliptic curves."}.
@@ -11,7 +11,7 @@
 {name,"Elliptic Curve Utils"}.
 {package_id,{"otpr","ec_utils",{1,0,0}}}.
 {prefix,none}.
-{repo_url,"https://github.com/zxq9/ec_utils"}.
-{tags,[]}.
+{repo_url,"https://github.com/hanssv/ec_utils"}.
+{tags,["cryptography","elliptic curve","crypto","enacl"]}.
 {type,lib}.
 {ws_url,"https://github.com/hanssv/ec_utils"}.
