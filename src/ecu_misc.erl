@@ -3,7 +3,7 @@
 %%% Description : Misc. functionality
 %%% Created     : 13 Jan 2022 by Hans Svensson
 -module(ecu_misc).
--vsn("0.1.0").
+-vsn("1.0.0").
 
 -export([eea/2, exp_mod/3,
          hex_to_bin/1, bin_to_hex/1,

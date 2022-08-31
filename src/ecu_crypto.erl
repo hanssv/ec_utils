@@ -3,7 +3,7 @@
 %%% Description :
 %%% Created     : 13 Jan 2022 by Hans Svensson
 -module(ecu_crypto).
--vsn("0.1.0").
+-vsn("1.0.0").
 
 -export([private_to_short/2, public_to_short/2,
          eth_sign/2, eth_recover/2, eth_verify/3, eth_msg_hash/1,

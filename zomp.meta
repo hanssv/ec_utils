@@ -1,5 +1,5 @@
-{a_email,"zxq9@zxq9.com"}.
-{author,"Craig Everett"}.
+{a_email,[]}.
+{author,"Hans Svensson"}.
 {c_email,[]}.
 {copyright,"Hans Svensson"}.
 {deps,[]}.
@@ -9,7 +9,7 @@
 {license,"MIT"}.
 {modules,[]}.
 {name,"Elliptic Curve Utils"}.
-{package_id,{"otpr","ec_utils",{0,1,0}}}.
+{package_id,{"otpr","ec_utils",{1,0,0}}}.
 {prefix,none}.
 {repo_url,"https://github.com/zxq9/ec_utils"}.
 {tags,[]}.

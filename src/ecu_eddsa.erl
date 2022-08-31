@@ -3,7 +3,7 @@
 %%% Description : eddsa functionality - when possible compatible with enacl.
 %%% Created     : 19 Jan 2022 by Hans Svensson
 -module(ecu_eddsa).
--vsn("0.1.0").
+-vsn("1.0.0").
 
 -export([sign_keypair/0,
          sign_seed_keypair/1,

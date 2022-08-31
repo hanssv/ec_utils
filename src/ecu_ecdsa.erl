@@ -3,7 +3,7 @@
 %%% Description : ecdsa functionality
 %%% Created     : 13 Jan 2022 by Hans Svensson
 -module(ecu_ecdsa).
--vsn("0.1.0").
+-vsn("1.0.0").
 
 -export([sign/3, verify/4,
          sign_secp256k1/2,
