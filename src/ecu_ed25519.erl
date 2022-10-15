@@ -11,12 +11,12 @@
 -type pt_affine() :: {non_neg_integer(), non_neg_integer()}. %% {X, Y}
 -type pt_hom_ext() :: {non_neg_integer(), non_neg_integer(),
                        non_neg_integer(), non_neg_integer()}. %% {X, Y, Z, T}
--type pt_compressed() :: <<_:32>>. %% Y coord + odd/even X.
+-type pt_compressed() :: <<_:256>>. %% Y coord + odd/even X.
 
 -type pt() :: pt_affine() | pt_hom_ext() | pt_compressed().
 
 %% -type fld_elem() :: 0..(?P-1).
--type scalar()   :: 0..(?N-1).
+-type scalar() :: 0..(?N-1).
 
 -define(D, 16#52036CEE2B6FFE738CC740797779E89800700A4D4141D8AB75EB4DCA135978A3).
 -define(X, 16#216936D3CD6E53FEC0A4E231FDD6DC5C692CC7609525A7B2C9562D608F25D51A).
@@ -32,6 +32,8 @@
 -define(MUL(A, B), ((A * B) rem ?P)).
 -define(SUB(A, B), ((A - B + ?P) rem ?P)).
 -define(DIV(A, B), f_div(A, B)).
+
+-export_type([pt/0, scalar/0]).
 
 -export([on_curve/1, p/0, n/0, pt_eq/2,
          scalar_mul/2, scalar_mul_base/1,
@@ -76,14 +78,14 @@ n() -> ?N.
 
 -define(TWO_POW_255_MINUS_1, 16#7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF).
 
--spec compress(P :: pt()) -> <<_:32>>.
+-spec compress(P :: pt()) -> pt_compressed().
 compress(<<_:32/binary>> = P) -> P;
 compress({_, _, _, _} = P)    -> compress(to_affine(P));
 compress({X, Y}) ->
   V = (Y band ?TWO_POW_255_MINUS_1) bor ((X band 1) bsl 255),
   <<V:256/little>>.
 
--spec decompress(<<_:32>>) -> pt_hom_ext().
+-spec decompress(pt_compressed()) -> pt_hom_ext().
 decompress(<<Y0:256/little>>) ->
   X0 = Y0 bsr 255,
   Y  = Y0 band ?TWO_POW_255_MINUS_1,

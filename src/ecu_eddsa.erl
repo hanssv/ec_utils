@@ -16,23 +16,22 @@
 %%
 %% The keypair is returned as a map with keys 'public' and 'secret'.
 %% @end
--spec sign_keypair() -> #{ atom() => binary() }.
+-spec sign_keypair() -> #{ public => binary(), secret => binary() }.
 sign_keypair() ->
   Secret = crypto:strong_rand_bytes(32),
-  <<Seed:32/bytes, _/binary>> = crypto:hash(sha512, Secret),
+  <<Seed:32/binary, _/binary>> = crypto:hash(sha512, Secret),
 
-  Pub = ecu_ed25519:scalar_mul_base(Seed),
+  Pub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed)),
   #{public => Pub, secret => <<Secret:32/binary, Pub:32/binary>>}.
 
 %% @doc sign_seed_keypair/1 computes the signing keypair from a seed.
 %%
 %% The keypair is returned as a map with keys 'public' and 'secret'.
 %% @end
--spec sign_seed_keypair(Seed :: <<_:32>>) -> #{ atom() => binary() }.
+-spec sign_seed_keypair(Secret :: <<_:256>>) -> #{ public => binary(), secret => binary() }.
 sign_seed_keypair(Secret) ->
-  <<Seed:32/bytes, _/binary>> = crypto:hash(sha512, Secret),
+  <<Seed:32/binary, _/binary>> = crypto:hash(sha512, Secret),
   Pub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed)),
-%%   Pub = enacl:crypto_ed25519_scalarmult_base(Seed),
 
   #{public => Pub, secret => <<Secret:32/binary, Pub:32/binary>>}.
 
@@ -41,7 +40,7 @@ sign_seed_keypair(Secret) ->
 %% Given a message `Msg' and a secret key `SK' the function will sign the
 %% message and return a signed message `SM'.
 %% @end
--spec sign(Msg :: iodata(), SK :: <<_:32>> | <<_:64>>) -> SM :: binary().
+-spec sign(Msg :: iodata(), SK :: <<_:256>> | <<_:512>>) -> SM :: binary().
 sign(Msg, SK) ->
   BinMsg = iolist_to_binary(Msg),
   Sig = sign_detached(Msg, SK),
@@ -54,12 +53,12 @@ sign(Msg, SK) ->
 %% `{error, failed_verification}' depending on the correctness of the
 %% signature.
 %% @end
--spec sign_open(SMsg :: binary(), PK :: <<_:32>>) ->
+-spec sign_open(SMsg :: binary(), PK :: <<_:256>>) ->
     {ok, Msg :: binary()} | {error, failed_verification}.
 sign_open(<<Sig:64/binary, BinMsg/binary>>, PK) ->
-  <<R:32/bytes, Ss:32/bytes>> = Sig,
+  <<R:32/binary, Ss:32/binary>> = Sig,
 
-  Ks0 = crypto:hash(sha512, <<R/bytes, PK/bytes, BinMsg/bytes>>),
+  Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
   Ks = ecu_ed25519:scalar_reduce(Ks0),
 
   LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
@@ -77,7 +76,7 @@ sign_open(<<Sig:64/binary, BinMsg/binary>>, PK) ->
 %% Given a message `Msg' and a secret key `SK' the function will compute the
 %% digital signature `Sig'.
 %% @end
--spec sign_detached(Msg :: iodata(), SK :: <<_:32>>) -> Sig :: binary().
+-spec sign_detached(Msg :: iodata(), SK :: <<_:256>> | <<_:512>>) -> Sig :: binary().
 sign_detached(Msg, SK) ->
   BinMsg = iolist_to_binary(Msg),
   <<Secret:32/binary, _/binary>> = SK,
@@ -119,12 +118,12 @@ sign_detached(Msg, SK) ->
 %% function computes true iff the `Sig' is valid for `Msg' and `PK'; and,
 %% false otherwise.
 %% @end
--spec sign_verify_detached(Sig :: <<_:64>>, Msg :: iodata(), PK :: <<_:32>>) -> boolean().
+-spec sign_verify_detached(Sig :: <<_:512>>, Msg :: iodata(), PK :: <<_:256>>) -> boolean().
 sign_verify_detached(Sig, Msg, PK) ->
   BinMsg = iolist_to_binary(Msg),
-  <<R:32/bytes, Ss:32/bytes>> = Sig,
+  <<R:32/binary, Ss:32/binary>> = Sig,
 
-  Ks0 = crypto:hash(sha512, <<R/bytes, PK/bytes, BinMsg/bytes>>),
+  Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
   Ks = ecu_ed25519:scalar_reduce(Ks0),
 
   LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
@@ -136,5 +135,5 @@ sign_verify_detached(Sig, Msg, PK) ->
 %% Clamp a 32-byte little-endian integer - i.e clear the lowest three bits
 %% of the first byte and clear the highest and set the second highest of
 %% the last byte (i.e. making it divisible by 8 and
-clamp(<<B0:8, B1_30:30/bytes, B31:8>>) ->
-  <<(B0 band 16#f8):8, B1_30/bytes, ((B31 band 16#7f) bor 16#40):8>>.
+clamp(<<B0:8, B1_30:30/binary, B31:8>>) ->
+  <<(B0 band 16#f8):8, B1_30/binary, ((B31 band 16#7f) bor 16#40):8>>.
