@@ -2,7 +2,7 @@
 {author,"Hans Svensson"}.
 {c_email,"hanssv@gmail.com"}.
 {copyright,"Hans Svensson"}.
-{deps,[]}.
+{deps,[{"otpr","sha3",{0,1,3}}]}.
 {desc,"Helper functions for cryptography, mostly related to elliptic curves."}.
 {file_exts,[]}.
 {key_name,none}.
