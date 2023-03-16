@@ -6,7 +6,9 @@
 -vsn("1.0.0").
 
 -export([private_to_short/2, public_to_short/2,
-         eth_sign/2, eth_recover/2, eth_verify/3, eth_msg_hash/1,
+         ec_recover/2,
+         eth_sign/2, eth_recover/2, eth_verify/3,
+         eth_msg_sign/2, eth_msg_recover/2, eth_msg_verify/3, eth_msg_hash/1,
          keccak256/1]).
 
 private_to_short(bitcoin, PrivateKey) ->
@@ -27,15 +29,33 @@ public_to_short(ethereum, PubKey) ->
       ShortPub
   end.
 
+eth_msg_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
+  eth_sign(eth_msg_hash(Msg), PrivateKey).
+
 eth_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
-  {BaseSig, YVal} = ecu_ecdsa:sign_secp256k1(eth_msg_hash(Msg), PrivateKey),
+  {BaseSig, YVal} = ecu_ecdsa:sign_secp256k1(Msg, PrivateKey),
   V = if YVal rem 2 == 0 -> 27;
          true            -> 28
       end,
   <<V:8, BaseSig/bytes>>.
 
-eth_recover(Msg, Sig = <<_:65/bytes>>) ->
-  MsgHash = eth_msg_hash(Msg),
+eth_msg_recover(Msg, Sig = <<_:65/bytes>>) ->
+  eth_recover(eth_msg_hash(Msg), Sig).
+
+%% This is the mythical Ethereum ECRECOVERY operation
+ec_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
+  <<V:8, R:256, S:256>> = Sig,
+  case (V == 27 orelse V == 28) andalso
+       (R >= 1 andalso R =< ecu_secp256k1:n()) andalso
+       (S >= 1 andalso S =< ecu_secp256k1:n()) of
+    true ->
+      ShortPub = eth_recover(MsgHash, Sig),
+      <<0:96, ShortPub/binary>>;
+    false ->
+      <<0:256>>
+  end.
+
+eth_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
   <<E:256>> = MsgHash,
   <<V:8, R:256, S:256>> = Sig,
   Z = E rem ecu_secp256k1:n(),
@@ -50,8 +70,11 @@ eth_recover(Msg, Sig = <<_:65/bytes>>) ->
   <<_:12/bytes, RPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
   RPub.
 
-eth_verify(Msg, PublicKey, Sig) ->
-  PublicKey == eth_recover(Msg, Sig).
+eth_msg_verify(Msg, PublicKey, Sig) ->
+  eth_verify(eth_msg_hash(Msg), PublicKey, Sig).
+
+eth_verify(Msg, PublickKey, Sig) ->
+  PublickKey == eth_recover(Msg, Sig).
 
 eth_msg_hash(Msg0) ->
   Msg = ["\x19Ethereum Signed Message:\n", integer_to_list(byte_size(Msg0)), Msg0],
