@@ -4,7 +4,7 @@
               {included_applications,[]},
               {applications,[stdlib,kernel]},
               {vsn,"1.0.0"},
-              {modules,[ed25519_eqc,eddsa_eqc,ec_utils,ecu_crypto,ecu_ecdsa,
-                        ecu_ed25519,ecu_eddsa,ecu_misc,ecu_secp256k1,
-                        benchmark_tests,crypto_tests,ecdsa_tests,
-                        secp256k1_tests]}]}.
+              {modules,[ecu_crypto_eqc,ed25519_eqc,eddsa_eqc,ec_utils,
+                        ecu_crypto,ecu_ecdsa,ecu_ed25519,ecu_eddsa,ecu_misc,
+                        ecu_secp256k1,benchmark_tests,crypto_tests,
+                        ecdsa_tests,secp256k1_tests]}]}.
