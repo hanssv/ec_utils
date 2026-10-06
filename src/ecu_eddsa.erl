@@ -19,20 +19,16 @@
 -spec sign_keypair() -> #{ public => binary(), secret => binary() }.
 sign_keypair() ->
   Secret = crypto:strong_rand_bytes(32),
-  <<Seed:32/binary, _/binary>> = crypto:hash(sha512, Secret),
-
-  Pub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed)),
-  #{public => Pub, secret => <<Secret:32/binary, Pub:32/binary>>}.
+  sign_seed_keypair(Secret).
 
 %% @doc sign_seed_keypair/1 computes the signing keypair from a seed.
 %%
 %% The keypair is returned as a map with keys 'public' and 'secret'.
 %% @end
 -spec sign_seed_keypair(Secret :: <<_:256>>) -> #{ public => binary(), secret => binary() }.
-sign_seed_keypair(Secret) ->
+sign_seed_keypair(<<Secret:32/binary>>) ->
   <<Seed:32/binary, _/binary>> = crypto:hash(sha512, Secret),
   Pub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed)),
-
   #{public => Pub, secret => <<Secret:32/binary, Pub:32/binary>>}.
 
 %% @doc sign/2 signs a message with private/secret key.
@@ -41,7 +37,7 @@ sign_seed_keypair(Secret) ->
 %% message and return a signed message `SM'.
 %% @end
 -spec sign(Msg :: iodata(), SK :: <<_:256>> | <<_:512>>) -> SM :: binary().
-sign(Msg, SK) ->
+sign(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   BinMsg = iolist_to_binary(Msg),
   Sig = sign_detached(Msg, SK),
   <<Sig/binary, BinMsg/binary>>.
@@ -55,7 +51,7 @@ sign(Msg, SK) ->
 %% @end
 -spec sign_open(SMsg :: binary(), PK :: <<_:256>>) ->
     {ok, Msg :: binary()} | {error, failed_verification}.
-sign_open(<<Sig:64/binary, BinMsg/binary>>, PK) ->
+sign_open(<<Sig:64/binary, BinMsg/binary>>, <<PK:32/binary>>) ->
   <<R:32/binary, Ss:32/binary>> = Sig,
 
   Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
@@ -77,7 +73,7 @@ sign_open(<<Sig:64/binary, BinMsg/binary>>, PK) ->
 %% digital signature `Sig'.
 %% @end
 -spec sign_detached(Msg :: iodata(), SK :: <<_:256>> | <<_:512>>) -> Sig :: binary().
-sign_detached(Msg, SK) ->
+sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   BinMsg = iolist_to_binary(Msg),
   <<Secret:32/binary, _/binary>> = SK,
 
@@ -119,7 +115,7 @@ sign_detached(Msg, SK) ->
 %% false otherwise.
 %% @end
 -spec sign_verify_detached(Sig :: <<_:512>>, Msg :: iodata(), PK :: <<_:256>>) -> boolean().
-sign_verify_detached(Sig, Msg, PK) ->
+sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
   BinMsg = iolist_to_binary(Msg),
   <<R:32/binary, Ss:32/binary>> = Sig,
 
