@@ -5,7 +5,7 @@
 -compile([export_all, nowarn_export_all]).
 
 -include_lib("eqc/include/eqc.hrl").
--define(N, 16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141).
+-include("ecu_secp256k1.hrl").
 -define(MAX256, 16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF).
 
 %% Scalar in range

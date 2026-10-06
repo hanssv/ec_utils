@@ -28,7 +28,7 @@ ecdsa_sign_verify_secp256k1_test() ->
 
 %% --- Input validation (S2, S8)
 
--define(N, 16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141).
+-include("ecu_secp256k1.hrl").
 
 pubkey() ->
   ecu_ecdsa:private_to_public(secp256k1, <<5:256>>).
