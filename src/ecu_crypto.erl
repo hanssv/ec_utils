@@ -41,15 +41,20 @@ eth_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
 eth_msg_recover(Msg, Sig = <<_:65/bytes>>) ->
   eth_recover(eth_msg_hash(Msg), Sig).
 
+-include("ecu_secp256k1.hrl").
+
 %% This is the mythical Ethereum ECRECOVERY operation
 ec_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
   <<V:8, R:256, S:256>> = Sig,
   case (V == 27 orelse V == 28) andalso
-       (R >= 1 andalso R =< ecu_secp256k1:n()) andalso
-       (S >= 1 andalso S =< ecu_secp256k1:n()) of
+       (R >= 1 andalso R < ?N) andalso
+       (S >= 1 andalso S < ?N) of
     true ->
-      ShortPub = eth_recover(MsgHash, Sig),
-      <<0:96, ShortPub/binary>>;
+      try eth_recover(MsgHash, Sig) of
+        ShortPub -> <<0:96, ShortPub/binary>>
+      catch _:_ ->
+        <<0:256>>
+      end;
     false ->
       <<0:256>>
   end.
@@ -57,7 +62,7 @@ ec_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
 eth_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
   <<E:256>> = MsgHash,
   <<V:8, R:256, S:256>> = Sig,
-  Z = E rem ecu_secp256k1:n(),
+  Z = E rem ?N,
   RInv = ecu_secp256k1:s_inv(R),
   Rd = ecu_secp256k1:decompress(<<(V - 27 + 2):8, R:256>>),
   [P1, P2] =
@@ -65,9 +70,12 @@ eth_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
       [fun() -> ecu_secp256k1:scalar_mul(ecu_secp256k1:s_mul(RInv, S), Rd) end,
        fun() -> ecu_secp256k1:scalar_mul_base(ecu_secp256k1:s_mul(RInv,Z)) end]),
 
-  {X, Y} = ecu_secp256k1:p_add(P1, ecu_secp256k1:p_neg(P2)),
-  <<_:12/bytes, RPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
-  RPub.
+  case ecu_secp256k1:p_add(P1, ecu_secp256k1:p_neg(P2)) of
+    {0, 0} -> error(point_at_infinity);
+    {X, Y} ->
+      <<_:12/bytes, RPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
+      RPub
+  end.
 
 eth_msg_verify(Msg, PublicKey, Sig) ->
   eth_verify(eth_msg_hash(Msg), PublicKey, Sig).

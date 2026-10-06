@@ -53,12 +53,17 @@ compress({X, Y}) when Y rem 2 == 0 -> <<2:8, X:256>>;
 compress({X, _})                   -> <<3:8, X:256>>;
 compress(<<4:8, X:256, Y:256>>)    -> compress({X, Y}).
 
-decompress(<<N:8, X:256>>) ->
-  Y0 = ?B + ?MUL(X, ?MUL(X, X)),
+decompress(<<N:8, X:256>>) when (N == 2 orelse N == 3), X < ?P ->
+  Y0 = ?ADD(?B, ?MUL(X, ?MUL(X, X))),
   Y1 = pow(Y0, (?P + 1) div 4),
-  case Y1 rem 2 == N rem 2 of
-    true  -> {X, Y1};
-    false -> {X, ?P - Y1}
+  case ?MUL(Y1, Y1) == Y0 of
+    true ->
+      case Y1 rem 2 == N rem 2 of
+        true  -> {X, Y1};
+        false -> {X, ?P - Y1}
+      end;
+    false ->
+      error(badarg)
   end.
 
 p_neg({X, Y}) -> {X, ?P - Y}.

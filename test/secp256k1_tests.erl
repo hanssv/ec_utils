@@ -70,4 +70,13 @@ compression_test() ->
          end,
   [ Test(ecu_secp256k1:scalar_mul_base(K)) || K <- lists:seq(10, 100) ].
 
+-include("ecu_secp256k1.hrl").
 
+decompress_invalid_test() ->
+  %% Invalid prefix (only 2 and 3 are valid)
+  ?assertError(_, ecu_secp256k1:decompress(<<4:8, 1:256>>)),
+  ?assertError(_, ecu_secp256k1:decompress(<<7:8, 1:256>>)),
+  %% X >= P
+  ?assertError(_, ecu_secp256k1:decompress(<<2:8, ?P:256>>)),
+  %% X = 5 has no square root on curve (y^2 = 5^3 + 7 = 132 has no sqrt mod P)
+  ?assertError(_, ecu_secp256k1:decompress(<<2:8, 5:256>>)).

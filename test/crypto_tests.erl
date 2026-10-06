@@ -33,3 +33,14 @@ recover_test() ->
 %%   <<Z:256>> = hex_to_bin("4a5c5d454721bbbb25540c3317521e71c373ae36458f960d2ad46ef088110e95"), %% MsgHash
   ShortPub = ecu_misc:hex_to_bin("E53e2125F377D5c62a1FfbfEEB89A0826E9dE54C"),
   ?assertEqual(ShortPub, ecu_crypto:eth_msg_recover(<<"test">>, <<28:8, R:256, S:256>>)).
+
+-include("ecu_secp256k1.hrl").
+
+ec_recover_invalid_test() ->
+  Msg = crypto:strong_rand_bytes(32),
+  %% R = N must return <<0:256>> rather than crashing in s_inv(N)
+  ?assertEqual(<<0:256>>, ecu_crypto:ec_recover(Msg, <<27:8, ?N:256, 1:256>>)),
+  %% S = N must return <<0:256>>
+  ?assertEqual(<<0:256>>, ecu_crypto:ec_recover(Msg, <<27:8, 1:256, ?N:256>>)),
+  %% R = 5 is not on the curve, must return <<0:256>> rather than a bogus address
+  ?assertEqual(<<0:256>>, ecu_crypto:ec_recover(Msg, <<27:8, 5:256, 1:256>>)).
