@@ -200,17 +200,20 @@ clamp(K) ->
   ((K band (bnot 7)) band (bnot (128 bsl 248))) bor (64 bsl 248).
 
 xrecover(Y) ->
-  Y2    = ?MUL(Y, Y),
-  U     = ?SUB(Y2, 1),
-  V     = ?ADD(?MUL(?D, Y2), 1),
-  UdivV = ?DIV(U, V),
-  X0    = f_pow(UdivV, ?PPLUS3DIV8),
+  Y2 = ?MUL(Y, Y),
+  case ?SUB(Y2, 1) of
+    0 -> 0;
+    U ->
+      V     = ?ADD(?MUL(?D, Y2), 1),
+      UdivV = ?DIV(U, V),
+      X0    = f_pow(UdivV, ?PPLUS3DIV8),
 
-  X0_2 = ?MUL(X0, X0),
-  case ?SUB(X0_2, UdivV) of
-    0 -> X0;
-    _ -> case ?ADD(X0_2, UdivV) of
-           0 -> ?MUL(X0, ?TWOPOWPMINUS1DIV4);
-           _ -> error(xrecover_failed)
-         end
+      X0_2 = ?MUL(X0, X0),
+      case ?SUB(X0_2, UdivV) of
+        0 -> X0;
+        _ -> case ?ADD(X0_2, UdivV) of
+               0 -> ?MUL(X0, ?TWOPOWPMINUS1DIV4);
+               _ -> error(xrecover_failed)
+             end
+      end
   end.

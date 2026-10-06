@@ -10,6 +10,11 @@
 
 %% A^B mod P
 exp_mod(_A, 0, _P) -> 1;
+exp_mod(A, B, P) when A rem P == 0 ->
+  case B > 0 of
+    true  -> 0;
+    false -> 1
+  end;
 exp_mod(A, B, P) when A > 0 ->
   binary:decode_unsigned(crypto:mod_pow(A, B, P));
 exp_mod(A, B, P) ->
