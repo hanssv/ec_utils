@@ -39,15 +39,75 @@ scalar_mul_base(K) ->
 
 scalar_mul(<<K:256>>, P) ->
   scalar_mul(K, P);
-scalar_mul(0, _P) ->
+scalar_mul(K, _P) when K =< 0 ->
   {0, 0};
-scalar_mul(1, P) ->
-  P;
-scalar_mul(K, P) ->
-  case K rem 2 == 0 of
-    true  -> scalar_mul(K div 2, p_add(P, P));
-    false -> p_add(P, scalar_mul(K - 1, P))
+scalar_mul(_K, {0, 0}) ->
+  {0, 0};
+scalar_mul(1, {X, Y}) ->
+  {X rem ?P, Y rem ?P};
+scalar_mul(K, {X, Y}) ->
+  AffP = {X rem ?P, Y rem ?P},
+  from_jacobian(scalar_mul_loop(K, AffP)).
+
+scalar_mul_loop(K, AffP) ->
+  [_MSB | RestBits] = integer_to_list(K, 2),
+  lists:foldl(fun
+    ($0, Acc) -> j_double(Acc);
+    ($1, Acc) -> j_add_affine(j_double(Acc), AffP)
+  end, to_jacobian(AffP), RestBits).
+
+to_jacobian({0, 0}) -> {1, 1, 0};
+to_jacobian({X, Y}) -> {X rem ?P, Y rem ?P, 1}.
+
+from_jacobian({_, _, 0}) -> {0, 0};
+from_jacobian({X, Y, 1}) -> {X, Y};
+from_jacobian({X, Y, Z}) ->
+  Zinv = f_inv(Z),
+  Zinv2 = ?MUL(Zinv, Zinv),
+  Zinv3 = ?MUL(Zinv2, Zinv),
+  {?MUL(X, Zinv2), ?MUL(Y, Zinv3)}.
+
+j_double({_, _, 0}) -> {1, 1, 0};
+j_double({_X, 0, _Z}) -> {1, 1, 0};
+j_double({X, Y, Z}) ->
+  Y2 = ?MUL(Y, Y),
+  S  = ?MUL(4, ?MUL(X, Y2)),
+  M  = ?MUL(3, ?MUL(X, X)),
+  X3 = ?SUB(?MUL(M, M), ?MUL(2, S)),
+  Y4 = ?MUL(Y2, Y2),
+  Y3 = ?SUB(?MUL(M, ?SUB(S, X3)), ?MUL(8, Y4)),
+  Z3 = ?MUL(2, ?MUL(Y, Z)),
+  {X3, Y3, Z3}.
+
+j_add_affine({_, _, 0}, {X2, Y2}) ->
+  to_jacobian({X2, Y2});
+j_add_affine(J1, {0, 0}) ->
+  J1;
+j_add_affine({X1, Y1, Z1}, {X2, Y2}) ->
+  RX2 = X2 rem ?P,
+  RY2 = Y2 rem ?P,
+  Z1_2 = ?MUL(Z1, Z1),
+  Z1_3 = ?MUL(Z1_2, Z1),
+  U2 = ?MUL(RX2, Z1_2),
+  S2 = ?MUL(RY2, Z1_3),
+  if
+    X1 == U2 ->
+      if
+        Y1 == S2 -> j_double({X1, Y1, Z1});
+        true     -> {1, 1, 0}
+      end;
+    true ->
+      H  = ?SUB(U2, X1),
+      R  = ?SUB(S2, Y1),
+      H2 = ?MUL(H, H),
+      H3 = ?MUL(H2, H),
+      V  = ?MUL(X1, H2),
+      X3 = ?SUB(?SUB(?MUL(R, R), H3), ?MUL(2, V)),
+      Y3 = ?SUB(?MUL(R, ?SUB(V, X3)), ?MUL(Y1, H3)),
+      Z3 = ?MUL(Z1, H),
+      {X3, Y3, Z3}
   end.
+
 
 compress({X, Y}) when Y rem 2 == 0 -> <<2:8, X:256>>;
 compress({X, _})                   -> <<3:8, X:256>>;

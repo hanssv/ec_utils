@@ -101,3 +101,14 @@ prop_secp256k1_p_add_unreduced() ->
     equals(Expected, Actual)
   end).
 
+%% Homomorphism: (k1 + k2) * G == k1 * G + k2 * G (modulo N)
+prop_secp256k1_scalar_mul_homomorphism() ->
+  ?FORALL({K1, K2}, {choose(0, ?N), choose(0, ?N)},
+  begin
+    P1 = ecu_secp256k1:scalar_mul_base(K1),
+    P2 = ecu_secp256k1:scalar_mul_base(K2),
+    SumP = ecu_secp256k1:p_add(P1, P2),
+    KSumP = ecu_secp256k1:scalar_mul_base((K1 + K2) rem ?N),
+    equals(SumP, KSumP)
+  end).
+

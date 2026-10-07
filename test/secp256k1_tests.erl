@@ -96,3 +96,20 @@ p_add_unreduced_coordinates_test() ->
   {X2, Y2} = P2,
   P2_unreduced = {X2 + ?P, Y2 + 2 * ?P},
   ?assertEqual(ecu_secp256k1:p_add(P, P2), ecu_secp256k1:p_add(P_unreduced, P2_unreduced)).
+
+scalar_mul_special_values_test() ->
+  ?assertEqual({0, 0}, ecu_secp256k1:scalar_mul_base(0)),
+  ?assertEqual({?X, ?Y}, ecu_secp256k1:scalar_mul_base(1)),
+  ?assertEqual(ecu_secp256k1:p_neg({?X, ?Y}), ecu_secp256k1:scalar_mul_base(?N - 1)),
+  ?assertEqual({0, 0}, ecu_secp256k1:scalar_mul_base(?N)).
+
+scalar_mul_benchmark_test() ->
+  Scalars = [ begin
+                <<K0:256>> = crypto:strong_rand_bytes(32),
+                (K0 rem (?N - 1)) + 1
+              end || _ <- lists:seq(1, 10) ],
+  {T, Results} = timer:tc(fun() ->
+    [ ecu_secp256k1:scalar_mul_base(K) || K <- Scalars ]
+  end),
+  ?debugFmt("Average time for secp256k1 scalar_mul_base: ~.3f ms", [(T / 1000) / length(Scalars)]),
+  [ ?assert(ecu_secp256k1:on_curve(Pt)) || Pt <- Results ].
