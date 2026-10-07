@@ -12,7 +12,9 @@
 
 private_to_public(secp256k1, <<PrivateKey:256>>) when PrivateKey >= 1,
                                                       PrivateKey < ?N ->
-  ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(PrivateKey)).
+  ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(PrivateKey));
+private_to_public(secp256k1, _) ->
+  error(badarg).
 
 sign(secp256k1, MsgHash = <<_:32/bytes>>, PrivateKey = <<_:32/bytes>>) ->
   {Sig, _YVal} = sign_secp256k1(MsgHash, PrivateKey),
@@ -52,7 +54,7 @@ sign_secp256k1(MsgHash = <<_:32/bytes>>, <<PrivateKey:256>>) when PrivateKey >= 
   S = ecu_secp256k1:s_mul(ecu_secp256k1:s_inv(K),
                           ecu_secp256k1:s_add(Z, ecu_secp256k1:s_mul(R, PrivateKey))),
   if R == 0 orelse S == 0 ->
-       sign(secp256k1, MsgHash, <<PrivateKey:256>>);
+       sign_secp256k1(MsgHash, <<PrivateKey:256>>);
      true ->
        {<<R:256, S:256>>, Y}
   end.

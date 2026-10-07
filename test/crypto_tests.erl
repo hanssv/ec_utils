@@ -44,3 +44,26 @@ ec_recover_invalid_test() ->
   ?assertEqual(<<0:256>>, ecu_crypto:ec_recover(Msg, <<27:8, 1:256, ?N:256>>)),
   %% R = 5 is not on the curve, must return <<0:256>> rather than a bogus address
   ?assertEqual(<<0:256>>, ecu_crypto:ec_recover(Msg, <<27:8, 5:256, 1:256>>)).
+
+private_to_short_bitcoin_test() ->
+  Priv = <<1:256>>,
+  Short = ecu_crypto:private_to_short(bitcoin, Priv),
+  ?assertEqual(20, byte_size(Short)),
+  ?assertError(badarg, ecu_crypto:private_to_short(bitcoin, <<0:256>>)),
+  ?assertError(badarg, ecu_crypto:private_to_short(bitcoin, <<?N:256>>)).
+
+private_to_short_ethereum_test() ->
+  Priv = <<1:256>>,
+  Short = ecu_crypto:private_to_short(ethereum, Priv),
+  ?assertEqual(20, byte_size(Short)),
+  ?assertError(badarg, ecu_crypto:private_to_short(ethereum, <<0:256>>)),
+  ?assertError(badarg, ecu_crypto:private_to_short(ethereum, <<?N:256>>)).
+
+pcomp_crash_test() ->
+  Start = erlang:monotonic_time(millisecond),
+  ?assertError({kaboom, _}, ecu_misc:pcomp([fun() -> error(kaboom) end, fun() -> 42 end])),
+  Elapsed = erlang:monotonic_time(millisecond) - Start,
+  ?assert(Elapsed < 200).
+
+hex_to_bin_odd_length_test() ->
+  ?assertError(badarg, ecu_misc:hex_to_bin("abc")).

@@ -70,17 +70,25 @@ p_neg({X, Y}) -> {X, ?P - Y}.
 
 p_add(P1, {0, 0}) -> P1;
 p_add({0, 0}, P2) -> P2;
-p_add({X, Y1}, {X, Y2}) when Y1 /= Y2 -> {0, 0};
-p_add(P = {X1, Y1}, P) ->
-  M  = ?DIV(?MUL(3, ?MUL(X1, X1)), ?MUL(2, Y1)),
-  X3 = ?SUB(?MUL(M, M), ?MUL(2, X1)),
-  Y3 = ?SUB(?MUL(M, ?SUB(X1, X3)), Y1),
-  {X3, Y3};
 p_add({X1, Y1}, {X2, Y2}) ->
-  M  = ?DIV(?SUB(Y2, Y1), ?SUB(X2, X1)),
-  X3 = ?SUB(?MUL(M, M), ?ADD(X1, X2)),
-  Y3 = ?SUB(?MUL(M, ?SUB(X1, X3)), Y1),
-  {X3, Y3}.
+  RX1 = X1 rem ?P,
+  RY1 = Y1 rem ?P,
+  RX2 = X2 rem ?P,
+  RY2 = Y2 rem ?P,
+  if
+    RX1 == RX2, (RY1 + RY2) rem ?P == 0 ->
+      {0, 0};
+    RX1 == RX2, RY1 == RY2 ->
+      M  = ?DIV(?MUL(3, ?MUL(RX1, RX1)), ?MUL(2, RY1)),
+      X3 = ?SUB(?MUL(M, M), ?MUL(2, RX1)),
+      Y3 = ?SUB(?MUL(M, ?SUB(RX1, X3)), RY1),
+      {X3, Y3};
+    true ->
+      M  = ?DIV(?SUB(RY2, RY1), ?SUB(RX2, RX1)),
+      X3 = ?SUB(?MUL(M, M), ?ADD(RX1, RX2)),
+      Y3 = ?SUB(?MUL(M, ?SUB(RX1, X3)), RY1),
+      {X3, Y3}
+  end.
 
 pow(A, B) -> ecu_misc:exp_mod(A, B, ?P).
 

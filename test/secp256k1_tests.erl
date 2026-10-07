@@ -80,3 +80,19 @@ decompress_invalid_test() ->
   ?assertError(_, ecu_secp256k1:decompress(<<2:8, ?P:256>>)),
   %% X = 5 has no square root on curve (y^2 = 5^3 + 7 = 132 has no sqrt mod P)
   ?assertError(_, ecu_secp256k1:decompress(<<2:8, 5:256>>)).
+
+p_add_unreduced_coordinates_test() ->
+  P = {?X, ?Y},
+  %% 1. Same point with X offset by P (should double, not divide by zero in f_inv)
+  P_unreduced = {?X + ?P, ?Y},
+  ?assertEqual(ecu_secp256k1:p_add(P, P), ecu_secp256k1:p_add(P, P_unreduced)),
+
+  %% 2. Opposite points with unreduced coordinates (should give infinity {0,0})
+  P_neg_unreduced = {?X + 2 * ?P, (?P - ?Y) + 3 * ?P},
+  ?assertEqual({0, 0}, ecu_secp256k1:p_add(P, P_neg_unreduced)),
+
+  %% 3. Distinct points with unreduced coordinates
+  P2 = ecu_secp256k1:p_add(P, P),
+  {X2, Y2} = P2,
+  P2_unreduced = {X2 + ?P, Y2 + 2 * ?P},
+  ?assertEqual(ecu_secp256k1:p_add(P, P2), ecu_secp256k1:p_add(P_unreduced, P2_unreduced)).

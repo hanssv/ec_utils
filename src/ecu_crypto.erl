@@ -11,9 +11,9 @@
          keccak256/1]).
 
 private_to_short(bitcoin, PrivateKey) ->
-  public_to_short(bitcoin, aeu_ecdsa:private_to_public(secp256k1, PrivateKey));
-private_to_short(ethereum, <<PrivateKey:256>>) ->
-  public_to_short(ethereum, ecu_secp256k1:scalar_mul_base(PrivateKey)).
+  public_to_short(bitcoin, ecu_ecdsa:private_to_public(secp256k1, PrivateKey));
+private_to_short(ethereum, PrivateKey) ->
+  public_to_short(ethereum, ecu_ecdsa:private_to_public(secp256k1, PrivateKey)).
 
 public_to_short(bitcoin, PubKey = <<_:33/bytes>>) ->
   crypto:hash(ripemd160, crypto:hash(sha256, PubKey));
@@ -31,6 +31,8 @@ public_to_short(ethereum, PubKey) ->
 eth_msg_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
   eth_sign(eth_msg_hash(Msg), PrivateKey).
 
+%% Recovery id V: Ethereum standard uses 27 + (Y rem 2). The case where
+%% X >= N (recovery id 2 or 3) occurs with probability ~ 2^-128 and is omitted.
 eth_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
   {BaseSig, YVal} = ecu_ecdsa:sign_secp256k1(Msg, PrivateKey),
   V = if YVal rem 2 == 0 -> 27;

@@ -84,3 +84,20 @@ prop_invalid_privkey() ->
 
 catches(F) ->
   try F(), false catch error:_ -> true end.
+
+prop_secp256k1_p_add_unreduced() ->
+  ?FORALL({K1, K2, M1, M2}, {choose(1, ?N - 1), choose(1, ?N - 1), choose(0, 3), choose(0, 3)},
+  begin
+    P1 = ecu_secp256k1:scalar_mul_base(K1),
+    P2 = ecu_secp256k1:scalar_mul_base(K2),
+    {X1, Y1} = P1,
+    {X2, Y2} = P2,
+    P1_unreduced = {X1 + M1 * ?P, Y1 + M1 * ?P},
+    P2_unreduced = {X2 + M2 * ?P, Y2 + M2 * ?P},
+    Expected = ecu_secp256k1:p_add(P1, P2),
+    Actual   = try ecu_secp256k1:p_add(P1_unreduced, P2_unreduced)
+               catch _:_ -> crash
+               end,
+    equals(Expected, Actual)
+  end).
+

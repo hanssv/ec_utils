@@ -76,3 +76,9 @@ valid_private_key_boundaries_test() ->
       ?assert(ecu_ecdsa:verify(secp256k1, <<7:256>>, Pub, Sig))
     end || K <- [1, ?N - 1] ].
 
+sign_secp256k1_return_type_test() ->
+  MsgHash = crypto:hash(sha256, <<"test">>),
+  Priv = <<123:256>>,
+  Res = ecu_ecdsa:sign_secp256k1(MsgHash, Priv),
+  ?assertMatch({<<_:64/binary>>, Y} when is_integer(Y), Res).
+
