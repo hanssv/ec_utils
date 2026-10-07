@@ -29,7 +29,7 @@
          scalar_mul_noclamp/2, scalar_mul_base_noclamp/1,
          scalar_reduce/1,
          p_add/2, p_sub/2, p_neg/1, p_dbl/1,
-         compress/1, decompress/1,
+         compress/1, decompress/1, is_small_order/1,
          f_add/2, f_mul/2, f_sub/2, f_div/2, f_inv/1,
          s_add/2, s_mul/2, s_sub/2, s_div/2, s_inv/1]).
 
@@ -75,14 +75,29 @@ compress({X, Y}) ->
   <<V:256/little>>.
 
 -spec decompress(pt_compressed()) -> pt_hom_ext().
-decompress(<<Y0:256/little>>) ->
+decompress(<<Y0:256/little-unsigned-integer>>) ->
   X0 = Y0 bsr 255,
   Y  = Y0 band ?TWO_POW_255_MINUS_1,
-  X  = xrecover(Y),
-  case X rem 2 == X0 of
-    true  -> to_ext_hom({X, Y});
-    false -> to_ext_hom({?P - X, Y})
-  end.
+  case Y < ?P of
+    false -> error(badarg);
+    true ->
+      X = xrecover(Y),
+      case X rem 2 == X0 of
+        true  -> to_ext_hom({X, Y});
+        false ->
+          case X == 0 of
+            true  -> error(badarg);
+            false -> to_ext_hom({?P - X, Y})
+          end
+      end
+  end;
+decompress(_) ->
+  error(badarg).
+
+-spec is_small_order(Pt :: pt()) -> boolean().
+is_small_order(P) ->
+  P8 = p_dbl(p_dbl(p_dbl(P))),
+  pt_eq(P8, {0, 1, 1, 0}).
 
 p_neg({X, Y})       -> {?P - X, Y};
 p_neg({X, Y, Z, T}) -> {?P - X, Y, Z, ?P - T};
@@ -202,7 +217,7 @@ xrecover(Y) ->
         0 -> X0;
         _ -> case ?ADD(X0_2, UdivV) of
                0 -> ?MUL(X0, ?TWOPOWPMINUS1DIV4);
-               _ -> error(xrecover_failed)
+               _ -> error(badarg)
              end
       end
   end.

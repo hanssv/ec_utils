@@ -54,23 +54,12 @@ sign(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
 -spec sign_open(SMsg :: binary(), PK :: <<_:256>>) ->
     {ok, Msg :: binary()} | {error, failed_verification}.
 sign_open(<<Sig:64/binary, BinMsg/binary>>, <<PK:32/binary>>) ->
-  <<R:32/binary, Ss:32/binary>> = Sig,
-  <<S:256/little-unsigned-integer>> = Ss,
-  case S < ?N of
-    false -> {error, failed_verification};
-    true ->
-      Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
-      Ks = ecu_ed25519:scalar_reduce(Ks0),
-
-      LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
-
-      RHS = ecu_ed25519:p_add(R, ecu_ed25519:scalar_mul_noclamp(Ks, PK)),
-
-      case ecu_ed25519:pt_eq(LHS, RHS) of
-        true  -> {ok, BinMsg};
-        false -> {error, failed_verification}
-      end
-  end.
+  case sign_verify_detached(Sig, BinMsg, PK) of
+    true  -> {ok, BinMsg};
+    false -> {error, failed_verification}
+  end;
+sign_open(_, _) ->
+  {error, failed_verification}.
 
 %% @doc sign_detached/2 computes the signature of a message with private/secret
 %% key.
@@ -127,17 +116,31 @@ sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
   case S < ?N of
     false -> false;
     true ->
-      BinMsg = iolist_to_binary(Msg),
+      try
+        A = ecu_ed25519:decompress(PK),
+        case ecu_ed25519:is_small_order(A) of
+          true -> false;
+          false ->
+            R_pt = ecu_ed25519:decompress(R),
+            case ecu_ed25519:is_small_order(R_pt) of
+              true -> false;
+              false ->
+                BinMsg = iolist_to_binary(Msg),
+                Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
+                Ks = ecu_ed25519:scalar_reduce(Ks0),
 
-      Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
-      Ks = ecu_ed25519:scalar_reduce(Ks0),
+                LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
+                RHS = ecu_ed25519:p_add(R_pt, ecu_ed25519:scalar_mul_noclamp(Ks, A)),
 
-      LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
-
-      RHS = ecu_ed25519:p_add(R, ecu_ed25519:scalar_mul_noclamp(Ks, PK)),
-
-      ecu_ed25519:pt_eq(LHS, RHS)
-  end.
+                ecu_ed25519:pt_eq(LHS, RHS)
+            end
+        end
+      catch
+        error:badarg -> false
+      end
+  end;
+sign_verify_detached(_, _, _) ->
+  false.
 
 %% Clamp a 32-byte little-endian integer - i.e clear the lowest three bits
 %% of the first byte and clear the highest and set the second highest of

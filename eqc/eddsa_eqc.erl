@@ -94,3 +94,24 @@ prop_sign_open_malleable_s() ->
     equals({ResEnacl, {error, failed_verification}}, {ResEcu, ResEnacl})
   end).
 
+prop_sign_verify_detached_arbitrary() ->
+  ?FORALL({Sig, Msg, PK}, {noshrink(binary(64)), noshrink(binary(48)), noshrink(binary(32))},
+  begin
+    ResEnacl = enacl:sign_verify_detached(Sig, Msg, PK),
+    ResEcu = try ecu_eddsa:sign_verify_detached(Sig, Msg, PK)
+             catch _:_ -> crash
+             end,
+    equals(ResEnacl, ResEcu)
+  end).
+
+prop_sign_open_arbitrary() ->
+  ?FORALL({Sig, Msg, PK}, {noshrink(binary(64)), noshrink(binary(48)), noshrink(binary(32))},
+  begin
+    SMsg = <<Sig/binary, Msg/binary>>,
+    ResEnacl = enacl:sign_open(SMsg, PK),
+    ResEcu = try ecu_eddsa:sign_open(SMsg, PK)
+             catch _:_ -> crash
+             end,
+    equals(ResEnacl, ResEcu)
+  end).
+
