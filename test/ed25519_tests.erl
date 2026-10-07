@@ -85,4 +85,14 @@ scalar_mul_base_benchmark_test() ->
   ?debugFmt("Average time for ed25519 scalar_mul_base: ~.3f ms", [(T / 1000) / length(Scalars)]),
   [ ?assert(ecu_ed25519:on_curve(Pt)) || Pt <- Results ].
 
-
+scalar_mul_benchmark_test() ->
+  Points = [ ecu_ed25519:scalar_mul_base(K) || K <- lists:seq(11, 20) ],
+  Scalars = [ begin
+                <<K:256>> = crypto:strong_rand_bytes(32),
+                K rem ?N
+              end || _ <- lists:seq(1, 10) ],
+  {T, Results} = timer:tc(fun() ->
+    [ ecu_ed25519:scalar_mul(K, Pt) || {K, Pt} <- lists:zip(Scalars, Points) ]
+  end),
+  ?debugFmt("Average time for ed25519 scalar_mul: ~.3f ms", [(T / 1000) / length(Scalars)]),
+  [ ?assert(ecu_ed25519:on_curve(Pt)) || Pt <- Results ].

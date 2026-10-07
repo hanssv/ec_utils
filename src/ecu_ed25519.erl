@@ -145,7 +145,7 @@ scalar_mul_base(K) when is_integer(K), K >= 0, K < ?N ->
 scalar_mul(<<K:256/little>>, P) ->
   scalar_mul(K, P);
 scalar_mul(K, P) ->
-  scalar_mul_(clamp(K), to_ext_hom(P)).
+  scalar_mul_window(clamp(K), to_ext_hom(P)).
 
 -spec scalar_mul_base_noclamp(Scalar :: scalar() | binary()) -> pt_hom_ext().
 scalar_mul_base_noclamp(<<K:256/little>>) ->
@@ -153,12 +153,12 @@ scalar_mul_base_noclamp(<<K:256/little>>) ->
 scalar_mul_base_noclamp(K) when is_integer(K), K >= 0, K < ?N ->
   scalar_mul_base_comb(K).
 
-
 -spec scalar_mul_noclamp(Scalar :: scalar() | binary(), Pt :: pt()) -> pt_hom_ext().
 scalar_mul_noclamp(<<K:256/little>>, P) ->
   scalar_mul_noclamp(K, P);
 scalar_mul_noclamp(K, P) ->
-  scalar_mul_(K, to_ext_hom(P)).
+  scalar_mul_window(K, to_ext_hom(P)).
+
 
 to_ext_hom({_, _, _, _} = P)    -> P;
 to_ext_hom(<<_:32/binary>> = P) -> decompress(P);
@@ -202,6 +202,40 @@ scalar_mul_(K, P) ->
     0 -> scalar_mul_(K div 2, p_dbl(P));
     1 -> p_add(P, scalar_mul_(K - 1, P))
   end.
+
+scalar_mul_window(0, _P) ->
+  {0, 1, 1, 0};
+scalar_mul_window(K, P) ->
+  Table = precompute_window_table(P),
+  <<W0:4, Rest/bitstring>> = <<K:256>>,
+  InitialAcc = element(W0 + 1, Table),
+  window_loop(Rest, Table, InitialAcc).
+
+window_loop(<<>>, _Table, Acc) ->
+  Acc;
+window_loop(<<W:4, Rest/bitstring>>, Table, Acc) ->
+  D4 = dbl4(Acc),
+  NewAcc =
+    case W of
+      0 -> D4;
+      _ ->
+        Pt = element(W + 1, Table),
+        case D4 of
+          {0, 1, 1, 0} -> Pt;
+          _            -> p_add(D4, Pt)
+        end
+    end,
+  window_loop(Rest, Table, NewAcc).
+
+precompute_window_table(P) ->
+  list_to_tuple(build_window_multiples(0, P, {0, 1, 1, 0})).
+
+build_window_multiples(16, _P, _Acc) ->
+  [];
+build_window_multiples(0, P, Acc) ->
+  [Acc | build_window_multiples(1, P, P)];
+build_window_multiples(W, P, Acc) ->
+  [Acc | build_window_multiples(W + 1, P, p_add(Acc, P))].
 
 scalar_mul_base_comb(0) ->
   {0, 1, 1, 0};
