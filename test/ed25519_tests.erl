@@ -66,3 +66,11 @@ invalid_pubkey_no_crash_test() ->
   ?assertEqual(false, ecu_eddsa:sign_verify_detached(Sig, Msg, BadPK)),
   ?assertEqual({error, failed_verification}, ecu_eddsa:sign_open(<<Sig/binary, Msg/binary>>, BadPK)).
 
+mismatched_pubkey_in_sk_test() ->
+  #{secret := <<Sec:32/binary, _RealPub:32/binary>>} = ecu_eddsa:sign_keypair(),
+  FakePub = crypto:strong_rand_bytes(32),
+  BadSK = <<Sec/binary, FakePub/binary>>,
+  Msg = <<"test message">>,
+  ?assertError(badarg, ecu_eddsa:sign_detached(Msg, BadSK)),
+  ?assertError(badarg, ecu_eddsa:sign(Msg, BadSK)).
+

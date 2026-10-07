@@ -76,11 +76,15 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   <<Seed0:32/bytes, Prefix:32/bytes>> = crypto:hash(sha512, Secret),
   Seed = clamp(Seed0),
 
+  DerivedPub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed0)),
   Pub = case SK of
           <<_:32/binary, Pub0:32/binary>> ->
-            Pub0;
+            case Pub0 == DerivedPub of
+              true  -> DerivedPub;
+              false -> error(badarg)
+            end;
           _ ->
-            ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed0))
+            DerivedPub
         end,
 
   %% Compute r = H(prefix || msg)

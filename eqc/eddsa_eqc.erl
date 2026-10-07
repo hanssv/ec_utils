@@ -115,3 +115,19 @@ prop_sign_open_arbitrary() ->
     equals(ResEnacl, ResEcu)
   end).
 
+prop_sign_detached_mismatched_pub() ->
+  ?FORALL({Seed, FakePub, Msg}, {binary(32), binary(32), binary(48)},
+  begin
+    #{secret := <<Sec:32/binary, RealPub:32/binary>>} = enacl:sign_seed_keypair(Seed),
+    case FakePub == RealPub of
+      true  -> true;
+      false ->
+        BadSK = <<Sec/binary, FakePub/binary>>,
+        try ecu_eddsa:sign_detached(Msg, BadSK) of
+          _ -> false
+        catch
+          error:badarg -> true
+        end
+    end
+  end).
+
