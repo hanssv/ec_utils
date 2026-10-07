@@ -33,6 +33,8 @@
          f_add/2, f_mul/2, f_sub/2, f_div/2, f_inv/1,
          s_add/2, s_mul/2, s_sub/2, s_div/2, s_inv/1]).
 
+-on_load(init/0).
+
 -ifdef(TEST).
 -compile([export_all, nowarn_export_all]).
 -endif.
@@ -135,9 +137,9 @@ p_dbl(P) ->
 
 -spec scalar_mul_base(Scalar :: scalar() | binary()) -> pt_hom_ext().
 scalar_mul_base(<<K:256/little>>) ->
-  scalar_mul_(clamp(K), ?GE);
+  scalar_mul_base_comb(clamp(K));
 scalar_mul_base(K) when is_integer(K), K >= 0, K < ?N ->
-  scalar_mul_(clamp(K), ?GE).
+  scalar_mul_base_comb(clamp(K)).
 
 -spec scalar_mul(Scalar :: scalar() | binary(), Pt :: pt()) -> pt_hom_ext().
 scalar_mul(<<K:256/little>>, P) ->
@@ -147,9 +149,10 @@ scalar_mul(K, P) ->
 
 -spec scalar_mul_base_noclamp(Scalar :: scalar() | binary()) -> pt_hom_ext().
 scalar_mul_base_noclamp(<<K:256/little>>) ->
-  scalar_mul_(K, ?GE);
+  scalar_mul_base_comb(K);
 scalar_mul_base_noclamp(K) when is_integer(K), K >= 0, K < ?N ->
-  scalar_mul_(K, ?GE).
+  scalar_mul_base_comb(K).
+
 
 -spec scalar_mul_noclamp(Scalar :: scalar() | binary(), Pt :: pt()) -> pt_hom_ext().
 scalar_mul_noclamp(<<K:256/little>>, P) ->
@@ -199,6 +202,59 @@ scalar_mul_(K, P) ->
     0 -> scalar_mul_(K div 2, p_dbl(P));
     1 -> p_add(P, scalar_mul_(K - 1, P))
   end.
+
+scalar_mul_base_comb(0) ->
+  {0, 1, 1, 0};
+scalar_mul_base_comb(K) ->
+  Table = get_base_comb(),
+  mul_comb(K, 1, Table, {0, 1, 1, 0}).
+
+mul_comb(0, _I, _Table, Acc) ->
+  Acc;
+mul_comb(K, I, Table, Acc) ->
+  W = K band 15,
+  NextK = K bsr 4,
+  NextAcc =
+    case W of
+      0 -> Acc;
+      _ ->
+        Pt = element(W + 1, element(I, Table)),
+        case Acc of
+          {0, 1, 1, 0} -> Pt;
+          _            -> p_add(Acc, Pt)
+        end
+    end,
+  mul_comb(NextK, I + 1, Table, NextAcc).
+
+init() ->
+  Table = build_base_comb(),
+  persistent_term:put({?MODULE, base_comb}, Table),
+  ok.
+
+get_base_comb() ->
+  persistent_term:get({?MODULE, base_comb}).
+
+build_base_comb() ->
+  %% 64 windows, each with 16 multiples (0..15) of 16^i * B
+  list_to_tuple(build_windows(0, ?GE)).
+
+build_windows(64, _CurrentBase) ->
+  [];
+build_windows(I, CurrentBase) ->
+  Multiples = list_to_tuple(build_multiples(0, CurrentBase)),
+  NextBase = dbl4(CurrentBase),
+  [Multiples | build_windows(I + 1, NextBase)].
+
+dbl4(P) ->
+  p_dbl(p_dbl(p_dbl(p_dbl(P)))).
+
+build_multiples(16, _Base) ->
+  [];
+build_multiples(0, Base) ->
+  [{0, 1, 1, 0} | build_multiples(1, Base)];
+build_multiples(W, Base) ->
+  Pt = scalar_mul_(W, Base),
+  [Pt | build_multiples(W + 1, Base)].
 
 clamp(K) ->
   ((K band (bnot 7)) band (bnot (128 bsl 248))) bor (64 bsl 248).

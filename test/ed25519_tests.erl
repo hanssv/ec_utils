@@ -74,3 +74,15 @@ mismatched_pubkey_in_sk_test() ->
   ?assertError(badarg, ecu_eddsa:sign_detached(Msg, BadSK)),
   ?assertError(badarg, ecu_eddsa:sign(Msg, BadSK)).
 
+scalar_mul_base_benchmark_test() ->
+  Scalars = [ begin
+                <<K:256>> = crypto:strong_rand_bytes(32),
+                K rem ?N
+              end || _ <- lists:seq(1, 10) ],
+  {T, Results} = timer:tc(fun() ->
+    [ ecu_ed25519:scalar_mul_base(K) || K <- Scalars ]
+  end),
+  ?debugFmt("Average time for ed25519 scalar_mul_base: ~.3f ms", [(T / 1000) / length(Scalars)]),
+  [ ?assert(ecu_ed25519:on_curve(Pt)) || Pt <- Results ].
+
+
