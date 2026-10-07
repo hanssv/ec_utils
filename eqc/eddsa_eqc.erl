@@ -68,3 +68,29 @@ prop_sign_verify_detached() ->
     equals(Res1, Res2)
   end).
 
+prop_malleable_s() ->
+  ?FORALL({Priv, Msg, K}, {binary(32), binary(48), choose(1, 14)},
+  begin
+    #{secret := SK, public := Pub} = enacl:sign_seed_keypair(Priv),
+    Sig = ecu_eddsa:sign_detached(Msg, SK),
+    <<R:32/binary, S:256/little-unsigned-integer>> = Sig,
+    S1 = S + K * ?N,
+    MalleableSig = <<R:32/binary, S1:256/little-unsigned-integer>>,
+    ResEnacl = enacl:sign_verify_detached(MalleableSig, Msg, Pub),
+    ResEcu   = ecu_eddsa:sign_verify_detached(MalleableSig, Msg, Pub),
+    equals({ResEnacl, false}, {ResEcu, ResEnacl})
+  end).
+
+prop_sign_open_malleable_s() ->
+  ?FORALL({Priv, Msg, K}, {binary(32), binary(48), choose(1, 14)},
+  begin
+    #{secret := SK, public := Pub} = enacl:sign_seed_keypair(Priv),
+    Sig = ecu_eddsa:sign_detached(Msg, SK),
+    <<R:32/binary, S:256/little-unsigned-integer>> = Sig,
+    S1 = S + K * ?N,
+    MalleableMsg = <<R:32/binary, S1:256/little-unsigned-integer, Msg/binary>>,
+    ResEnacl = enacl:sign_open(MalleableMsg, Pub),
+    ResEcu   = ecu_eddsa:sign_open(MalleableMsg, Pub),
+    equals({ResEnacl, {error, failed_verification}}, {ResEcu, ResEnacl})
+  end).
+

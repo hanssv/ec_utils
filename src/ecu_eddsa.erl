@@ -4,6 +4,8 @@
 %%% Created     : 19 Jan 2022 by Hans Svensson
 -module(ecu_eddsa).
 
+-include("ecu_ed25519.hrl").
+
 -export([sign_keypair/0,
          sign_seed_keypair/1,
          sign/2,
@@ -53,17 +55,21 @@ sign(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
     {ok, Msg :: binary()} | {error, failed_verification}.
 sign_open(<<Sig:64/binary, BinMsg/binary>>, <<PK:32/binary>>) ->
   <<R:32/binary, Ss:32/binary>> = Sig,
+  <<S:256/little-unsigned-integer>> = Ss,
+  case S < ?N of
+    false -> {error, failed_verification};
+    true ->
+      Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
+      Ks = ecu_ed25519:scalar_reduce(Ks0),
 
-  Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
-  Ks = ecu_ed25519:scalar_reduce(Ks0),
+      LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
 
-  LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
+      RHS = ecu_ed25519:p_add(R, ecu_ed25519:scalar_mul_noclamp(Ks, PK)),
 
-  RHS = ecu_ed25519:p_add(R, ecu_ed25519:scalar_mul_noclamp(Ks, PK)),
-
-  case ecu_ed25519:pt_eq(LHS, RHS) of
-    true  -> {ok, BinMsg};
-    false -> {error, failed_verification}
+      case ecu_ed25519:pt_eq(LHS, RHS) of
+        true  -> {ok, BinMsg};
+        false -> {error, failed_verification}
+      end
   end.
 
 %% @doc sign_detached/2 computes the signature of a message with private/secret
@@ -116,17 +122,22 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
 %% @end
 -spec sign_verify_detached(Sig :: <<_:512>>, Msg :: iodata(), PK :: <<_:256>>) -> boolean().
 sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
-  BinMsg = iolist_to_binary(Msg),
   <<R:32/binary, Ss:32/binary>> = Sig,
+  <<S:256/little-unsigned-integer>> = Ss,
+  case S < ?N of
+    false -> false;
+    true ->
+      BinMsg = iolist_to_binary(Msg),
 
-  Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
-  Ks = ecu_ed25519:scalar_reduce(Ks0),
+      Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
+      Ks = ecu_ed25519:scalar_reduce(Ks0),
 
-  LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
+      LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
 
-  RHS = ecu_ed25519:p_add(R, ecu_ed25519:scalar_mul_noclamp(Ks, PK)),
+      RHS = ecu_ed25519:p_add(R, ecu_ed25519:scalar_mul_noclamp(Ks, PK)),
 
-  ecu_ed25519:pt_eq(LHS, RHS).
+      ecu_ed25519:pt_eq(LHS, RHS)
+  end.
 
 %% Clamp a 32-byte little-endian integer - i.e clear the lowest three bits
 %% of the first byte and clear the highest and set the second highest of

@@ -19,3 +19,21 @@ decompress_identity_test() ->
   %% This calls xrecover(1) -> exp_mod(0, ...), which previously went into infinite recursion / OOM
   ?assertEqual({0, 1, 1, 0}, ecu_ed25519:decompress(Ident)).
 
+-include("ecu_ed25519.hrl").
+
+malleable_s_test() ->
+  #{secret := Priv, public := Pub} = ecu_eddsa:sign_keypair(),
+  Msg = <<"test message">>,
+  Sig = ecu_eddsa:sign_detached(Msg, Priv),
+  <<R:32/binary, S:256/little-unsigned-integer>> = Sig,
+  S1 = S + ?N,
+  ?assert(S1 < (1 bsl 256)),
+  MalleableSig = <<R:32/binary, S1:256/little-unsigned-integer>>,
+  %% enacl rejects S >= N (malleable signature)
+  ?assertEqual(false, enacl:sign_verify_detached(MalleableSig, Msg, Pub)),
+  %% ecu_eddsa should also reject S >= N
+  ?assertEqual(false, ecu_eddsa:sign_verify_detached(MalleableSig, Msg, Pub)),
+  SignedMsg = <<MalleableSig/binary, Msg/binary>>,
+  ?assertEqual({error, failed_verification}, enacl:sign_open(SignedMsg, Pub)),
+  ?assertEqual({error, failed_verification}, ecu_eddsa:sign_open(SignedMsg, Pub)).
+
