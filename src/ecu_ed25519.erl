@@ -25,7 +25,7 @@
 -export_type([pt/0, scalar/0]).
 
 -export([on_curve/1, p/0, n/0, pt_eq/2,
-         scalar_mul/2, scalar_mul_base/1,
+         scalar_mul/2, scalar_mul_base/1, scalar_mul_dual_base/3,
          scalar_mul_noclamp/2, scalar_mul_base_noclamp/1,
          scalar_reduce/1,
          p_add/2, p_sub/2, p_neg/1, p_dbl/1,
@@ -159,6 +159,11 @@ scalar_mul_noclamp(<<K:256/little>>, P) ->
 scalar_mul_noclamp(K, P) ->
   scalar_mul_window(K, to_ext_hom(P)).
 
+-spec scalar_mul_dual_base(K1 :: scalar(), K2 :: scalar(), P2 :: pt()) -> pt_hom_ext().
+scalar_mul_dual_base(K1, K2, P2) ->
+  P1 = scalar_mul_base_comb(K1),
+  P2_mul = scalar_mul_window(K2, to_ext_hom(P2)),
+  p_add(P1, P2_mul).
 
 to_ext_hom({_, _, _, _} = P)    -> P;
 to_ext_hom(<<_:32/binary>> = P) -> decompress(P);

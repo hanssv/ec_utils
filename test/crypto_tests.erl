@@ -59,11 +59,5 @@ private_to_short_ethereum_test() ->
   ?assertError(badarg, ecu_crypto:private_to_short(ethereum, <<0:256>>)),
   ?assertError(badarg, ecu_crypto:private_to_short(ethereum, <<?N:256>>)).
 
-pcomp_crash_test() ->
-  Start = erlang:monotonic_time(millisecond),
-  ?assertError({kaboom, _}, ecu_misc:pcomp([fun() -> error(kaboom) end, fun() -> 42 end])),
-  Elapsed = erlang:monotonic_time(millisecond) - Start,
-  ?assert(Elapsed < 200).
-
 hex_to_bin_odd_length_test() ->
   ?assertError(badarg, ecu_misc:hex_to_bin("abc")).

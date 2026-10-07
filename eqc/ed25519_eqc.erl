@@ -126,3 +126,14 @@ prop_dbl() ->
 equal_pts(P1, P2) ->
   ?WHENFAIL(eqc:format("~p\n  /=\n~p\n", [ecu_ed25519:to_affine(P1), ecu_ed25519:to_affine(P2)]),
             ecu_ed25519:pt_eq(P1, P2)).
+
+%% Shamir's trick: scalar_mul_dual_base(K1, K2, P2) == K1*B + K2*P2
+prop_ed25519_scalar_mul_dual() ->
+  ?FORALL({K1, K2, P2}, {choose(0, ?N - 1), choose(0, ?N - 1), gen_point()},
+  begin
+    Expected = ecu_ed25519:p_add(
+                 ecu_ed25519:scalar_mul_base_noclamp(K1),
+                 ecu_ed25519:scalar_mul_noclamp(K2, P2)),
+    Actual = ecu_ed25519:scalar_mul_dual_base(K1, K2, P2),
+    equal_pts(Expected, Actual)
+  end).

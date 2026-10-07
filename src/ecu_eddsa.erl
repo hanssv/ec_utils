@@ -125,18 +125,14 @@ sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
         case ecu_ed25519:is_small_order(A) of
           true -> false;
           false ->
-            R_pt = ecu_ed25519:decompress(R),
-            case ecu_ed25519:is_small_order(R_pt) of
-              true -> false;
-              false ->
-                BinMsg = iolist_to_binary(Msg),
-                Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
-                Ks = ecu_ed25519:scalar_reduce(Ks0),
-
-                LHS = ecu_ed25519:scalar_mul_base_noclamp(Ss),
-                RHS = ecu_ed25519:p_add(R_pt, ecu_ed25519:scalar_mul_noclamp(Ks, A)),
-
-                ecu_ed25519:pt_eq(LHS, RHS)
+            BinMsg = iolist_to_binary(Msg),
+            Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
+            <<K:256/little-unsigned-integer>> = ecu_ed25519:scalar_reduce(Ks0),
+            NegK = (?N - K) rem ?N,
+            R_prime = ecu_ed25519:scalar_mul_dual_base(S, NegK, A),
+            case ecu_ed25519:is_small_order(R_prime) of
+              true  -> false;
+              false -> ecu_ed25519:compress(R_prime) == R
             end
         end
       catch
