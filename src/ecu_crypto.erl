@@ -67,12 +67,9 @@ eth_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
   Z = E rem ?N,
   RInv = ecu_secp256k1:s_inv(R),
   Rd = ecu_secp256k1:decompress(<<(V - 27 + 2):8, R:256>>),
-  [P1, P2] =
-    ecu_misc:pcomp(
-      [fun() -> ecu_secp256k1:scalar_mul(ecu_secp256k1:s_mul(RInv, S), Rd) end,
-       fun() -> ecu_secp256k1:scalar_mul_base(ecu_secp256k1:s_mul(RInv,Z)) end]),
-
-  case ecu_secp256k1:p_add(P1, ecu_secp256k1:p_neg(P2)) of
+  K1 = (?N - ecu_secp256k1:s_mul(RInv, Z)) rem ?N,
+  K2 = ecu_secp256k1:s_mul(RInv, S),
+  case ecu_secp256k1:scalar_mul_dual(K1, {?X, ?Y}, K2, Rd) of
     {0, 0} -> error(point_at_infinity);
     {X, Y} ->
       <<_:12/bytes, RPub:20/bytes>> = keccak256(<<X:256, Y:256>>),

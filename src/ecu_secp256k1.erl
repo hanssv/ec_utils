@@ -13,7 +13,8 @@
 -define(DIV(A, B), f_div(A, B)).
 
 -export([on_curve/1, p/0, n/0,
-         scalar_mul/2, scalar_mul_base/1, p_add/2, p_neg/1,
+         scalar_mul/2, scalar_mul_base/1, scalar_mul_dual/4,
+         p_add/2, p_neg/1,
          compress/1, decompress/1,
          f_add/2, f_mul/2, f_sub/2, f_div/2, f_inv/1,
          s_add/2, s_mul/2, s_sub/2, s_div/2, s_inv/1]).
@@ -55,6 +56,39 @@ scalar_mul_loop(K, AffP) ->
     ($0, Acc) -> j_double(Acc);
     ($1, Acc) -> j_add_affine(j_double(Acc), AffP)
   end, to_jacobian(AffP), RestBits).
+
+%% Shamir's trick: computes K1*P1 + K2*P2 simultaneously using a single
+%% doubling chain in Jacobian coordinates.
+scalar_mul_dual(K1, P1, K2, P2) ->
+  Aff1 = to_affine(P1),
+  Aff2 = to_affine(P2),
+  case {Aff1, Aff2} of
+    {{0, 0}, _} -> scalar_mul(K2, Aff2);
+    {_, {0, 0}} -> scalar_mul(K1, Aff1);
+    _ ->
+      P11 = p_add(Aff1, Aff2),
+      Bits1 = integer_to_bitstring(K1),
+      Bits2 = integer_to_bitstring(K2),
+      from_jacobian(dual_loop(Bits1, Bits2, Aff1, Aff2, P11, {1, 1, 0}))
+  end.
+
+to_affine({X, Y}) -> {X rem ?P, Y rem ?P}.
+
+integer_to_bitstring(K) ->
+  <<K:256>>.
+
+dual_loop(<<>>, <<>>, _P1, _P2, _P11, Acc) ->
+  Acc;
+dual_loop(<<B1:1, R1/bitstring>>, <<B2:1, R2/bitstring>>, P1, P2, P11, Acc) ->
+  D = j_double(Acc),
+  NewAcc =
+    case {B1, B2} of
+      {0, 0} -> D;
+      {1, 0} -> j_add_affine(D, P1);
+      {0, 1} -> j_add_affine(D, P2);
+      {1, 1} -> j_add_affine(D, P11)
+    end,
+  dual_loop(R1, R2, P1, P2, P11, NewAcc).
 
 to_jacobian({0, 0}) -> {1, 1, 0};
 to_jacobian({X, Y}) -> {X rem ?P, Y rem ?P, 1}.

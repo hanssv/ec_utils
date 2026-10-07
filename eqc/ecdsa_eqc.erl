@@ -112,3 +112,15 @@ prop_secp256k1_scalar_mul_homomorphism() ->
     equals(SumP, KSumP)
   end).
 
+%% Shamir's trick: scalar_mul_dual(K1, P1, K2, P2) == K1*P1 + K2*P2
+prop_secp256k1_scalar_mul_dual() ->
+  ?FORALL({K1, K2, Priv}, {choose(0, ?N - 1), choose(0, ?N - 1), gen_privkey()},
+  begin
+    <<PrivInt:256>> = Priv,
+    P2 = ecu_secp256k1:scalar_mul_base(PrivInt),
+    Expected = ecu_secp256k1:p_add(
+                 ecu_secp256k1:scalar_mul_base(K1),
+                 ecu_secp256k1:scalar_mul(K2, P2)),
+    Actual = ecu_secp256k1:scalar_mul_dual(K1, {?X, ?Y}, K2, P2),
+    equals(Expected, Actual)
+  end).

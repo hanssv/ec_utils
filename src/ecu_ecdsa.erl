@@ -36,10 +36,9 @@ verify(secp256k1, MsgHash, PubKey = {_, _}, <<R:256, S:256>>) ->
 verify_(<<E:256>>, PubKey, R, S) ->
   Z = E rem ?N,
   W = ecu_secp256k1:s_inv(S),
-  [P1, P2] = ecu_misc:pcomp(
-               [fun() -> ecu_secp256k1:scalar_mul_base(ecu_secp256k1:s_mul(Z, W)) end,
-                fun() -> ecu_secp256k1:scalar_mul(ecu_secp256k1:s_mul(R, W), PubKey) end]),
-  case ecu_secp256k1:p_add(P1, P2) of
+  U1 = ecu_secp256k1:s_mul(Z, W),
+  U2 = ecu_secp256k1:s_mul(R, W),
+  case ecu_secp256k1:scalar_mul_dual(U1, {?X, ?Y}, U2, PubKey) of
     {0, 0} -> false; %% point at infinity
     {X, _Y} -> R == (X rem ?N)
   end.
