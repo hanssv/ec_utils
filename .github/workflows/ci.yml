@@ -23,6 +23,11 @@ jobs:
           otp-version: ${{ matrix.otp }}
           rebar3-version: '3.27.3'
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsodium-dev
+
       - name: Compile
         run: rebar3 compile
 
@@ -30,11 +35,16 @@ jobs:
         run: rebar3 eunit
 
       - name: Install ELP
+        # Pinned ELP release 2026-10-14; keep in sync with mise.toml
         run: |
-          curl -fSL -o elp.tar.gz https://github.com/WhatsApp/erlang-language-platform/releases/latest/download/elp-linux-x86_64-unknown-linux-musl.tar.gz
+          gh release download 2026-10-14 --repo WhatsApp/erlang-language-platform \
+            --pattern "elp-linux-x86_64-unknown-linux-gnu-otp-${{ matrix.otp }}*.tar.gz" \
+            --output elp.tar.gz
           tar -xzf elp.tar.gz
           chmod +x elp
           echo "$PWD" >> $GITHUB_PATH
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Run eqWAlizer
         run: elp eqwalize-all --as default
