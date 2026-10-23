@@ -31,6 +31,8 @@
          f_add/2, f_mul/2, f_sub/2, f_div/2, f_inv/1,
          s_add/2, s_mul/2, s_sub/2, s_div/2, s_inv/1]).
 
+-on_load(init/0).
+
 -ifdef(TEST).
 -compile([export_all, nowarn_export_all]).
 -endif.
@@ -50,9 +52,17 @@ n() -> ?N.
 
 -spec scalar_mul_base(scalar()) -> pt_affine().
 scalar_mul_base(<<K:256>>) ->
-  scalar_mul(K, {?X, ?Y});
+  scalar_mul_base(K);
+scalar_mul_base(K) when is_integer(K), K =< 0 ->
+  {0, 0};
 scalar_mul_base(K) when is_integer(K) ->
-  scalar_mul(K, {?X, ?Y}).
+  case K rem ?N of
+    0 -> {0, 0};
+    RedK ->
+      Table = get_base_comb(),
+      Acc = mul_comb(RedK, 1, Table, {1, 1, 0}),
+      from_jacobian(Acc)
+  end.
 
 -spec scalar_mul(scalar(), pt_affine()) -> pt_affine().
 scalar_mul(<<K:256>>, P) ->
@@ -277,6 +287,52 @@ s_inv(A) when is_integer(A) ->
     _          -> error(badarg)
   end.
 
+mul_comb(0, _I, _Table, Acc) ->
+  Acc;
+mul_comb(K, I, Table, Acc) ->
+  W = K band 15,
+  NextK = K bsr 4,
+  NextAcc =
+    case W of
+      0 -> Acc;
+      _ ->
+        Pt = element(W + 1, element(I, Table)),
+        case Acc of
+          {_, _, 0} -> to_jacobian(Pt);
+          _         -> j_add_affine(Acc, Pt)
+        end
+    end,
+  mul_comb(NextK, I + 1, Table, NextAcc).
+
+-spec init() -> ok.
+init() ->
+  Table = build_base_comb(),
+  persistent_term:put({?MODULE, base_comb}, Table),
+  ok.
+
+-spec get_base_comb() -> tuple().
+get_base_comb() ->
+  persistent_term:get({?MODULE, base_comb}).
+
+-spec build_base_comb() -> tuple().
+build_base_comb() ->
+  %% 64 windows, each with 16 multiples (0..15) of 16^i * G
+  list_to_tuple(build_windows(0, {?X, ?Y})).
+
+build_windows(64, _Cur) -> [];
+build_windows(I, Cur) ->
+  Mults = list_to_tuple(build_multiples(0, Cur, {1, 1, 0})),
+  NextCur = from_jacobian(dbl4(to_jacobian(Cur))),
+  [Mults | build_windows(I + 1, NextCur)].
+
+dbl4(J) ->
+  j_double(j_double(j_double(j_double(J)))).
+
+build_multiples(16, _Base, _Acc) -> [];
+build_multiples(0, Base, _Acc) ->
+  [{0, 0} | build_multiples(1, Base, to_jacobian(Base))];
+build_multiples(W, Base, Acc) ->
+  [from_jacobian(Acc) | build_multiples(W + 1, Base, j_add_affine(Acc, Base))].
 
 %% curve() ->
 %%   #{ p => 16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F,

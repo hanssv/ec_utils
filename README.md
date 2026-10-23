@@ -85,7 +85,7 @@ the library incorporates key algorithmic optimizations:
 1. **Jacobian projective coordinates (secp256k1):** Doubling and mixed additions
    require zero modular inversions; a single field inversion is computed at the
    end of scalar multiplication.
-2. **Precomputed comb table (Ed25519):** Base-point scalar multiplication uses a
+2. **Precomputed comb table (Ed25519 & secp256k1):** Base-point scalar multiplication uses a
    precomputed table of 1,024 points stored in `persistent_term` (loaded via
    `-on_load`), taking at most 64 additions and 0 doublings.
 3. **Fixed 4-bit window (Ed25519):** Variable-base scalar multiplication
@@ -99,7 +99,7 @@ the library incorporates key algorithmic optimizations:
 
 | Operation | Baseline | Optimized | Speedup | Reference (Native NIF) | vs Reference |
 |:---|---:|---:|---:|---:|---:|
-| **secp256k1 scalar mul base** | 5,377 µs | **728 µs** | **~7.4×** | — | — |
+| **secp256k1 scalar mul base** | 5,377 µs | **166 µs** | **~32×** | — | — |
 | **secp256k1 eth_recover** | 7,810 µs | **893 µs** | **~8.7×** | 54.1 µs (Rust NIF) | 16.5× |
 | **ed25519 scalar mul base** | 746 µs | **122 µs** | **~6.1×** | 14.9 µs (enacl) | 8.2× |
 | **ed25519 scalar mul** | 741 µs | **614 µs** | **~1.2×** | 71.8 µs (enacl) | 8.6× |
