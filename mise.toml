@@ -1,6 +1,6 @@
 [tools]
 erlang = "29.1.1"
-rebar3 = "3.25.1-otp28"
+rebar3 = "3.27.3-otp29"
 elp = "elp-2026-10-14-otp29.1"
 
 [tasks.eqwalize]

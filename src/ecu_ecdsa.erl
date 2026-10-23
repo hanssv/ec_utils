@@ -84,9 +84,8 @@ sign_secp256k1(MsgHash = <<_:32/bytes>>, <<PrivateKey:256>>) when PrivateKey >= 
 %% A public key must be a finite point on the curve with reduced coordinates.
 %% Note: the point at infinity ({0, 0}) is not on the curve.
 -spec valid_pubkey(term()) -> boolean().
-valid_pubkey({X, Y}) ->
-  is_integer(X) andalso is_integer(Y)
-  andalso X >= 0 andalso X < ?P
+valid_pubkey({X, Y}) when is_integer(X), is_integer(Y) ->
+  X >= 0 andalso X < ?P
   andalso Y >= 0 andalso Y < ?P
   andalso ecu_secp256k1:on_curve({X, Y});
 valid_pubkey(_) ->
