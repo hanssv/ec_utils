@@ -287,6 +287,7 @@ s_inv(A) when is_integer(A) ->
     _          -> error(badarg)
   end.
 
+-spec mul_comb(non_neg_integer(), pos_integer(), dynamic(), pt_jacobian()) -> pt_jacobian().
 mul_comb(0, _I, _Table, Acc) ->
   Acc;
 mul_comb(K, I, Table, Acc) ->
@@ -310,24 +311,27 @@ init() ->
   persistent_term:put({?MODULE, base_comb}, Table),
   ok.
 
--spec get_base_comb() -> tuple().
+-spec get_base_comb() -> dynamic().
 get_base_comb() ->
   persistent_term:get({?MODULE, base_comb}).
 
--spec build_base_comb() -> tuple().
+-spec build_base_comb() -> dynamic().
 build_base_comb() ->
   %% 64 windows, each with 16 multiples (0..15) of 16^i * G
   list_to_tuple(build_windows(0, {?X, ?Y})).
 
+-spec build_windows(non_neg_integer(), pt_affine()) -> [tuple()].
 build_windows(64, _Cur) -> [];
 build_windows(I, Cur) ->
   Mults = list_to_tuple(build_multiples(0, Cur, {1, 1, 0})),
   NextCur = from_jacobian(dbl4(to_jacobian(Cur))),
   [Mults | build_windows(I + 1, NextCur)].
 
+-spec dbl4(pt_jacobian()) -> pt_jacobian().
 dbl4(J) ->
   j_double(j_double(j_double(j_double(J)))).
 
+-spec build_multiples(non_neg_integer(), pt_affine(), pt_jacobian()) -> [pt_affine()].
 build_multiples(16, _Base, _Acc) -> [];
 build_multiples(0, Base, _Acc) ->
   [{0, 0} | build_multiples(1, Base, to_jacobian(Base))];

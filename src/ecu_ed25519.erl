@@ -31,6 +31,7 @@
 -export([on_curve/1, p/0, n/0, pt_eq/2,
          scalar_mul/2, scalar_mul_base/1, scalar_mul_dual_base/3,
          scalar_mul_noclamp/2, scalar_mul_base_noclamp/1,
+         multi_scalar_mul/1,
          scalar_reduce/1,
          p_add/2, p_sub/2, p_neg/1, p_dbl/1,
          compress/1, decompress/1, is_small_order/1,
@@ -181,10 +182,84 @@ scalar_mul_dual_base(K1, K2, P2) when is_integer(K1), K1 >= 0, is_integer(K2), K
   P2_mul = scalar_mul_window(K2, to_ext_hom(P2)),
   p_add(P1, P2_mul).
 
+-spec multi_scalar_mul([{scalar() | <<_:128>>, pt()}]) -> pt_hom_ext().
+multi_scalar_mul([]) ->
+  {0, 1, 1, 0};
+multi_scalar_mul(Pairs) ->
+  PointsWithTables =
+    lists:filtermap(
+      fun({Scalar, Pt}) ->
+        K = to_scalar_int(Scalar),
+        case K of
+          0 -> false;
+          _ ->
+            ExtPt = to_ext_hom(Pt),
+            Table = precompute_window_table(ExtPt),
+            {true, {nibbles(<<K:256>>), Table}}
+        end
+      end,
+      Pairs
+    ),
+  case PointsWithTables of
+    [] ->
+      {0, 1, 1, 0};
+    _ ->
+      Slices = build_slices(64, PointsWithTables),
+      multi_scalar_loop(Slices, {0, 1, 1, 0})
+  end.
+
+-spec to_scalar_int(scalar() | <<_:128>>) -> non_neg_integer().
+to_scalar_int(<<K:256/little>>) -> K rem ?N;
+to_scalar_int(<<K:128/little>>) -> K rem ?N;
+to_scalar_int(K) when is_integer(K), K >= 0 -> K rem ?N.
+
+-spec nibbles(bitstring()) -> [0..15].
+nibbles(<<>>) ->
+  [];
+nibbles(<<W:4, Rest/bitstring>>) ->
+  [W | nibbles(Rest)].
+
+-spec build_slices(non_neg_integer(), [{[0..15], dynamic()}]) -> [[dynamic()]].
+build_slices(0, _Points) ->
+  [];
+build_slices(StepCount, Points) ->
+  {SlicePoints, NextPoints} = collect_slice(Points, [], []),
+  [SlicePoints | build_slices(StepCount - 1, NextPoints)].
+
+-spec collect_slice([{[0..15], dynamic()}], [dynamic()], [{[0..15], dynamic()}]) ->
+    {[dynamic()], [{[0..15], dynamic()}]}.
+collect_slice([], SliceAcc, NextAcc) ->
+  {SliceAcc, NextAcc};
+collect_slice([{[], _Table} | _], SliceAcc, NextAcc) ->
+  {SliceAcc, NextAcc};
+collect_slice([{ [0 | Rest], Table } | More], SliceAcc, NextAcc) ->
+  collect_slice(More, SliceAcc, [{Rest, Table} | NextAcc]);
+collect_slice([{ [W | Rest], Table } | More], SliceAcc, NextAcc) ->
+  Pt = element(W + 1, Table),
+  collect_slice(More, [Pt | SliceAcc], [{Rest, Table} | NextAcc]).
+
+-spec multi_scalar_loop([[dynamic()]], pt_hom_ext()) -> pt_hom_ext().
+multi_scalar_loop([], Acc) ->
+  Acc;
+multi_scalar_loop([Slice | RestSlices], Acc) ->
+  D4 = case Acc of
+         {0, 1, 1, 0} -> {0, 1, 1, 0};
+         _            -> dbl4(Acc)
+       end,
+  NewAcc = lists:foldl(fun(Pt, CurAcc) ->
+                         case CurAcc of
+                           {0, 1, 1, 0} -> Pt;
+                           _            -> p_add(CurAcc, Pt)
+                         end
+                       end, D4, Slice),
+  multi_scalar_loop(RestSlices, NewAcc).
+
+-spec to_ext_hom(pt()) -> pt_hom_ext().
 to_ext_hom({_, _, _, _} = P)    -> P;
 to_ext_hom(<<_:32/binary>> = P) -> decompress(P);
 to_ext_hom({X, Y})              -> {X, Y, 1, ?MUL(X, Y)}.
 
+-spec to_affine(pt()) -> pt_affine().
 to_affine({_, _} = P) -> P;
 to_affine(<<_:32/binary>> = P) -> to_affine(decompress(P));
 to_affine({X, Y, Z, _}) ->
@@ -235,6 +310,7 @@ scalar_reduce(<<S:512/little>>) ->
   <<(S rem ?N):256/little>>.
 
 %% --- internal functions
+-spec scalar_mul_(non_neg_integer(), pt_hom_ext()) -> pt_hom_ext().
 scalar_mul_(0, _P) -> {0, 1, 1, 0};
 scalar_mul_(1, P)  -> P;
 scalar_mul_(K, P) ->
@@ -243,6 +319,7 @@ scalar_mul_(K, P) ->
     1 -> p_add(P, scalar_mul_(K - 1, P))
   end.
 
+-spec scalar_mul_window(non_neg_integer(), pt_hom_ext()) -> pt_hom_ext().
 scalar_mul_window(0, _P) ->
   {0, 1, 1, 0};
 scalar_mul_window(K, P) ->
@@ -251,6 +328,7 @@ scalar_mul_window(K, P) ->
   InitialAcc = element(W0 + 1, Table),
   window_loop(Rest, Table, InitialAcc).
 
+-spec window_loop(bitstring(), dynamic(), dynamic()) -> pt_hom_ext().
 window_loop(<<>>, _Table, Acc) ->
   Acc;
 window_loop(<<W:4, Rest/bitstring>>, Table, Acc) ->
@@ -267,9 +345,11 @@ window_loop(<<W:4, Rest/bitstring>>, Table, Acc) ->
     end,
   window_loop(Rest, Table, NewAcc).
 
+-spec precompute_window_table(pt_hom_ext()) -> dynamic().
 precompute_window_table(P) ->
   list_to_tuple(build_window_multiples(0, P, {0, 1, 1, 0})).
 
+-spec build_window_multiples(non_neg_integer(), pt_hom_ext(), pt_hom_ext()) -> [pt_hom_ext()].
 build_window_multiples(16, _P, _Acc) ->
   [];
 build_window_multiples(0, P, Acc) ->
@@ -277,12 +357,14 @@ build_window_multiples(0, P, Acc) ->
 build_window_multiples(W, P, Acc) ->
   [Acc | build_window_multiples(W + 1, P, p_add(Acc, P))].
 
+-spec scalar_mul_base_comb(non_neg_integer()) -> pt_hom_ext().
 scalar_mul_base_comb(0) ->
   {0, 1, 1, 0};
 scalar_mul_base_comb(K) ->
   Table = get_base_comb(),
   mul_comb(K, 1, Table, {0, 1, 1, 0}).
 
+-spec mul_comb(non_neg_integer(), pos_integer(), dynamic(), pt_hom_ext()) -> pt_hom_ext().
 mul_comb(0, _I, _Table, Acc) ->
   Acc;
 mul_comb(K, I, Table, Acc) ->
@@ -300,18 +382,22 @@ mul_comb(K, I, Table, Acc) ->
     end,
   mul_comb(NextK, I + 1, Table, NextAcc).
 
+-spec init() -> ok.
 init() ->
   Table = build_base_comb(),
   persistent_term:put({?MODULE, base_comb}, Table),
   ok.
 
+-spec get_base_comb() -> dynamic().
 get_base_comb() ->
   persistent_term:get({?MODULE, base_comb}).
 
+-spec build_base_comb() -> dynamic().
 build_base_comb() ->
   %% 64 windows, each with 16 multiples (0..15) of 16^i * B
   list_to_tuple(build_windows(0, ?GE)).
 
+-spec build_windows(non_neg_integer(), pt_hom_ext()) -> [tuple()].
 build_windows(64, _CurrentBase) ->
   [];
 build_windows(I, CurrentBase) ->
@@ -319,9 +405,11 @@ build_windows(I, CurrentBase) ->
   NextBase = dbl4(CurrentBase),
   [Multiples | build_windows(I + 1, NextBase)].
 
+-spec dbl4(pt_hom_ext()) -> pt_hom_ext().
 dbl4(P) ->
   p_dbl(p_dbl(p_dbl(p_dbl(P)))).
 
+-spec build_multiples(non_neg_integer(), pt_hom_ext()) -> [pt_hom_ext()].
 build_multiples(16, _Base) ->
   [];
 build_multiples(0, Base) ->
@@ -330,9 +418,11 @@ build_multiples(W, Base) ->
   Pt = scalar_mul_(W, Base),
   [Pt | build_multiples(W + 1, Base)].
 
+-spec clamp(non_neg_integer()) -> non_neg_integer().
 clamp(K) ->
   ((K band (bnot 7)) band (bnot (128 bsl 248))) bor (64 bsl 248).
 
+-spec xrecover(field_elem()) -> field_elem().
 xrecover(Y) ->
   Y2 = ?MUL(Y, Y),
   case ?SUB(Y2, 1) of

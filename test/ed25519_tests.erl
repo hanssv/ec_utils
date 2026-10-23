@@ -96,3 +96,102 @@ scalar_mul_benchmark_test() ->
   end),
   ?debugFmt("Average time for ed25519 scalar_mul: ~.3f ms", [(T / 1000) / length(Scalars)]),
   [ ?assert(ecu_ed25519:on_curve(Pt)) || Pt <- Results ].
+
+multi_scalar_mul_test() ->
+  %% Empty MSM returns identity
+  ?assertEqual({0, 1, 1, 0}, ecu_ed25519:multi_scalar_mul([])),
+  %% Single point MSM matches scalar_mul_noclamp
+  P = ecu_ed25519:scalar_mul_base(42),
+  K1 = 12345,
+  Expected1 = ecu_ed25519:scalar_mul_noclamp(K1, P),
+  Actual1 = ecu_ed25519:multi_scalar_mul([{K1, P}]),
+  ?assert(ecu_ed25519:pt_eq(Expected1, Actual1)),
+  %% Multi-point MSM matches sum of scalar_mul_noclamp
+  P2 = ecu_ed25519:scalar_mul_base(99),
+  K2 = 67890,
+  Expected2 = ecu_ed25519:p_add(Expected1, ecu_ed25519:scalar_mul_noclamp(K2, P2)),
+  Actual2 = ecu_ed25519:multi_scalar_mul([{K1, P}, {K2, P2}]),
+  ?assert(ecu_ed25519:pt_eq(Expected2, Actual2)).
+
+batch_verify_empty_test() ->
+  ?assertEqual(true, ecu_eddsa:sign_verify_batch([])).
+
+batch_verify_single_test() ->
+  #{secret := Priv, public := Pub} = ecu_eddsa:sign_keypair(),
+  Msg = <<"single batch message">>,
+  Sig = ecu_eddsa:sign_detached(Msg, Priv),
+  ?assertEqual(true, ecu_eddsa:sign_verify_batch([{Sig, Msg, Pub}])),
+  <<_R:32/binary, S:32/binary>> = Sig,
+  CorruptedSig = <<(crypto:strong_rand_bytes(32))/binary, S/binary>>,
+  ?assertEqual(false, ecu_eddsa:sign_verify_batch([{CorruptedSig, Msg, Pub}])).
+
+batch_verify_valid_batch_test() ->
+  Batch = [ begin
+              #{secret := Priv, public := Pub} = ecu_eddsa:sign_keypair(),
+              Msg = <<"message ", (integer_to_binary(I))/binary>>,
+              Sig = ecu_eddsa:sign_detached(Msg, Priv),
+              {Sig, Msg, Pub}
+            end || I <- lists:seq(1, 5) ],
+  ?assertEqual(true, ecu_eddsa:sign_verify_batch(Batch)).
+
+batch_verify_tampered_sig_test() ->
+  Batch = [ begin
+              #{secret := Priv, public := Pub} = ecu_eddsa:sign_keypair(),
+              Msg = <<"message ", (integer_to_binary(I))/binary>>,
+              Sig = ecu_eddsa:sign_detached(Msg, Priv),
+              {Sig, Msg, Pub}
+            end || I <- lists:seq(1, 5) ],
+  %% Corrupt the 3rd signature
+  {Sig3, Msg3, Pub3} = lists:nth(3, Batch),
+  <<R3:32/binary, S3:256/little-unsigned-integer>> = Sig3,
+  CorruptedSig3 = <<R3/binary, ((S3 + 1) rem ?N):256/little>>,
+  TamperedBatch = lists:sublist(Batch, 2) ++ [{CorruptedSig3, Msg3, Pub3}] ++ lists:nthtail(3, Batch),
+  ?assertEqual(false, ecu_eddsa:sign_verify_batch(TamperedBatch)).
+
+batch_verify_tampered_msg_test() ->
+  Batch = [ begin
+              #{secret := Priv, public := Pub} = ecu_eddsa:sign_keypair(),
+              Msg = <<"message ", (integer_to_binary(I))/binary>>,
+              Sig = ecu_eddsa:sign_detached(Msg, Priv),
+              {Sig, Msg, Pub}
+            end || I <- lists:seq(1, 5) ],
+  %% Corrupt the 2nd message
+  {Sig2, Msg2, Pub2} = lists:nth(2, Batch),
+  TamperedBatch = lists:sublist(Batch, 1) ++ [{Sig2, <<Msg2/binary, "!">>, Pub2}] ++ lists:nthtail(2, Batch),
+  ?assertEqual(false, ecu_eddsa:sign_verify_batch(TamperedBatch)).
+
+batch_verify_tampered_pk_test() ->
+  Batch = [ begin
+              #{secret := Priv, public := Pub} = ecu_eddsa:sign_keypair(),
+              Msg = <<"message ", (integer_to_binary(I))/binary>>,
+              Sig = ecu_eddsa:sign_detached(Msg, Priv),
+              {Sig, Msg, Pub}
+            end || I <- lists:seq(1, 5) ],
+  %% Replace 4th public key with another valid public key
+  #{public := OtherPub} = ecu_eddsa:sign_keypair(),
+  {Sig4, Msg4, _Pub4} = lists:nth(4, Batch),
+  TamperedBatch = lists:sublist(Batch, 3) ++ [{Sig4, Msg4, OtherPub}] ++ lists:nthtail(4, Batch),
+  ?assertEqual(false, ecu_eddsa:sign_verify_batch(TamperedBatch)).
+
+batch_verify_malleable_s_test() ->
+  Batch = [ begin
+              #{secret := Priv, public := Pub} = ecu_eddsa:sign_keypair(),
+              Msg = <<"message ", (integer_to_binary(I))/binary>>,
+              Sig = ecu_eddsa:sign_detached(Msg, Priv),
+              {Sig, Msg, Pub}
+            end || I <- lists:seq(1, 3) ],
+  %% Make 2nd signature non-canonical (S >= N)
+  {Sig2, Msg2, Pub2} = lists:nth(2, Batch),
+  <<R2:32/binary, S2:256/little-unsigned-integer>> = Sig2,
+  MalleableSig = <<R2/binary, (S2 + ?N):256/little-unsigned-integer>>,
+  TamperedBatch = lists:sublist(Batch, 1) ++ [{MalleableSig, Msg2, Pub2}] ++ lists:nthtail(2, Batch),
+  ?assertEqual(false, ecu_eddsa:sign_verify_batch(TamperedBatch)).
+
+batch_verify_malformed_test() ->
+  Bad1 = id([not_a_tuple]),
+  Bad2 = id(not_a_list),
+  ?assertEqual(false, ecu_eddsa:sign_verify_batch(Bad1)),
+  ?assertEqual(false, ecu_eddsa:sign_verify_batch([{<<0:256>>, <<"msg">>, <<0:256>>}])),
+  ?assertEqual(false, ecu_eddsa:sign_verify_batch(Bad2)).
+
+id(X) -> X.

@@ -131,3 +131,56 @@ prop_sign_detached_mismatched_pub() ->
     end
   end).
 
+prop_multi_scalar_mul() ->
+  ?FORALL(Pairs, non_empty(list({gen_large_n(), gen_point()})),
+  begin
+    Expected = lists:foldl(
+      fun({K, Pt}, Acc) ->
+        ecu_ed25519:p_add(Acc, ecu_ed25519:scalar_mul_noclamp(K, Pt))
+      end,
+      {0, 1, 1, 0},
+      Pairs
+    ),
+    Actual = ecu_ed25519:multi_scalar_mul(Pairs),
+    ecu_ed25519:pt_eq(Expected, Actual)
+  end).
+
+prop_batch_verify() ->
+  ?FORALL(Items, non_empty(list({binary(32), binary(32)})),
+  begin
+    Batch = [ begin
+                #{secret := SK, public := PK} = ecu_eddsa:sign_seed_keypair(Seed),
+                Sig = ecu_eddsa:sign_detached(Msg, SK),
+                {Sig, Msg, PK}
+              end || {Seed, Msg} <- Items ],
+    ecu_eddsa:sign_verify_batch(Batch)
+  end).
+
+prop_batch_verify_tampered() ->
+  ?FORALL({Items, TamperIdx, TamperChoice},
+          {non_empty(list({binary(32), binary(32)})), choose(1, 100), elements([sig, msg, pk])},
+  begin
+    Batch = [ begin
+                #{secret := SK, public := PK} = ecu_eddsa:sign_seed_keypair(Seed),
+                Sig = ecu_eddsa:sign_detached(Msg, SK),
+                {Sig, Msg, PK}
+              end || {Seed, Msg} <- Items ],
+    Idx = ((TamperIdx - 1) rem length(Batch)) + 1,
+    {Sig, Msg, PK} = lists:nth(Idx, Batch),
+    TamperedItem =
+      case TamperChoice of
+        sig ->
+          <<R:32/binary, S:256/little-unsigned-integer>> = Sig,
+          {<<R/binary, ((S + 1) rem ?N):256/little>>, Msg, PK};
+        msg ->
+          {Sig, <<Msg/binary, 1>>, PK};
+        pk ->
+          #{public := OtherPK} = ecu_eddsa:sign_keypair(),
+          {Sig, Msg, OtherPK}
+      end,
+    TamperedBatch = lists:sublist(Batch, Idx - 1) ++ [TamperedItem] ++ lists:nthtail(Idx, Batch),
+    case TamperedItem == {Sig, Msg, PK} of
+      true  -> true;
+      false -> not ecu_eddsa:sign_verify_batch(TamperedBatch)
+    end
+  end).

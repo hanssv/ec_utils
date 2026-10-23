@@ -20,7 +20,8 @@
          sign/2,
          sign_open/2,
          sign_detached/2,
-         sign_verify_detached/3]).
+         sign_verify_detached/3,
+         sign_verify_batch/1]).
 
 %% @doc sign_keypair/0 creates a keypair for signing
 %%
@@ -149,6 +150,70 @@ sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
   end;
 sign_verify_detached(_, _, _) ->
   false.
+
+%% @doc sign_verify_batch/1 verifies a batch of detached signatures.
+%%
+%% Given a list of `{Sig, Msg, PK}' tuples, this function verifies all signatures
+%% in a single batch using RFC 8032 Section 5.1.7 batch verification.
+%% Returns true iff ALL signatures in the batch are valid; false otherwise.
+%% @end
+-spec sign_verify_batch(
+    [{signature() | binary(), iodata(), public_key() | binary()}]
+) -> boolean().
+sign_verify_batch([]) ->
+  true;
+sign_verify_batch([{Sig, Msg, PK}]) ->
+  sign_verify_detached(Sig, Msg, PK);
+sign_verify_batch(Items) when is_list(Items) ->
+  try
+    verify_batch_impl(Items)
+  catch
+    error:_ -> false
+  end;
+sign_verify_batch(_) ->
+  false.
+
+-spec verify_batch_impl([{signature() | binary(), iodata(), public_key() | binary()}]) -> boolean().
+verify_batch_impl(Items) ->
+  {Points, S_Batch} = parse_batch(Items, [], 0),
+  P_others = ecu_ed25519:multi_scalar_mul(Points),
+  P_base = ecu_ed25519:scalar_mul_base_noclamp(S_Batch),
+  P_total = ecu_ed25519:p_sub(P_others, P_base),
+  ecu_ed25519:is_small_order(P_total).
+
+-spec parse_batch([{signature() | binary(), iodata(), public_key() | binary()}],
+                  [{non_neg_integer(), ecu_ed25519:pt_hom_ext()}],
+                  non_neg_integer()) ->
+    {[{non_neg_integer(), ecu_ed25519:pt_hom_ext()}], non_neg_integer()}.
+parse_batch([], PointsAcc, SAcc) ->
+  {PointsAcc, SAcc};
+parse_batch([{<<R_bin:32/binary, Ss:32/binary>>, Msg, <<PK:32/binary>>} | Rest], PointsAcc, SAcc) ->
+  <<S:256/little-unsigned-integer>> = Ss,
+  case S < ?N of
+    false -> error(badarg);
+    true ->
+      A = ecu_ed25519:decompress(PK),
+      case ecu_ed25519:is_small_order(A) of
+        true  -> error(badarg);
+        false ->
+          R = ecu_ed25519:decompress(R_bin),
+          case ecu_ed25519:is_small_order(R) of
+            true  -> error(badarg);
+            false ->
+              BinMsg = iolist_to_binary(Msg),
+              Ks0 = crypto:hash(sha512, <<R_bin/binary, PK/binary, BinMsg/binary>>),
+              <<K:256/little-unsigned-integer>> = ecu_ed25519:scalar_reduce(Ks0),
+              <<Z0:128/little-unsigned-integer>> = crypto:strong_rand_bytes(16),
+              Z = case Z0 of 0 -> 1; _ -> Z0 end,
+              C = (Z * K) rem ?N,
+              NewSAcc = (SAcc + Z * S) rem ?N,
+              NewPoints = [{Z, R}, {C, A} | PointsAcc],
+              parse_batch(Rest, NewPoints, NewSAcc)
+          end
+      end
+  end;
+parse_batch([_ | _], _PointsAcc, _SAcc) ->
+  error(badarg).
 
 %% Clamp a 32-byte little-endian integer - i.e clear the lowest three bits
 %% of the first byte and clear the highest and set the second highest of

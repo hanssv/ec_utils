@@ -45,6 +45,8 @@ Supported Curves & API
   - `sign/2`, `sign_open/2`: Create and open combined signed messages.
   - `sign_detached/2`, `sign_verify_detached/3`: Create and verify detached
     signatures.
+  - `sign_verify_batch/1`: Batch signature verification verifying a list of
+    `{Sig, Msg, PK}` tuples in a single pass (RFC 8032 §5.1.7).
 - `ecu_ed25519`: Curve point arithmetic and group operations using extended
   homogeneous coordinates (`{X, Y, Z, T}`):
   - Point addition (`p_add/2`), subtraction (`p_sub/2`), doubling (`p_dbl/1`),
@@ -54,6 +56,8 @@ Supported Curves & API
   - Variable-base scalar multiplication (`scalar_mul/2`, `scalar_mul_noclamp/2`)
     using a fixed 4-bit window method.
   - Dual-scalar multiplication (`scalar_mul_dual_base/3`) for verification.
+  - Multi-scalar multiplication (`multi_scalar_mul/1`) using interleaved windowed
+    Straus accumulation for accelerated batch operations.
   - Point compression (`compress/1`) and decompression (`decompress/1`) with
     canonical encoding checks and small-order point detection
     (`is_small_order/1`).
@@ -105,6 +109,7 @@ the library incorporates key algorithmic optimizations:
 | **ed25519 scalar mul** | 741 µs | **614 µs** | **~1.2×** | 71.8 µs (enacl) | 8.6× |
 | **ed25519 sign** | 739 µs | **272 µs** | **~2.7×** | 16.1 µs (enacl) | 16.9× |
 | **ed25519 verify** | 1,496 µs | **769 µs** | **~1.9×** | 44.2 µs (enacl) | 17.4× |
+| **ed25519 verify (batch of 32)** | 846 µs/sig | **368 µs/sig** | **~2.3×** | — | — |
 | **ed25519 point add** | 1.9 µs | **2.3 µs** | ~1.0× | 12.6 µs (enacl) | **5.6× faster** |
 
 *Note: Pure Erlang point addition is faster than `enacl` because calling the NIF

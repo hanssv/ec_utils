@@ -107,6 +107,28 @@ bench_verify_test() ->
   diff(TimeEnacl / length(DataEnacl), TimeEd25519 / length(DataEd25519)),
   ok.
 
+bench_batch_verify_test() ->
+  N = 32,
+  Batch = [ begin
+              K = ecu_eddsa:sign_keypair(),
+              Msg = crypto:strong_rand_bytes(32),
+              Sig = ecu_eddsa:sign_detached(Msg, maps:get(secret, K)),
+              {Sig, Msg, maps:get(public, K)}
+            end || _ <- lists:seq(1, N) ],
+  Iters = 5,
+  {TimeIndiv, _} = timer:tc(fun() ->
+    [ [ ecu_eddsa:sign_verify_detached(Sig, Msg, PK) || {Sig, Msg, PK} <- Batch ]
+      || _ <- lists:seq(1, Iters) ]
+  end),
+  {TimeBatch, _} = timer:tc(fun() ->
+    [ ecu_eddsa:sign_verify_batch(Batch) || _ <- lists:seq(1, Iters) ]
+  end),
+  ?debugFmt("", []),
+  stats("Ed25519 verify x32", "individual  ", N * Iters, TimeIndiv),
+  stats("Ed25519 verify x32", "batch verify", N * Iters, TimeBatch),
+  diff(TimeBatch / (N * Iters), TimeIndiv / (N * Iters)),
+  ok.
+
 gen_ecdsa_secp256k1_privkey() ->
   <<P0:256>> = crypto:strong_rand_bytes(32),
   P = (P0 rem (ecu_secp256k1:n() - 1)) + 1,
