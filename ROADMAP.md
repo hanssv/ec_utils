@@ -29,7 +29,19 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 3. Diffie-Hellman Key Exchange (X25519 / RFC 7748)
+## 3. FROST: Flexible Round-Optimized Schnorr Threshold Signatures (RFC 9591)
+
+- **Standard**: [RFC 9591](https://datatracker.ietf.org/doc/html/rfc9591) / Komlo & Goldberg (2020).
+- **Goal**: Implement threshold multi-party signing ($t$-of-$n$) where any threshold subset of participants cooperatively produces standard BIP-340 or Ed25519 Schnorr signatures.
+- **Features**:
+  - **FROST(secp256k1, SHA-256)**: Produces standard BIP-340 signatures indistinguishable from a single signer.
+  - **FROST(Ed25519, SHA-512)**: Produces standard Ed25519 signatures.
+  - **Two-Round Signing**: Nonce commitment generation (Round 1) and signature share aggregation (Round 2) using binding factors to prevent ROS/forgery attacks.
+  - **Key Generation & Resharing**: Distributed Key Generation (DKG) using Pedersen verifiable secret sharing (VSS) or trusted dealer setup.
+
+---
+
+## 4. Diffie-Hellman Key Exchange (X25519 / RFC 7748)
 
 - **Standard**: [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) (Curve25519 ECDH).
 - **Goal**: Enable pure-Erlang key agreement and shared secret derivation.
@@ -41,7 +53,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 4. Side-Channel & Timing Mitigation (Exploratory)
+## 5. Side-Channel & Timing Mitigation (Exploratory)
 
 While pure Erlang bignum arithmetic on the BEAM is fundamentally variable-time (reliant on runtime bignum routines), high-level algorithmic timing variances can be mitigated for defense-in-depth:
 - **Branch-Free Scalar Loops**: Use uniform Montgomery ladder steps for scalar multiplication so the sequence of point operations is identical regardless of scalar bit values.
@@ -50,7 +62,7 @@ While pure Erlang bignum arithmetic on the BEAM is fundamentally variable-time (
 
 ---
 
-## 5. Packaging & Publishing Readiness
+## 6. Packaging & Publishing Readiness
 
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.
