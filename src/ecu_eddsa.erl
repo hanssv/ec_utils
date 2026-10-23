@@ -4,7 +4,16 @@
 %%% Created     : 19 Jan 2022 by Hans Svensson
 -module(ecu_eddsa).
 
+-typing([eqwalizer]).
+
 -include("ecu_ed25519.hrl").
+
+-type public_key() :: <<_:256>>.
+-type secret_key() :: <<_:256>> | <<_:512>>.
+-type keypair() :: #{ public := public_key(), secret := <<_:512>> }.
+-type signature() :: <<_:512>>.
+
+-export_type([public_key/0, secret_key/0, keypair/0, signature/0]).
 
 -export([sign_keypair/0,
          sign_seed_keypair/1,
@@ -13,12 +22,11 @@
          sign_detached/2,
          sign_verify_detached/3]).
 
-
 %% @doc sign_keypair/0 creates a keypair for signing
 %%
 %% The keypair is returned as a map with keys 'public' and 'secret'.
 %% @end
--spec sign_keypair() -> #{ public => binary(), secret => binary() }.
+-spec sign_keypair() -> keypair().
 sign_keypair() ->
   Secret = crypto:strong_rand_bytes(32),
   sign_seed_keypair(Secret).
@@ -27,7 +35,7 @@ sign_keypair() ->
 %%
 %% The keypair is returned as a map with keys 'public' and 'secret'.
 %% @end
--spec sign_seed_keypair(Secret :: <<_:256>>) -> #{ public => binary(), secret => binary() }.
+-spec sign_seed_keypair(Secret :: <<_:256>>) -> keypair().
 sign_seed_keypair(<<Secret:32/binary>>) ->
   <<Seed:32/binary, _/binary>> = crypto:hash(sha512, Secret),
   Pub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed)),
@@ -38,7 +46,7 @@ sign_seed_keypair(<<Secret:32/binary>>) ->
 %% Given a message `Msg' and a secret key `SK' the function will sign the
 %% message and return a signed message `SM'.
 %% @end
--spec sign(Msg :: iodata(), SK :: <<_:256>> | <<_:512>>) -> SM :: binary().
+-spec sign(Msg :: iodata(), SK :: secret_key()) -> SM :: binary().
 sign(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   BinMsg = iolist_to_binary(Msg),
   Sig = sign_detached(Msg, SK),
@@ -51,7 +59,7 @@ sign(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
 %% `{error, failed_verification}' depending on the correctness of the
 %% signature.
 %% @end
--spec sign_open(SMsg :: binary(), PK :: <<_:256>>) ->
+-spec sign_open(SMsg :: binary(), PK :: public_key()) ->
     {ok, Msg :: binary()} | {error, failed_verification}.
 sign_open(<<Sig:64/binary, BinMsg/binary>>, <<PK:32/binary>>) ->
   case sign_verify_detached(Sig, BinMsg, PK) of
@@ -67,7 +75,7 @@ sign_open(_, _) ->
 %% Given a message `Msg' and a secret key `SK' the function will compute the
 %% digital signature `Sig'.
 %% @end
--spec sign_detached(Msg :: iodata(), SK :: <<_:256>> | <<_:512>>) -> Sig :: binary().
+-spec sign_detached(Msg :: iodata(), SK :: secret_key()) -> Sig :: signature().
 sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   BinMsg = iolist_to_binary(Msg),
   <<Secret:32/binary, _/binary>> = SK,
@@ -113,7 +121,7 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
 %% function computes true iff the `Sig' is valid for `Msg' and `PK'; and,
 %% false otherwise.
 %% @end
--spec sign_verify_detached(Sig :: <<_:512>>, Msg :: iodata(), PK :: <<_:256>>) -> boolean().
+-spec sign_verify_detached(Sig :: signature() | binary(), Msg :: iodata(), PK :: public_key() | binary()) -> boolean().
 sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
   <<R:32/binary, Ss:32/binary>> = Sig,
   <<S:256/little-unsigned-integer>> = Ss,
@@ -145,5 +153,6 @@ sign_verify_detached(_, _, _) ->
 %% Clamp a 32-byte little-endian integer - i.e clear the lowest three bits
 %% of the first byte and clear the highest and set the second highest of
 %% the last byte (i.e. making it divisible by 8 and
+-spec clamp(<<_:256>>) -> <<_:256>>.
 clamp(<<B0:8, B1_30:30/binary, B31:8>>) ->
   <<(B0 band 16#f8):8, B1_30/binary, ((B31 band 16#7f) bor 16#40):8>>.

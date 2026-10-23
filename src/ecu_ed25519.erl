@@ -5,24 +5,28 @@
 %%% Created     : 13 Jan 2022 by Hans Svensson
 -module(ecu_ed25519).
 
+-typing([eqwalizer]).
+
 -include("ecu_ed25519.hrl").
 
--type pt_affine() :: {non_neg_integer(), non_neg_integer()}. %% {X, Y}
--type pt_hom_ext() :: {non_neg_integer(), non_neg_integer(),
-                       non_neg_integer(), non_neg_integer()}. %% {X, Y, Z, T}
+-type pt_affine() :: {field_elem(), field_elem()}. %% {X, Y}
+-type pt_hom_ext() :: {field_elem(), field_elem(),
+                       field_elem(), field_elem()}. %% {X, Y, Z, T}
 -type pt_compressed() :: <<_:256>>. %% Y coord + odd/even X.
 
 -type pt() :: pt_affine() | pt_hom_ext() | pt_compressed().
 
-%% -type fld_elem() :: 0..(?P-1).
--type scalar() :: 0..(?N-1).
+-type scalar_elem() :: 0..(?N-1).
+-type scalar() :: non_neg_integer() | <<_:256>>.
+-type field_elem() :: non_neg_integer().
 
 -define(ADD(A, B), ((A + B) rem ?P)).
 -define(MUL(A, B), ((A * B) rem ?P)).
 -define(SUB(A, B), ((A - B + ?P) rem ?P)).
 -define(DIV(A, B), f_div(A, B)).
 
--export_type([pt/0, scalar/0]).
+-export_type([pt/0, pt_affine/0, pt_hom_ext/0, pt_compressed/0,
+              scalar/0, scalar_elem/0, field_elem/0]).
 
 -export([on_curve/1, p/0, n/0, pt_eq/2,
          scalar_mul/2, scalar_mul_base/1, scalar_mul_dual_base/3,
@@ -54,7 +58,8 @@ pt_eq(P1, P2) ->
 %%  - weak keys
 %%  - canonical representation
 %%  - main subgroup...
-on_curve({X, Y}) ->
+-spec on_curve(pt()) -> boolean().
+on_curve({X, Y}) when is_integer(X), is_integer(Y) ->
   X2 = ?MUL(X, X),
   Y2 = ?MUL(Y, Y),
   LHS = ?SUB(Y2, X2),
@@ -63,8 +68,10 @@ on_curve({X, Y}) ->
 on_curve(P) ->
   on_curve(to_affine(P)).
 
+-spec p() -> pos_integer().
 p() -> ?P.
 
+-spec n() -> pos_integer().
 n() -> ?N.
 
 -define(TWO_POW_255_MINUS_1, 16#7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF).
@@ -72,7 +79,7 @@ n() -> ?N.
 -spec compress(P :: pt()) -> pt_compressed().
 compress(<<_:32/binary>> = P) -> P;
 compress({_, _, _, _} = P)    -> compress(to_affine(P));
-compress({X, Y}) ->
+compress({X, Y}) when is_integer(X), is_integer(Y) ->
   V = (Y band ?TWO_POW_255_MINUS_1) bor ((X band 1) bsl 255),
   <<V:256/little>>.
 
@@ -101,14 +108,18 @@ is_small_order(P) ->
   P8 = p_dbl(p_dbl(p_dbl(P))),
   pt_eq(P8, {0, 1, 1, 0}).
 
-p_neg({X, Y})       -> {?P - X, Y};
-p_neg({X, Y, Z, T}) -> {?P - X, Y, Z, ?P - T};
+-spec p_neg(pt()) -> pt().
+p_neg({X, Y}) when is_integer(X), is_integer(Y) -> {?P - X, Y};
+p_neg({X, Y, Z, T}) when is_integer(X), is_integer(Y), is_integer(Z), is_integer(T) -> {?P - X, Y, Z, ?P - T};
 p_neg(P)            -> p_neg(to_ext_hom(P)).
 
+-spec p_sub(pt(), pt()) -> pt_hom_ext().
 p_sub(P1, P2) -> p_add(P1, p_neg(P2)).
 
 -spec p_add(X :: pt(), Y :: pt()) -> pt_hom_ext().
-p_add({X1, Y1, Z1, T1}, {X2, Y2, Z2, T2}) ->
+p_add({X1, Y1, Z1, T1}, {X2, Y2, Z2, T2})
+  when is_integer(X1), is_integer(Y1), is_integer(Z1), is_integer(T1),
+       is_integer(X2), is_integer(Y2), is_integer(Z2), is_integer(T2) ->
   A = ?MUL(?SUB(Y1, X1), ?SUB(Y2, X2)),
   B = ?MUL(?ADD(Y1, X1), ?ADD(Y2, X2)),
   C = ?MUL(?MUL(T1, T2), 2 * ?D),
@@ -121,7 +132,8 @@ p_add({X1, Y1, Z1, T1}, {X2, Y2, Z2, T2}) ->
 p_add(P1, P2) ->
   p_add(to_ext_hom(P1), to_ext_hom(P2)).
 
-p_dbl({X, Y, Z, _T}) ->
+-spec p_dbl(pt()) -> pt_hom_ext().
+p_dbl({X, Y, Z, _T}) when is_integer(X), is_integer(Y), is_integer(Z) ->
   A = ?MUL(X, X),
   B = ?MUL(Y, Y),
   C = ?MUL(2 * Z, Z),
@@ -135,32 +147,36 @@ p_dbl({X, Y, Z, _T}) ->
 p_dbl(P) ->
   p_dbl(to_ext_hom(P)).
 
--spec scalar_mul_base(Scalar :: scalar() | binary()) -> pt_hom_ext().
+-spec scalar_mul_base(Scalar :: scalar()) -> pt_hom_ext().
 scalar_mul_base(<<K:256/little>>) ->
   scalar_mul_base_comb(clamp(K));
-scalar_mul_base(K) when is_integer(K), K >= 0, K < ?N ->
+scalar_mul_base(K) when is_integer(K), K >= 0 ->
   scalar_mul_base_comb(clamp(K)).
 
--spec scalar_mul(Scalar :: scalar() | binary(), Pt :: pt()) -> pt_hom_ext().
+-spec scalar_mul(Scalar :: scalar(), Pt :: pt()) -> pt_hom_ext().
 scalar_mul(<<K:256/little>>, P) ->
   scalar_mul(K, P);
-scalar_mul(K, P) ->
+scalar_mul(K, P) when is_integer(K), K >= 0 ->
   scalar_mul_window(clamp(K), to_ext_hom(P)).
 
--spec scalar_mul_base_noclamp(Scalar :: scalar() | binary()) -> pt_hom_ext().
+-spec scalar_mul_base_noclamp(Scalar :: scalar()) -> pt_hom_ext().
 scalar_mul_base_noclamp(<<K:256/little>>) ->
   scalar_mul_base_comb(K);
-scalar_mul_base_noclamp(K) when is_integer(K), K >= 0, K < ?N ->
+scalar_mul_base_noclamp(K) when is_integer(K), K >= 0 ->
   scalar_mul_base_comb(K).
 
--spec scalar_mul_noclamp(Scalar :: scalar() | binary(), Pt :: pt()) -> pt_hom_ext().
+-spec scalar_mul_noclamp(Scalar :: scalar(), Pt :: pt()) -> pt_hom_ext().
 scalar_mul_noclamp(<<K:256/little>>, P) ->
   scalar_mul_noclamp(K, P);
-scalar_mul_noclamp(K, P) ->
+scalar_mul_noclamp(K, P) when is_integer(K), K >= 0 ->
   scalar_mul_window(K, to_ext_hom(P)).
 
 -spec scalar_mul_dual_base(K1 :: scalar(), K2 :: scalar(), P2 :: pt()) -> pt_hom_ext().
-scalar_mul_dual_base(K1, K2, P2) ->
+scalar_mul_dual_base(<<K1:256/little>>, K2, P2) ->
+  scalar_mul_dual_base(K1, K2, P2);
+scalar_mul_dual_base(K1, <<K2:256/little>>, P2) ->
+  scalar_mul_dual_base(K1, K2, P2);
+scalar_mul_dual_base(K1, K2, P2) when is_integer(K1), K1 >= 0, is_integer(K2), K2 >= 0 ->
   P1 = scalar_mul_base_comb(K1),
   P2_mul = scalar_mul_window(K2, to_ext_hom(P2)),
   p_add(P1, P2_mul).
@@ -175,27 +191,46 @@ to_affine({X, Y, Z, _}) ->
   ZInv = f_inv(Z),
   {?MUL(X, ZInv), ?MUL(Y, ZInv)}.
 
-f_pow(A, B) -> ecu_misc:exp_mod(A, B, ?P).
+-spec f_pow(field_elem(), non_neg_integer()) -> field_elem().
+f_pow(A, B) when is_integer(A), is_integer(B), B >= 0 ->
+  ecu_misc:exp_mod(A, B, ?P).
 
 %% Arithmetics in prime field P
-f_add(A, B) -> (A + B) rem ?P.
-f_mul(A, B) -> (A * B) rem ?P.
-f_sub(A, B) -> (A - B + ?P) rem ?P.
-f_div(A, B) -> f_mul(A, f_inv(B)).
+-spec f_add(field_elem(), field_elem()) -> field_elem().
+f_add(A, B) when is_integer(A), is_integer(B) -> (A + B) rem ?P.
 
-f_inv(A) ->
+-spec f_mul(field_elem(), field_elem()) -> field_elem().
+f_mul(A, B) when is_integer(A), is_integer(B) -> (A * B) rem ?P.
+
+-spec f_sub(field_elem(), field_elem()) -> field_elem().
+f_sub(A, B) when is_integer(A), is_integer(B) -> (A - B + ?P) rem ?P.
+
+-spec f_div(field_elem(), field_elem()) -> field_elem().
+f_div(A, B) when is_integer(A), is_integer(B) -> f_mul(A, f_inv(B)).
+
+-spec f_inv(field_elem()) -> field_elem().
+f_inv(A) when is_integer(A) ->
   f_pow(A, ?P - 2).
 
 %% Arithmetics in curve group order N
+-spec s_add(<<_:256>>, <<_:256>>) -> <<_:256>>.
 s_add(<<A:256/little>>, <<B:256/little>>) -> <<((A + B) rem ?N):256/little>>.
-s_mul(<<A:256/little>>, <<B:256/little>>) -> <<((A * B) rem ?N):256/little>>.
-s_sub(<<A:256/little>>, <<B:256/little>>) -> <<((A - B + ?N) rem ?N):256/little>>.
-s_div(A, B) -> s_mul(A, s_inv(B)).
 
+-spec s_mul(<<_:256>>, <<_:256>>) -> <<_:256>>.
+s_mul(<<A:256/little>>, <<B:256/little>>) -> <<((A * B) rem ?N):256/little>>.
+
+-spec s_sub(<<_:256>>, <<_:256>>) -> <<_:256>>.
+s_sub(<<A:256/little>>, <<B:256/little>>) -> <<((A - B + ?N) rem ?N):256/little>>.
+
+-spec s_div(<<_:256>>, <<_:256>>) -> <<_:256>>.
+s_div(A, B) when is_binary(A), is_binary(B) -> s_mul(A, s_inv(B)).
+
+-spec s_inv(<<_:256>>) -> <<_:256>>.
 s_inv(<<A:256/little>>) ->
   {1, S, _T} = ecu_misc:eea(A, ?N),
   <<((S + ?N) rem ?N):256/little>>.
 
+-spec scalar_reduce(<<_:512>>) -> <<_:256>>.
 scalar_reduce(<<S:512/little>>) ->
   <<(S rem ?N):256/little>>.
 

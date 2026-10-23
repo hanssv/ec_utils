@@ -17,6 +17,21 @@ $ rebar3 eunit
 $ rebar3 eqc
 ```
 
+### Type Checking (eqWAlizer)
+
+Type specifications across all source modules are validated using [eqWAlizer](https://github.com/whatsapp/eqwalizer) via the [Erlang Language Platform (ELP)](https://github.com/whatsapp/erlang-language-platform):
+
+```sh
+# Type-check all source modules
+$ elp eqwalize-all --as default
+
+# Or using mise
+$ mise run eqwalize
+
+# Or type-check a specific module
+$ elp eqwalize ecu_secp256k1
+```
+
 Supported Curves & API
 ----------------------
 
