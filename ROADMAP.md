@@ -34,12 +34,15 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 ## 3. FROST: Flexible Round-Optimized Schnorr Threshold Signatures (RFC 9591)
 
 - **Standard**: [RFC 9591](https://datatracker.ietf.org/doc/html/rfc9591) / Komlo & Goldberg (2020).
-- **Goal**: Implement threshold multi-party signing ($t$-of-$n$) where any threshold subset of participants cooperatively produces standard BIP-340 or Ed25519 Schnorr signatures.
-- **Features**:
-  - **FROST(secp256k1, SHA-256)**: Produces standard BIP-340 signatures indistinguishable from a single signer.
-  - **FROST(Ed25519, SHA-512)**: Produces standard Ed25519 signatures.
-  - **Two-Round Signing**: Nonce commitment generation (Round 1) and signature share aggregation (Round 2) using binding factors to prevent ROS/forgery attacks.
-  - **Key Generation & Resharing**: Distributed Key Generation (DKG) using Pedersen verifiable secret sharing (VSS) or trusted dealer setup.
+- **Goal**: Implement threshold multi-party signing ($t$-of-$n$) where any threshold subset of participants cooperatively produces standard Schnorr signatures indistinguishable from a single signer.
+- **Ciphersuites**:
+  - **Stage 1: `FROST(Ed25519, SHA-512)`**: Produces standard Ed25519 signatures verifiable with `ecu_eddsa`.
+  - **Stage 2: `FROST(secp256k1, SHA-256)`**: Produces standard BIP-340 Taproot signatures verifiable with `ecu_schnorr`.
+  - **Stage 3: `FROST(Ed448, SHAKE256)`**: Threshold signing for the Ed448 Goldilocks curve.
+- **Protocol Features**:
+  - Two-Round Signing: Nonce commitment generation (Round 1) and signature share aggregation (Round 2) using binding factors to prevent ROS/forgery attacks.
+  - Two-Round Distributed Key Generation (DKG) with Schnorr Proof of Knowledge (PoK) and Pedersen/Feldman verifiable secret sharing (VSS).
+  - Validation against official RFC 9591 test vectors.
 
 ---
 
@@ -55,7 +58,31 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 5. Side-Channel & Timing Mitigation (Exploratory)
+## 5. Ed448 / Curve448 (Goldilocks Curve / RFC 7748 & RFC 8032)
+
+- **Standard**: [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) (X448 key exchange) and [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) (Ed448 digital signatures).
+- **Goal**: High-security (~224-bit security level) elliptic curve cryptography based on the Goldilocks prime $p = 2^{448} - 2^{224} - 1$.
+- **Features**:
+  - Pure-Erlang arithmetic over $\mathbb{F}_{2^{448} - 2^{224} - 1}$ with fast Karatsuba/Solinas reduction.
+  - Twisted Edwards point arithmetic for Ed448 signatures using SHAKE256.
+  - Montgomery ladder over Curve448 for X448 key agreement.
+  - Foundation for `FROST(Ed448, SHAKE256)`.
+
+---
+
+## 6. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
+
+- **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Ethereum / Filecoin / Zcash zk-SNARK primitives.
+- **Goal**: Support pairing-based cryptography, short aggregate signatures, and zero-knowledge proof verification.
+- **Features**:
+  - Arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_q$) and $\mathbb{G}_2$ (over extension field $\mathbb{F}_{q^2}$) on the BLS12-381 curve.
+  - Optimal Ate pairing $e: \mathbb{G}_1 \times \mathbb{G}_2 \rightarrow \mathbb{G}_T$ over field extension $\mathbb{F}_{q^{12}}$.
+  - BLS threshold and aggregate signatures (non-interactive aggregation of $N$ signatures into a single group element).
+  - Verifier building blocks for Groth16 / PLONK zk-SNARK proof verification.
+
+---
+
+## 7. Side-Channel & Timing Mitigation (Exploratory)
 
 While pure Erlang bignum arithmetic on the BEAM is fundamentally variable-time (reliant on runtime bignum routines), high-level algorithmic timing variances can be mitigated for defense-in-depth:
 - **Branch-Free Scalar Loops**: Use uniform Montgomery ladder steps for scalar multiplication so the sequence of point operations is identical regardless of scalar bit values.
@@ -64,7 +91,7 @@ While pure Erlang bignum arithmetic on the BEAM is fundamentally variable-time (
 
 ---
 
-## 6. Packaging & Publishing Readiness
+## 8. Packaging & Packaging Readiness
 
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.
