@@ -80,6 +80,16 @@ Supported Curves & API
     `eth_msg_recover/2`, `ec_recover/2`).
   - Bitcoin address derivation (`private_to_short/2`).
 
+### secp256k1 / BIP-340 Schnorr (Bitcoin Taproot)
+
+- `ecu_schnorr`: Complete BIP-340 64-byte Schnorr signature implementation:
+  - `sign_keypair/0`: Generate a fresh `{secret, public}` keypair with 32-byte $x$-only public key.
+  - `sign_keypair_from_secret/1`: Derive 32-byte $x$-only public key from a 32-byte secret key (negating the scalar if $Y$ is odd).
+  - `sign/2`, `sign/3`: Sign arbitrary-length message with deterministic or auxiliary randomness.
+  - `verify/3`: Verify 64-byte signature against message and 32-byte $x$-only public key.
+  - `lift_x/1`: Lift 32-byte $X$ coordinate to secp256k1 curve point with even $Y$.
+  - `tagged_hash/2`: Compute BIP-340 tagged hashes (`BIP0340/challenge`, `BIP0340/aux`, `BIP0340/nonce`).
+
 Performance & Benchmarks
 ------------------------
 
@@ -105,6 +115,8 @@ the library incorporates key algorithmic optimizations:
 |:---|---:|---:|---:|---:|---:|
 | **secp256k1 scalar mul base** | 5,377 µs | **166 µs** | **~32×** | — | — |
 | **secp256k1 eth_recover** | 7,810 µs | **893 µs** | **~8.7×** | 54.1 µs (Rust NIF) | 16.5× |
+| **secp256k1 bip340 sign** | — | **370 µs** | — | — | — |
+| **secp256k1 bip340 verify** | — | **996 µs** | — | — | — |
 | **ed25519 scalar mul base** | 746 µs | **122 µs** | **~6.1×** | 14.9 µs (enacl) | 8.2× |
 | **ed25519 scalar mul** | 741 µs | **614 µs** | **~1.2×** | 71.8 µs (enacl) | 8.6× |
 | **ed25519 sign** | 739 µs | **272 µs** | **~2.7×** | 16.1 µs (enacl) | 16.9× |

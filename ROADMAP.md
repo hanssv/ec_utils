@@ -17,15 +17,17 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 2. BIP-340 Schnorr Signatures (secp256k1 / Bitcoin Taproot)
+## 2. BIP-340 Schnorr Signatures (secp256k1 / Bitcoin Taproot) `[Completed]`
 
 - **Standard**: [BIP-340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki) (64-byte Schnorr signatures for secp256k1).
-- **Goal**: Support modern Bitcoin Taproot signatures alongside ECDSA.
+- **Implementation**:
+  - `ecu_schnorr`: Complete BIP-340 implementation (`sign_keypair/0`, `sign/2,3`, `verify/3`, `lift_x/1`, `tagged_hash/2`).
+  - Tested against all 19 official [BIP-340 CSV test vectors](https://raw.githubusercontent.com/bitcoin/bips/master/bip-0340/test-vectors.csv).
 - **Features**:
   - 32-byte $x$-only public keys (eliminating point decompression ambiguity).
   - Provably secure, non-malleable 64-byte $(r, s)$ signatures.
   - Tagged SHA-256 hashes (`BIP0340/challenge`, `BIP0340/aux`, `BIP0340/nonce`).
-  - Foundation for multi-signatures (MuSig) and batch verification on secp256k1.
+  - Foundation for multi-signatures (MuSig) and FROST threshold signatures on secp256k1.
 
 ---
 
