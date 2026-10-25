@@ -3,25 +3,31 @@
 %%% FROST: Distributed Key Generation (DKG)
 %%% Two-round Distributed Key Generation with Schnorr Proof of Knowledge
 %%% for the FROST threshold signing scheme.
+%%% Ciphersuite-aware supporting both 'ed25519' (default) and 'secp256k1'.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ecu_frost_dkg).
 
--export([round1/3, round1_check/4,
-         round2/2, round2_check/3,
-         compute_private_sign_share/1,
-         compute_public_verification_share/1,
-         compute_public_verification_share/2,
-         compute_public_key/1]).
+-export([round1/3, round1/4,
+         round1_check/4, round1_check/5,
+         round2/2, round2/3,
+         round2_check/3, round2_check/4,
+         compute_private_sign_share/1, compute_private_sign_share/2,
+         compute_public_verification_share/1, compute_public_verification_share/2,
+         compute_public_verification_share/3,
+         compute_public_key/1, compute_public_key/2]).
 
 %% Types
--type participant_id() :: pos_integer().
--type scalar() :: <<_:256>>.
--type compressed_pt() :: <<_:256>>.
--type pok() :: <<_:512>>.
+-type ciphersuite() :: ecu_frost:ciphersuite().
+-type participant_id() :: ecu_frost:participant_id().
+-type scalar() :: ecu_frost:scalar().
+-type compressed_pt() :: ecu_frost:compressed_pt().
+-type pok() :: <<_:512>> | <<_:520>>.
 -type polynomial() :: [scalar()].
 
--export_type([participant_id/0, scalar/0, compressed_pt/0, pok/0, polynomial/0]).
+-export_type([ciphersuite/0, participant_id/0, scalar/0, compressed_pt/0, pok/0, polynomial/0]).
+
+-define(SECP256K1_N, 16#fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141).
 
 %% ===================================================================
 %% Round 1: Polynomial commitment and Proof of Knowledge
@@ -31,34 +37,70 @@
              T :: pos_integer(),
              CtxString :: binary()) ->
   {polynomial(), pok(), [compressed_pt()]}.
-round1(Id, T, CtxString) when T >= 1 ->
-  Cs = [C0 | _] = [ rnd_scalar() || _ <- lists:seq(1, T) ],
+round1(Id, T, CtxString) ->
+  round1(ed25519, Id, T, CtxString).
 
-  %% Proof of knowledge of C0
-  K   = rnd_scalar(),
-  R   = compress(sc_mul(K)),
-  GC0 = compress(sc_mul(C0)),
-  C   = hash_to_scalar(<<(sc(Id)):32/binary, CtxString/binary, GC0:32/binary, R:32/binary>>),
-  Mu  = add_sc(K, mul_sc(C0, C)),
+-spec round1(Suite :: ciphersuite(),
+             Id :: participant_id(),
+             T :: pos_integer(),
+             CtxString :: binary()) ->
+  {polynomial(), pok(), [compressed_pt()]}.
+round1(ed25519, Id, T, CtxString) when T >= 1 ->
+  Cs = [C0 | _] = [ ecu_ed25519:scalar_reduce(crypto:strong_rand_bytes(64)) || _ <- lists:seq(1, T) ],
+  K   = ecu_ed25519:scalar_reduce(crypto:strong_rand_bytes(64)),
+  R   = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(K)),
+  GC0 = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(C0)),
+  C   = ecu_ed25519:scalar_reduce(crypto:hash(sha512, <<Id:256/little, CtxString/binary, GC0/binary, R/binary>>)),
+  Mu  = ecu_ed25519:s_add(K, ecu_ed25519:s_mul(C0, C)),
   C0Prf = <<R:32/binary, Mu:32/binary>>,
-
-  %% Public commitments to coefficients
-  PubC = [ compress(sc_mul(Coeff)) || Coeff <- Cs ],
-
+  PubC = [ ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Coeff)) || Coeff <- Cs ],
+  {Cs, C0Prf, PubC};
+round1(secp256k1, Id, T, CtxString) when T >= 1 ->
+  Cs = [C0 | _] = [ rnd_scalar_secp256k1() || _ <- lists:seq(1, T) ],
+  K   = rnd_scalar_secp256k1(),
+  <<K_int:256>> = K,
+  <<C0_int:256>> = C0,
+  R   = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K_int)),
+  GC0 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(C0_int)),
+  C   = ecu_frost:compute_challenge(secp256k1, GC0, R, <<Id:256/big, CtxString/binary>>),
+  <<C_int:256>> = C,
+  Mu_int = (K_int + C0_int * C_int) rem ?SECP256K1_N,
+  C0Prf = <<R:33/binary, Mu_int:256/big>>,
+  PubC = [ begin
+             <<Coeff_int:256>> = Coeff,
+             ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(Coeff_int))
+           end || Coeff <- Cs ],
   {Cs, C0Prf, PubC}.
 
 -spec round1_check(Id :: participant_id(),
                    CtxString :: binary(),
                    C0Prf :: pok(),
                    PubC :: [compressed_pt()]) -> boolean().
-round1_check(Id, CtxString, <<R:32/binary, Mu:32/binary>>, [C0 | _]) ->
-  C = hash_to_scalar(<<(sc(Id)):32/binary, CtxString/binary, C0:32/binary, R:32/binary>>),
-  LHS = sc_mul(Mu),
+round1_check(Id, CtxString, C0Prf, PubC) ->
+  round1_check(ed25519, Id, CtxString, C0Prf, PubC).
+
+-spec round1_check(Suite :: ciphersuite(),
+                   Id :: participant_id(),
+                   CtxString :: binary(),
+                   C0Prf :: pok(),
+                   PubC :: [compressed_pt()]) -> boolean().
+round1_check(ed25519, Id, CtxString, <<R:32/binary, Mu:32/binary>>, [C0 | _]) ->
+  C = ecu_ed25519:scalar_reduce(crypto:hash(sha512, <<Id:256/little, CtxString/binary, C0/binary, R/binary>>)),
+  LHS = ecu_ed25519:scalar_mul_base_noclamp(Mu),
   PtR = ecu_ed25519:decompress(R),
   PtC0 = ecu_ed25519:decompress(C0),
   RHS = ecu_ed25519:p_add(PtR, ecu_ed25519:scalar_mul_noclamp(C, PtC0)),
   ecu_ed25519:pt_eq(LHS, RHS);
-round1_check(_, _, _, _) ->
+round1_check(secp256k1, Id, CtxString, <<R:33/binary, Mu:32/binary>>, [C0 | _]) ->
+  C = ecu_frost:compute_challenge(secp256k1, C0, R, <<Id:256/big, CtxString/binary>>),
+  <<Mu_int:256>> = Mu,
+  <<C_int:256>> = C,
+  LHS = ecu_secp256k1:scalar_mul_base(Mu_int),
+  PtR = ecu_secp256k1:decompress(R),
+  PtC0 = ecu_secp256k1:decompress(C0),
+  RHS = ecu_secp256k1:p_add(PtR, ecu_secp256k1:scalar_mul(C_int, PtC0)),
+  LHS =:= RHS;
+round1_check(_, _, _, _, _) ->
   false.
 
 %% ===================================================================
@@ -67,89 +109,137 @@ round1_check(_, _, _, _) ->
 
 -spec round2(N :: pos_integer(), Cs :: polynomial()) ->
   [{participant_id(), scalar()}].
-round2(N, Cs) when N >= 1 ->
-  [ {I, ecu_frost:polynomial_evaluate(I, Cs)} || I <- lists:seq(1, N) ].
+round2(N, Cs) ->
+  round2(ed25519, N, Cs).
+
+-spec round2(Suite :: ciphersuite(), N :: pos_integer(), Cs :: polynomial()) ->
+  [{participant_id(), scalar()}].
+round2(Suite, N, Cs) when N >= 1 ->
+  [ {I, ecu_frost:polynomial_evaluate(Suite, I, Cs)} || I <- lists:seq(1, N) ].
 
 -spec round2_check(Id :: participant_id(),
                    ShareVal :: scalar(),
                    PubC :: [compressed_pt()]) -> boolean().
 round2_check(Id, ShareVal, PubC) ->
-  LHS = sc_mul(ShareVal),
-  Exponents = pows(sc(Id), length(PubC)),
+  round2_check(ed25519, Id, ShareVal, PubC).
+
+-spec round2_check(Suite :: ciphersuite(),
+                   Id :: participant_id(),
+                   ShareVal :: scalar(),
+                   PubC :: [compressed_pt()]) -> boolean().
+round2_check(ed25519, Id, ShareVal, PubC) ->
+  LHS = ecu_ed25519:scalar_mul_base_noclamp(ShareVal),
+  Exponents = pows_ed25519(<<Id:256/little>>, length(PubC)),
   Ps = [ ecu_ed25519:scalar_mul_noclamp(E, ecu_ed25519:decompress(C))
          || {E, C} <- lists:zip(Exponents, PubC) ],
-  RHS = add_pts(Ps),
-  ecu_ed25519:pt_eq(LHS, RHS).
+  RHS = fold_pts_ed25519(Ps),
+  ecu_ed25519:pt_eq(LHS, RHS);
+round2_check(secp256k1, Id, ShareVal, PubC) ->
+  <<S_int:256>> = ShareVal,
+  LHS = ecu_secp256k1:scalar_mul_base(S_int),
+  Exponents = pows_secp256k1(Id, length(PubC)),
+  Ps = [ ecu_secp256k1:scalar_mul(E, ecu_secp256k1:decompress(C))
+         || {E, C} <- lists:zip(Exponents, PubC) ],
+  RHS = fold_pts_secp256k1(Ps),
+  LHS =:= RHS.
 
 %% ===================================================================
 %% Key & Share Derivation
 %% ===================================================================
 
 -spec compute_private_sign_share([{participant_id(), scalar()}]) -> scalar().
-compute_private_sign_share(Shares) when length(Shares) >= 1 ->
-  lists:foldl(fun({_, S}, Acc) -> add_sc(Acc, S) end, <<0:256>>, Shares).
+compute_private_sign_share(Shares) ->
+  compute_private_sign_share(ed25519, Shares).
+
+-spec compute_private_sign_share(Suite :: ciphersuite(),
+                                 Shares :: [{participant_id(), scalar()}]) -> scalar().
+compute_private_sign_share(ed25519, Shares) when length(Shares) >= 1 ->
+  lists:foldl(fun({_, S}, Acc) -> ecu_ed25519:s_add(Acc, S) end, <<0:256>>, Shares);
+compute_private_sign_share(secp256k1, Shares) when length(Shares) >= 1 ->
+  Sum = lists:foldl(fun({_, <<S:256>>}, Acc) -> (Acc + S) rem ?SECP256K1_N end, 0, Shares),
+  <<Sum:256/big>>.
 
 -spec compute_public_verification_share([{participant_id(), scalar()}]) -> compressed_pt().
 compute_public_verification_share(Shares) ->
-  compress(sc_mul(compute_private_sign_share(Shares))).
+  compute_public_verification_share(ed25519, Shares).
 
--spec compute_public_verification_share(Id :: participant_id(),
+-spec compute_public_verification_share(ciphersuite(), [{participant_id(), scalar()}]) -> compressed_pt();
+                                       (participant_id(), [[compressed_pt()]]) -> compressed_pt().
+compute_public_verification_share(ed25519, Shares) when is_list(Shares) ->
+  ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(compute_private_sign_share(ed25519, Shares)));
+compute_public_verification_share(secp256k1, Shares) when is_list(Shares) ->
+  <<S_int:256>> = compute_private_sign_share(secp256k1, Shares),
+  ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(S_int));
+compute_public_verification_share(Id, PubCs) when is_integer(Id), is_list(PubCs) ->
+  compute_public_verification_share(ed25519, Id, PubCs).
+
+-spec compute_public_verification_share(Suite :: ciphersuite(),
+                                        Id :: participant_id(),
                                         PubCs :: [[compressed_pt()]]) -> compressed_pt().
-compute_public_verification_share(Id, [PubC1 | _] = PubCs) ->
-  Exponents = pows(sc(Id), length(PubC1)),
+compute_public_verification_share(ed25519, Id, [PubC1 | _] = PubCs) ->
+  Exponents = pows_ed25519(<<Id:256/little>>, length(PubC1)),
   Pts = [ ecu_ed25519:scalar_mul_noclamp(E, ecu_ed25519:decompress(C))
           || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC) ],
-  compress(add_pts(Pts)).
+  ecu_ed25519:compress(fold_pts_ed25519(Pts));
+compute_public_verification_share(secp256k1, Id, [PubC1 | _] = PubCs) ->
+  Exponents = pows_secp256k1(Id, length(PubC1)),
+  Pts = [ ecu_secp256k1:scalar_mul(E, ecu_secp256k1:decompress(C))
+          || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC) ],
+  ecu_secp256k1:compress(fold_pts_secp256k1(Pts)).
 
 -spec compute_public_key(PubCs :: [[compressed_pt()]]) -> compressed_pt().
-compute_public_key(PubCs) when length(PubCs) >= 1 ->
+compute_public_key(PubCs) ->
+  compute_public_key(ed25519, PubCs).
+
+-spec compute_public_key(Suite :: ciphersuite(),
+                         PubCs :: [[compressed_pt()]]) -> compressed_pt().
+compute_public_key(ed25519, PubCs) when length(PubCs) >= 1 ->
   Pts = [ ecu_ed25519:decompress(C0) || [C0 | _] <- PubCs ],
-  compress(add_pts(Pts)).
+  ecu_ed25519:compress(fold_pts_ed25519(Pts));
+compute_public_key(secp256k1, PubCs) when length(PubCs) >= 1 ->
+  Pts = [ ecu_secp256k1:decompress(C0) || [C0 | _] <- PubCs ],
+  ecu_secp256k1:compress(fold_pts_secp256k1(Pts)).
 
 %% ===================================================================
 %% Internal Helpers
 %% ===================================================================
 
--spec pows(scalar(), non_neg_integer()) -> [scalar()].
-pows(X, N) ->
-  pows(sc(1), X, N).
+-spec rnd_scalar_secp256k1() -> scalar().
+rnd_scalar_secp256k1() ->
+  Val = binary:decode_unsigned(crypto:strong_rand_bytes(48)) rem ?SECP256K1_N,
+  case Val of
+    0 -> rnd_scalar_secp256k1();
+    _ -> <<Val:256/big>>
+  end.
 
--spec pows(scalar(), scalar(), non_neg_integer()) -> [scalar()].
-pows(_, _, 0) ->
+-spec pows_ed25519(scalar(), non_neg_integer()) -> [scalar()].
+pows_ed25519(X, N) ->
+  pows_ed25519(<<1:256/little>>, X, N).
+
+-spec pows_ed25519(scalar(), scalar(), non_neg_integer()) -> [scalar()].
+pows_ed25519(_, _, 0) ->
   [];
-pows(X, X0, N) ->
-  [X | pows(mul_sc(X, X0), X0, N - 1)].
+pows_ed25519(X, X0, N) ->
+  [X | pows_ed25519(ecu_ed25519:s_mul(X, X0), X0, N - 1)].
 
--spec hash_to_scalar(binary()) -> scalar().
-hash_to_scalar(Binary) ->
-  ecu_ed25519:scalar_reduce(crypto:hash(sha512, Binary)).
+-spec pows_secp256k1(non_neg_integer(), non_neg_integer()) -> [non_neg_integer()].
+pows_secp256k1(X, N) ->
+  pows_secp256k1(1, X rem ?SECP256K1_N, N).
 
--spec rnd_scalar() -> scalar().
-rnd_scalar() ->
-  ecu_ed25519:scalar_reduce(crypto:strong_rand_bytes(64)).
+-spec pows_secp256k1(non_neg_integer(), non_neg_integer(), non_neg_integer()) -> [non_neg_integer()].
+pows_secp256k1(_, _, 0) ->
+  [];
+pows_secp256k1(X, X0, N) ->
+  [X | pows_secp256k1((X * X0) rem ?SECP256K1_N, X0, N - 1)].
 
--spec sc_mul(scalar()) -> ecu_ed25519:pt().
-sc_mul(S) ->
-  ecu_ed25519:scalar_mul_base_noclamp(S).
-
--spec add_sc(scalar(), scalar()) -> scalar().
-add_sc(A, B) ->
-  ecu_ed25519:s_add(A, B).
-
--spec mul_sc(scalar(), scalar()) -> scalar().
-mul_sc(A, B) ->
-  ecu_ed25519:s_mul(A, B).
-
--spec compress(ecu_ed25519:pt()) -> compressed_pt().
-compress(P) ->
-  ecu_ed25519:compress(P).
-
--spec add_pts([ecu_ed25519:pt()]) -> ecu_ed25519:pt().
-add_pts([]) ->
-  ecu_ed25519:decompress(<<1:8, 0:248>>); %% Identity
-add_pts([P | Pts]) ->
+-spec fold_pts_ed25519([ecu_ed25519:pt()]) -> ecu_ed25519:pt().
+fold_pts_ed25519([]) ->
+  ecu_ed25519:decompress(<<1:8, 0:248>>);
+fold_pts_ed25519([P | Pts]) ->
   lists:foldl(fun(Pt, Acc) -> ecu_ed25519:p_add(Acc, Pt) end, P, Pts).
 
--spec sc(integer() | binary()) -> scalar().
-sc(X) when is_integer(X) -> <<X:256/little>>;
-sc(X) when is_binary(X), byte_size(X) =:= 32 -> X.
+-spec fold_pts_secp256k1([ecu_secp256k1:pt_affine()]) -> ecu_secp256k1:pt_affine().
+fold_pts_secp256k1([]) ->
+  {0, 0};
+fold_pts_secp256k1([P | Pts]) ->
+  lists:foldl(fun(Pt, Acc) -> ecu_secp256k1:p_add(Acc, Pt) end, P, Pts).

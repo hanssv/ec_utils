@@ -92,18 +92,22 @@ Supported Curves & API
 
 ### FROST Threshold Signatures (RFC 9591)
 
-- `ecu_frost`: Two-round FROST threshold signature scheme for `FROST(Ed25519, SHA-512)`:
-  - `commit/1,2`: Round 1 preprocessing — generate hiding & binding nonces and commitments.
-  - `sign/6`: Round 2 signing — compute partial signature share $z_i$ bound to group public key and message.
-  - `verify_signature_share/7`: Coordinator verification of individual signature shares.
-  - `aggregate/4`: Aggregate threshold signature shares into a standard Ed25519 signature.
-  - `trusted_dealer_keygen/2,3`: Trusted dealer key generation ($t$-of-$n$) with Feldman VSS commitments.
-  - `vss_verify/3`: Verifiable Secret Sharing share verification.
-  - `secret_share_combine/1`: Lagrange polynomial secret reconstruction from $t$ shares.
+- `ecu_frost`: Two-round FROST threshold signature scheme supporting ciphersuites:
+  - `ed25519`: `FROST(Ed25519, SHA-512)` (default) producing standard 64-byte Ed25519 signatures.
+  - `secp256k1`: `FROST(secp256k1, SHA-256)` using RFC 9380 `expand_message_xmd` producing 65-byte signatures ($R \parallel z$).
+  - API functions accept an optional `ciphersuite()` prefix (`ed25519 | secp256k1`), defaulting to `ed25519`:
+    - `commit/1,2`: Round 1 preprocessing — generate hiding & binding nonces and commitments.
+    - `sign/6,7`: Round 2 signing — compute partial signature share $z_i$ bound to group public key and message.
+    - `verify_signature_share/7,8`: Coordinator verification of individual signature shares.
+    - `aggregate/4,5`: Aggregate threshold signature shares into a group signature.
+    - `verify/3,4`: Verify aggregated FROST signatures (detached Ed25519 or secp256k1 prime-order verify).
+    - `trusted_dealer_keygen/2,3,4`: Trusted dealer key generation ($t$-of-$n$) with Feldman VSS commitments.
+    - `vss_verify/3,4`: Verifiable Secret Sharing share verification.
+    - `secret_share_combine/1,2`: Lagrange polynomial secret reconstruction from $t$ shares.
 - `ecu_frost_dkg`: Two-round Distributed Key Generation (DKG):
-  - `round1/3`, `round1_check/4`: Coefficient commitment and zero-knowledge Proof of Knowledge (PoK).
-  - `round2/2`, `round2_check/3`: Share distribution and verification against public commitments.
-  - `compute_private_sign_share/1`, `compute_public_verification_share/1,2`, `compute_public_key/1`: Joint key derivation.
+  - `round1/3,4`, `round1_check/4,5`: Coefficient commitment and zero-knowledge Proof of Knowledge (PoK).
+  - `round2/2,3`, `round2_check/3,4`: Share distribution and verification against public commitments.
+  - `compute_private_sign_share/1,2`, `compute_public_verification_share/1,2,3`, `compute_public_key/1,2`: Joint key derivation.
 
 Performance & Benchmarks
 ------------------------
@@ -138,9 +142,14 @@ the library incorporates key algorithmic optimizations:
 | **ed25519 verify** | 1,496 µs | **769 µs** | **~1.9×** | 44.2 µs (enacl) | 17.4× |
 | **ed25519 verify (batch of 32)** | 846 µs/sig | **368 µs/sig** | **~2.3×** | — | — |
 | **ed25519 point add** | 1.9 µs | **2.3 µs** | ~1.0× | 12.6 µs (enacl) | **5.6× faster** |
-| **frost ed25519 commit** | — | **335 µs** | — | — | — |
-| **frost ed25519 part sign** | — | **2.20 ms** | — | — | — |
-| **frost ed25519 aggregate** | — | **2.22 ms** | — | — | — |
+| **frost ed25519 commit** | — | **355 µs** | — | — | — |
+| **frost ed25519 part sign** | — | **2.18 ms** | — | — | — |
+| **frost ed25519 aggregate** | — | **2.08 ms** | — | — | — |
+| **frost ed25519 verify** | — | **824 µs** | — | — | — |
+| **frost secp256k1 commit** | — | **359 µs** | — | — | — |
+| **frost secp256k1 part sign** | — | **2.45 ms** | — | — | — |
+| **frost secp256k1 aggregate** | — | **2.43 ms** | — | — | — |
+| **frost secp256k1 verify** | — | **1.01 ms** | — | — | — |
 
 *Note: Pure Erlang point addition is faster than `enacl` because calling the NIF
 incurs marshalling and point decompression overhead.*
