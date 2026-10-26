@@ -7,7 +7,7 @@
 -include_lib("eqc/include/eqc.hrl").
 
 gen_ciphersuite() ->
-  elements([ed25519, secp256k1]).
+  elements([ed25519, secp256k1, bip340]).
 
 gen_params() ->
   ?LET(T, choose(2, 4),
@@ -16,7 +16,18 @@ gen_params() ->
 
 pub_from_priv(ed25519, Share) ->
   ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Share));
+pub_from_priv(bip340, Share) ->
+  <<S:256>> = Share,
+  {X, _} = ecu_secp256k1:scalar_mul_base(S),
+  <<X:256/big>>;
 pub_from_priv(secp256k1, Share) ->
+  ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(Share)).
+
+pub_share_for_verify(ed25519, Share) ->
+  ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Share));
+pub_share_for_verify(bip340, Share) ->
+  ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(Share));
+pub_share_for_verify(secp256k1, Share) ->
   ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(Share)).
 
 prop_trusted_dealer_vss() ->
@@ -56,7 +67,7 @@ prop_frost_sign_verify() ->
 
     %% Round 2: Signature shares
     SigShares = [ begin
-                    PubShare = pub_from_priv(CS, Share),
+                    PubShare = pub_share_for_verify(CS, Share),
                     SigShare = ecu_frost:sign(CS, Id, Share, GroupPubKey, NoncePair, Msg, CommitmentList),
                     true = ecu_frost:verify_signature_share(CS, Id, PubShare, NonceComm, SigShare, CommitmentList, GroupPubKey, Msg),
                     SigShare
@@ -125,9 +136,10 @@ prop_dkg_e2e() ->
                                  end, Shares)
                      end, Secrets),
 
-    GroupPubKey = ecu_frost_dkg:compute_public_key(CS, [ PubC || {_, {_, _, PubC}} <- KeyGen1 ]),
-    SignShares = [ {I, ecu_frost_dkg:compute_private_sign_share(CS, Shares),
-                       ecu_frost_dkg:compute_public_verification_share(CS, Shares)}
+    PubCs = [ PubC || {_, {_, _, PubC}} <- KeyGen1 ],
+    GroupPubKey = ecu_frost_dkg:compute_public_key(CS, PubCs),
+    SignShares = [ {I, ecu_frost_dkg:compute_private_sign_share(CS, Shares, PubCs),
+                       ecu_frost_dkg:compute_public_verification_share(CS, Shares, PubCs)}
                    || {I, Shares} <- Secrets ],
 
     %% Sign with signers 1 and 3

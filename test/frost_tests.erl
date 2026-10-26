@@ -338,6 +338,75 @@ dkg_secp256k1_test() ->
   Signature = ecu_frost:aggregate(secp256k1, CommitmentList, Msg, GroupPubKey, SigShares),
   ?assert(ecu_frost:verify(secp256k1, Signature, Msg, GroupPubKey)).
 
+trusted_dealer_bip340_test() ->
+  N = 5,
+  T = 3,
+  {Shares, GroupPubKey, VSSCommitment} = ecu_frost:trusted_dealer_keygen(bip340, T, N),
+  ?assertEqual(32, byte_size(GroupPubKey)),
+  ?assertEqual(N, length(Shares)),
+  ?assertEqual(T, length(VSSCommitment)),
+
+  [ ?assert(ecu_frost:vss_verify(bip340, Id, Share, VSSCommitment))
+    || {Id, Share} <- Shares ],
+
+  Selected = [lists:nth(1, Shares), lists:nth(3, Shares), lists:nth(5, Shares)],
+  Msg = <<"BIP-340 Taproot threshold transaction">>,
+
+  Nonces = [ {Id, Share, ecu_frost:commit(bip340, Share)} || {Id, Share} <- Selected ],
+  CommitmentList = [ {Id, HC, BC} || {Id, _, {_, {HC, BC}}} <- Nonces ],
+
+  SigShares = [ begin
+                  <<S:256>> = Share,
+                  PubShare = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(S)),
+                  SigShare = ecu_frost:sign(bip340, Id, Share, GroupPubKey, NoncePair, Msg, CommitmentList),
+                  ?assert(ecu_frost:verify_signature_share(bip340, Id, PubShare, NonceComm, SigShare, CommitmentList, GroupPubKey, Msg)),
+                  SigShare
+                end || {Id, Share, {NoncePair, NonceComm}} <- Nonces ],
+
+  Signature = ecu_frost:aggregate(bip340, CommitmentList, Msg, GroupPubKey, SigShares),
+  ?assertEqual(64, byte_size(Signature)),
+  ?assert(ecu_frost:verify(bip340, Signature, Msg, GroupPubKey)),
+  ?assert(ecu_schnorr:verify(Signature, Msg, GroupPubKey)),
+  ?assertNot(ecu_frost:verify(bip340, Signature, <<"Wrong msg">>, GroupPubKey)).
+
+dkg_bip340_test() ->
+  N = 3,
+  T = 2,
+  CtxString = <<"bip340_dkg_test">>,
+  KeyGen1 = [ {I, ecu_frost_dkg:round1(bip340, I, T, CtxString)} || I <- lists:seq(1, N) ],
+
+  [ ?assert(ecu_frost_dkg:round1_check(bip340, I, CtxString, PoK, PubC))
+    || {I, {_, PoK, PubC}} <- KeyGen1 ],
+
+  KeyGen2 = [ {I, ecu_frost_dkg:round2(bip340, N, Cs)} || {I, {Cs, _, _}} <- KeyGen1 ],
+  Secrets = [ {I, [ {J, S} || {J, Shares} <- KeyGen2, {Ix, S} <- Shares, Ix =:= I ]}
+              || I <- lists:seq(1, N) ],
+
+  PubCs = [ PubC || {_, {_, _, PubC}} <- KeyGen1 ],
+  GroupPubKey = ecu_frost_dkg:compute_public_key(bip340, PubCs),
+  ?assertEqual(32, byte_size(GroupPubKey)),
+
+  SignShares = [ {I, ecu_frost_dkg:compute_private_sign_share(bip340, Shares, PubCs),
+                     ecu_frost_dkg:compute_public_verification_share(bip340, Shares)}
+                 || {I, Shares} <- Secrets ],
+
+  SigningGroup = [lists:nth(1, SignShares), lists:nth(2, SignShares)],
+  Msg = <<"BIP-340 DKG threshold signing test">>,
+
+  Nonces = [ {Id, PrivShare, PubShare, ecu_frost:commit(bip340, PrivShare)}
+             || {Id, PrivShare, PubShare} <- SigningGroup ],
+  CommitmentList = [ {Id, HC, BC} || {Id, _, _, {_, {HC, BC}}} <- Nonces ],
+
+  SigShares = [ begin
+                  SigShare = ecu_frost:sign(bip340, Id, PrivShare, GroupPubKey, NoncePair, Msg, CommitmentList),
+                  SigShare
+                end || {Id, PrivShare, _PubShare, {NoncePair, _NonceComm}} <- Nonces ],
+
+  Signature = ecu_frost:aggregate(bip340, CommitmentList, Msg, GroupPubKey, SigShares),
+  ?assertEqual(64, byte_size(Signature)),
+  ?assert(ecu_frost:verify(bip340, Signature, Msg, GroupPubKey)),
+  ?assert(ecu_schnorr:verify(Signature, Msg, GroupPubKey)).
+
 %% ===================================================================
 %% Benchmarks
 %% ===================================================================
@@ -411,6 +480,43 @@ benchmark_frost_secp256k1_test() ->
 
   ?assert(Valid),
   ?debugFmt("~nFROST secp256k1 (t=~p, n=~p) Benchmarks:", [T, N]),
+  ?debugFmt("Commit (x~p):     ~.2f us/op (~.2f us/participant)", [T, CommitTime / 1, CommitTime / T]),
+  ?debugFmt("Part Sign (x~p):  ~.2f us/op (~.2f us/participant)", [T, SignTime / 1, SignTime / T]),
+  ?debugFmt("Aggregate:        ~.2f us/op", [AggTime / 1]),
+  ?debugFmt("Final Verify:     ~.2f us/op", [VerifyTime / 1]).
+
+benchmark_frost_bip340_test() ->
+  T = 3,
+  N = 5,
+  {Shares, GroupPubKey, _} = ecu_frost:trusted_dealer_keygen(bip340, T, N),
+  Selected = lists:sublist(Shares, T),
+  Msg = <<"Benchmark FROST bip340 message">>,
+
+  %% Nonce commit benchmark
+  {CommitTime, Nonces} = timer:tc(fun() ->
+    [ {Id, S, ecu_frost:commit(bip340, S)} || {Id, S} <- Selected ]
+  end),
+
+  CommitmentList = [ {Id, HC, BC} || {Id, _, {_, {HC, BC}}} <- Nonces ],
+
+  %% Partial sign benchmark
+  {SignTime, SigShares} = timer:tc(fun() ->
+    [ ecu_frost:sign(bip340, Id, S, GroupPubKey, NoncePair, Msg, CommitmentList)
+      || {Id, S, {NoncePair, _}} <- Nonces ]
+  end),
+
+  %% Aggregate benchmark
+  {AggTime, Signature} = timer:tc(fun() ->
+    ecu_frost:aggregate(bip340, CommitmentList, Msg, GroupPubKey, SigShares)
+  end),
+
+  %% BIP-340 verify benchmark
+  {VerifyTime, Valid} = timer:tc(fun() ->
+    ecu_frost:verify(bip340, Signature, Msg, GroupPubKey)
+  end),
+
+  ?assert(Valid),
+  ?debugFmt("~nFROST BIP-340 (t=~p, n=~p) Benchmarks:", [T, N]),
   ?debugFmt("Commit (x~p):     ~.2f us/op (~.2f us/participant)", [T, CommitTime / 1, CommitTime / T]),
   ?debugFmt("Part Sign (x~p):  ~.2f us/op (~.2f us/participant)", [T, SignTime / 1, SignTime / T]),
   ?debugFmt("Aggregate:        ~.2f us/op", [AggTime / 1]),
