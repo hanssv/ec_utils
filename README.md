@@ -8,13 +8,21 @@ This library is intended for learning, experimentation, and as a portable
 pure-Erlang fallback when native C/Rust NIFs (such as `libsodium`/`enacl` or
 native `secp256k1` bindings) are unavailable.
 
-Build & Test
-------------
+Build & Verification
+--------------------
 
 ```sh
+# Compile
 $ rebar3 compile
+
+# EUnit test suite
 $ rebar3 eunit
-$ rebar3 eqc
+
+# Dialyzer static analysis
+$ rebar3 dialyzer
+
+# QuickCheck property-based testing
+$ rebar3 as test eqc
 ```
 
 ### Type Checking (eqWAlizer)
@@ -30,6 +38,60 @@ $ mise run eqwalize
 
 # Or type-check a specific module
 $ elp eqwalize ecu_secp256k1
+```
+
+Quick Start
+-----------
+
+### Ed25519 & Batch Verification
+
+```erlang
+%% Keypair generation, signing, and detached verification
+{SecretKey, PublicKey} = ecu_eddsa:sign_keypair(),
+Signature = ecu_eddsa:sign_detached(<<"Hello, world!">>, SecretKey),
+true = ecu_eddsa:sign_verify_detached(Signature, <<"Hello, world!">>, PublicKey).
+
+%% Batch verification of multiple signatures in a single pass (RFC 8032 §5.1.7)
+Items = [
+    {Sig1, Msg1, PK1},
+    {Sig2, Msg2, PK2},
+    {Sig3, Msg3, PK3}
+],
+true = ecu_eddsa:sign_verify_batch(Items).
+```
+
+### BIP-340 Schnorr Signatures (Bitcoin Taproot)
+
+```erlang
+%% Generate keypair with 32-byte x-only public key
+{SecretKey, PublicKey} = ecu_schnorr:sign_keypair(),
+Msg = <<"Bitcoin Taproot transaction">>,
+
+%% Sign and verify 64-byte signature
+Signature = ecu_schnorr:sign(SecretKey, Msg),
+true = ecu_schnorr:verify(Signature, Msg, PublicKey).
+```
+
+### FROST Threshold Signatures (RFC 9591 & BIP-340)
+
+```erlang
+%% Trusted dealer keygen for a 2-of-3 BIP-340 threshold group
+{Shares, GroupPK, _VSS} = ecu_frost:trusted_dealer_keygen(bip340, 2, 3),
+Msg = <<"Threshold signed payload">>,
+
+%% Round 1: Any 2 participants commit nonces
+[{1, S1}, {2, S2} | _] = Shares,
+{N1, {HC1, BC1}} = ecu_frost:commit(bip340, S1),
+{N2, {HC2, BC2}} = ecu_frost:commit(bip340, S2),
+Commitments = [{1, HC1, BC1}, {2, HC2, BC2}],
+
+%% Round 2: Participants compute partial signature shares
+Z1 = ecu_frost:sign(bip340, 1, S1, GroupPK, N1, Msg, Commitments),
+Z2 = ecu_frost:sign(bip340, 2, S2, GroupPK, N2, Msg, Commitments),
+
+%% Aggregate shares into a standard 64-byte BIP-340 Taproot signature
+Signature = ecu_frost:aggregate(bip340, Commitments, Msg, GroupPK, [Z1, Z2]),
+true = ecu_schnorr:verify(Signature, Msg, GroupPK).
 ```
 
 Supported Curves & API
@@ -158,6 +220,14 @@ the library incorporates key algorithmic optimizations:
 
 *Note: Pure Erlang point addition is faster than `enacl` because calling the NIF
 incurs marshalling and point decompression overhead.*
+
+Roadmap
+-------
+
+See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cryptographic extensions, including:
+- **Diffie-Hellman Key Exchange (X25519 / RFC 7748)**: Pure-Erlang Montgomery ladder on Curve25519.
+- **Ed448 Goldilocks Curve (RFC 8032 & RFC 7748)**: 448-bit Edwards curve arithmetic and SHAKE256.
+- **Pairing-Friendly Cryptography (BLS12-381)**: Primitives for threshold BLS signatures and ZK-SNARK verifiers.
 
 Security Considerations & Limitations
 -------------------------------------
