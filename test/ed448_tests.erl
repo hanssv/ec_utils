@@ -295,4 +295,19 @@ batch_verify_malformed_test() ->
   ?assertEqual(false, ecu_eddsa448:sign_verify_batch([{<<0:456>>, <<"msg">>, <<0:456>>}])),
   ?assertEqual(false, ecu_eddsa448:sign_verify_batch(Bad2)).
 
+batch_verify_single_with_context_test() ->
+  #{secret := Priv, public := Pub} = ecu_eddsa448:sign_keypair(),
+  Msg = <<"single batch message with ctx">>,
+  Ctx = <<"custom context">>,
+  Sig = ecu_eddsa448:sign_detached(Msg, Priv, Ctx),
+  ?assertEqual(true, ecu_eddsa448:sign_verify_batch([{Sig, Msg, Pub}], Ctx)),
+  ?assertEqual(true, ecu_eddsa448:sign_verify_batch([{Sig, Msg, Pub, Ctx}], <<"ignored default">>)).
+
+argon04_scalar_window_truncation_ed448_test() ->
+  LargeK = (1 bsl 456) + 12345,
+  Pt = ecu_ed448:scalar_mul_base(1),
+  ResLarge = ecu_ed448:scalar_mul_noclamp(LargeK, Pt),
+  ResExpected = ecu_ed448:scalar_mul_noclamp(LargeK rem ?N, Pt),
+  ?assert(ecu_ed448:pt_eq(ResLarge, ResExpected)).
+
 id(X) -> X.

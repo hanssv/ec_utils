@@ -34,6 +34,13 @@
          polynomial_evaluate/2, polynomial_evaluate/3,
          derive_interpolating_value/2, derive_interpolating_value/3]).
 
+%% Verification & Validation Helpers
+-export([suite_order/1,
+         rnd_scalar/1,
+         is_canonical_scalar/2,
+         is_canonical_nonzero_scalar/2,
+         is_valid_point/2]).
+
 %% Types
 -type ciphersuite() :: ed25519 | secp256k1 | bip340 | ed448.
 -type participant_id() :: pos_integer().
@@ -57,6 +64,8 @@
 -define(ED25519_CTX, <<"FROST-ED25519-SHA512-v1"/utf8>>).
 -define(ED448_CTX, <<"FROST-ED448-SHAKE256-v1"/utf8>>).
 -define(SECP256K1_CTX, <<"FROST-secp256k1-SHA256-v1"/utf8>>).
+-define(ED25519_N, 16#1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed).
+-define(ED448_N, 16#3fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f3).
 -define(SECP256K1_N, 16#fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141).
 
 %% ===================================================================
@@ -158,11 +167,7 @@ sign(bip340, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, 
          0 -> 1;
          1 -> ?SECP256K1_N - 1
        end,
-  Nu = case GroupPublicKey of
-         <<_:32/binary>> -> 1;
-         <<2:8, _:32/binary>> -> 1;
-         <<3:8, _:32/binary>> -> ?SECP256K1_N - 1
-       end,
+  Nu = 1,
 
   <<D:256>> = HidingNonce,
   <<E:256>> = BindingNonce,
@@ -218,113 +223,168 @@ verify_signature_share(Id, PublicKeyShare, CommitmentPair,
                              CommitmentList :: commitment_list(),
                              GroupPublicKey :: compressed_pt(),
                              Msg :: binary()) -> boolean().
-verify_signature_share(ed25519, Id, PublicKeyShare, {HidingNonceComm, BindingNonceComm},
+verify_signature_share(Suite, Id, PublicKeyShare, CommitmentPair,
                        SigShare, CommitmentList, GroupPublicKey, Msg) ->
-  SortedList = sort_commitment_list(CommitmentList),
-  BindingFactorList = compute_binding_factors(ed25519, GroupPublicKey, SortedList, Msg),
-  BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
-  GroupCommitment = compute_group_commitment(ed25519, SortedList, BindingFactorList),
-  Challenge = compute_challenge(ed25519, GroupCommitment, GroupPublicKey, Msg),
-  ParticipantList = participants_from_commitment_list(SortedList),
-  LambdaId = derive_lagrange_coefficient(ed25519, Id, ParticipantList),
+  try
+    verify_signature_share_impl(Suite, Id, PublicKeyShare, CommitmentPair,
+                                SigShare, CommitmentList, GroupPublicKey, Msg)
+  catch
+    _:_ -> false
+  end.
 
-  PtHiding = ecu_ed25519:decompress(HidingNonceComm),
-  PtBinding = ecu_ed25519:decompress(BindingNonceComm),
-  CommShare = ecu_ed25519:p_add(PtHiding, ecu_ed25519:scalar_mul_noclamp(BindingFactor, PtBinding)),
+-spec verify_signature_share_impl(Suite :: ciphersuite(),
+                                  Id :: participant_id(),
+                                  PublicKeyShare :: compressed_pt(),
+                                  CommitmentPair :: nonce_commitment_pair(),
+                                  SigShare :: sig_share(),
+                                  CommitmentList :: commitment_list(),
+                                  GroupPublicKey :: compressed_pt(),
+                                  Msg :: binary()) -> boolean().
+verify_signature_share_impl(ed25519, Id, PublicKeyShare, {HidingNonceComm, BindingNonceComm},
+                            SigShare, CommitmentList, GroupPublicKey, Msg) ->
+  Order = suite_order(ed25519),
+  case Id > 0 andalso Id < Order andalso is_canonical_scalar(ed25519, SigShare) of
+    false -> false;
+    true ->
+      SortedList = sort_commitment_list(CommitmentList),
+      BindingFactorList = compute_binding_factors(ed25519, GroupPublicKey, SortedList, Msg),
+      BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
+      GroupCommitment = compute_group_commitment(ed25519, SortedList, BindingFactorList),
+      Challenge = compute_challenge(ed25519, GroupCommitment, GroupPublicKey, Msg),
+      ParticipantList = participants_from_commitment_list(SortedList),
+      LambdaId = derive_lagrange_coefficient(ed25519, Id, ParticipantList),
 
-  LHS = ecu_ed25519:scalar_mul_base_noclamp(SigShare),
-  PtPub = ecu_ed25519:decompress(PublicKeyShare),
-  RHS = ecu_ed25519:p_add(CommShare, ecu_ed25519:scalar_mul_noclamp(ecu_ed25519:s_mul(Challenge, LambdaId), PtPub)),
+      PtHiding = ecu_ed25519:decompress(HidingNonceComm),
+      PtBinding = ecu_ed25519:decompress(BindingNonceComm),
+      PtPub = ecu_ed25519:decompress(PublicKeyShare),
+      case is_valid_point(ed25519, PtHiding) andalso
+           is_valid_point(ed25519, PtBinding) andalso
+           is_valid_point(ed25519, PtPub) of
+        false -> false;
+        true ->
+          CommShare = ecu_ed25519:p_add(PtHiding, ecu_ed25519:scalar_mul_noclamp(BindingFactor, PtBinding)),
+          LHS = ecu_ed25519:scalar_mul_base_noclamp(SigShare),
+          RHS = ecu_ed25519:p_add(CommShare, ecu_ed25519:scalar_mul_noclamp(ecu_ed25519:s_mul(Challenge, LambdaId), PtPub)),
+          ecu_ed25519:pt_eq(LHS, RHS)
+      end
+  end;
+verify_signature_share_impl(ed448, Id, PublicKeyShare, {HidingNonceComm, BindingNonceComm},
+                            SigShare, CommitmentList, GroupPublicKey, Msg) ->
+  Order = suite_order(ed448),
+  case Id > 0 andalso Id < Order andalso is_canonical_scalar(ed448, SigShare) of
+    false -> false;
+    true ->
+      SortedList = sort_commitment_list(CommitmentList),
+      BindingFactorList = compute_binding_factors(ed448, GroupPublicKey, SortedList, Msg),
+      BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
+      GroupCommitment = compute_group_commitment(ed448, SortedList, BindingFactorList),
+      Challenge = compute_challenge(ed448, GroupCommitment, GroupPublicKey, Msg),
+      ParticipantList = participants_from_commitment_list(SortedList),
+      LambdaId = derive_lagrange_coefficient(ed448, Id, ParticipantList),
 
-  ecu_ed25519:pt_eq(LHS, RHS);
-verify_signature_share(ed448, Id, PublicKeyShare, {HidingNonceComm, BindingNonceComm},
-                       SigShare, CommitmentList, GroupPublicKey, Msg) ->
-  SortedList = sort_commitment_list(CommitmentList),
-  BindingFactorList = compute_binding_factors(ed448, GroupPublicKey, SortedList, Msg),
-  BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
-  GroupCommitment = compute_group_commitment(ed448, SortedList, BindingFactorList),
-  Challenge = compute_challenge(ed448, GroupCommitment, GroupPublicKey, Msg),
-  ParticipantList = participants_from_commitment_list(SortedList),
-  LambdaId = derive_lagrange_coefficient(ed448, Id, ParticipantList),
+      PtHiding = ecu_ed448:decompress(HidingNonceComm),
+      PtBinding = ecu_ed448:decompress(BindingNonceComm),
+      PtPub = ecu_ed448:decompress(PublicKeyShare),
+      case is_valid_point(ed448, PtHiding) andalso
+           is_valid_point(ed448, PtBinding) andalso
+           is_valid_point(ed448, PtPub) of
+        false -> false;
+        true ->
+          CommShare = ecu_ed448:p_add(PtHiding, ecu_ed448:scalar_mul_noclamp(BindingFactor, PtBinding)),
+          LHS = ecu_ed448:scalar_mul_base_noclamp(SigShare),
+          RHS = ecu_ed448:p_add(CommShare, ecu_ed448:scalar_mul_noclamp(ecu_ed448:s_mul(Challenge, LambdaId), PtPub)),
+          ecu_ed448:pt_eq(LHS, RHS)
+      end
+  end;
+verify_signature_share_impl(bip340, Id, PublicKeyShare, {HidingNonceComm, BindingNonceComm},
+                            SigShare, CommitmentList, GroupPublicKey, Msg) ->
+  Order = suite_order(bip340),
+  case Id > 0 andalso Id < Order andalso is_canonical_scalar(bip340, SigShare) of
+    false -> false;
+    true ->
+      SortedList = sort_commitment_list(CommitmentList),
+      BindingFactorList = compute_binding_factors(bip340, GroupPublicKey, SortedList, Msg),
+      BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
+      GroupCommitment = compute_group_commitment(bip340, SortedList, BindingFactorList),
+      Challenge = compute_challenge(bip340, GroupCommitment, GroupPublicKey, Msg),
+      ParticipantList = participants_from_commitment_list(SortedList),
+      LambdaId = derive_lagrange_coefficient(bip340, Id, ParticipantList),
 
-  PtHiding = ecu_ed448:decompress(HidingNonceComm),
-  PtBinding = ecu_ed448:decompress(BindingNonceComm),
-  CommShare = ecu_ed448:p_add(PtHiding, ecu_ed448:scalar_mul_noclamp(BindingFactor, PtBinding)),
+      {_Rx, Ry} = ecu_secp256k1:decompress(GroupCommitment),
+      Mu = case Ry rem 2 of
+             0 -> 1;
+             1 -> ?SECP256K1_N - 1
+           end,
+      Nu = 1,
 
-  LHS = ecu_ed448:scalar_mul_base_noclamp(SigShare),
-  PtPub = ecu_ed448:decompress(PublicKeyShare),
-  RHS = ecu_ed448:p_add(CommShare, ecu_ed448:scalar_mul_noclamp(ecu_ed448:s_mul(Challenge, LambdaId), PtPub)),
+      PtHiding = ecu_secp256k1:decompress(HidingNonceComm),
+      PtBinding = ecu_secp256k1:decompress(BindingNonceComm),
+      PtPubShare = case PublicKeyShare of
+                     <<_:32/binary>> ->
+                       case ecu_schnorr:lift_x(PublicKeyShare) of
+                         {ok, Pt} -> Pt;
+                         error -> error(badarg)
+                       end;
+                     <<_:33/binary>> ->
+                       ecu_secp256k1:decompress(PublicKeyShare)
+                   end,
+      case is_valid_point(bip340, PtHiding) andalso
+           is_valid_point(bip340, PtBinding) andalso
+           is_valid_point(bip340, PtPubShare) of
+        false -> false;
+        true ->
+          <<BF_int:256>> = BindingFactor,
+          CommShare = ecu_secp256k1:p_add(PtHiding, ecu_secp256k1:scalar_mul(BF_int, PtBinding)),
+          SignedCommShare = ecu_secp256k1:scalar_mul(Mu, CommShare),
 
-  ecu_ed448:pt_eq(LHS, RHS);
-verify_signature_share(bip340, Id, PublicKeyShare, {HidingNonceComm, BindingNonceComm},
-                       SigShare, CommitmentList, GroupPublicKey, Msg) ->
-  SortedList = sort_commitment_list(CommitmentList),
-  BindingFactorList = compute_binding_factors(bip340, GroupPublicKey, SortedList, Msg),
-  BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
-  GroupCommitment = compute_group_commitment(bip340, SortedList, BindingFactorList),
-  Challenge = compute_challenge(bip340, GroupCommitment, GroupPublicKey, Msg),
-  ParticipantList = participants_from_commitment_list(SortedList),
-  LambdaId = derive_lagrange_coefficient(bip340, Id, ParticipantList),
+          <<C_int:256>> = Challenge,
+          <<L_int:256>> = LambdaId,
+          Factor = (Nu * ((C_int * L_int) rem ?SECP256K1_N)) rem ?SECP256K1_N,
+          RHS = ecu_secp256k1:p_add(SignedCommShare, ecu_secp256k1:scalar_mul(Factor, PtPubShare)),
 
-  {_Rx, Ry} = ecu_secp256k1:decompress(GroupCommitment),
-  Mu = case Ry rem 2 of
-         0 -> 1;
-         1 -> ?SECP256K1_N - 1
-       end,
-  Nu = case GroupPublicKey of
-         <<_:32/binary>> -> 1;
-         <<2:8, _:32/binary>> -> 1;
-         <<3:8, _:32/binary>> -> ?SECP256K1_N - 1
-       end,
+          <<Z_int:256>> = SigShare,
+          LHS = ecu_secp256k1:scalar_mul_base(Z_int),
+          LHS =:= RHS
+      end
+  end;
+verify_signature_share_impl(secp256k1, Id, PublicKeyShare, {HidingNonceComm, BindingNonceComm},
+                            SigShare, CommitmentList, GroupPublicKey, Msg) ->
+  Order = suite_order(secp256k1),
+  case Id > 0 andalso Id < Order andalso is_canonical_scalar(secp256k1, SigShare) of
+    false -> false;
+    true ->
+      SortedList = sort_commitment_list(CommitmentList),
+      BindingFactorList = compute_binding_factors(secp256k1, GroupPublicKey, SortedList, Msg),
+      BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
+      GroupCommitment = compute_group_commitment(secp256k1, SortedList, BindingFactorList),
+      Challenge = compute_challenge(secp256k1, GroupCommitment, GroupPublicKey, Msg),
+      ParticipantList = participants_from_commitment_list(SortedList),
+      LambdaId = derive_lagrange_coefficient(secp256k1, Id, ParticipantList),
 
-  PtHiding = ecu_secp256k1:decompress(HidingNonceComm),
-  PtBinding = ecu_secp256k1:decompress(BindingNonceComm),
-  <<BF_int:256>> = BindingFactor,
-  CommShare = ecu_secp256k1:p_add(PtHiding, ecu_secp256k1:scalar_mul(BF_int, PtBinding)),
-  SignedCommShare = ecu_secp256k1:scalar_mul(Mu, CommShare),
+      PtHiding = ecu_secp256k1:decompress(HidingNonceComm),
+      PtBinding = ecu_secp256k1:decompress(BindingNonceComm),
+      PtPub = ecu_secp256k1:decompress(PublicKeyShare),
+      case is_valid_point(secp256k1, PtHiding) andalso
+           is_valid_point(secp256k1, PtBinding) andalso
+           is_valid_point(secp256k1, PtPub) of
+        false -> false;
+        true ->
+          <<BF_int:256>> = BindingFactor,
+          CommShare = ecu_secp256k1:p_add(PtHiding, ecu_secp256k1:scalar_mul(BF_int, PtBinding)),
 
-  PtPubShare = case PublicKeyShare of
-                 <<_:32/binary>> ->
-                   case ecu_schnorr:lift_x(PublicKeyShare) of
-                     {ok, Pt} -> Pt;
-                     error -> error(badarg)
-                   end;
-                 <<_:33/binary>> ->
-                   ecu_secp256k1:decompress(PublicKeyShare)
-               end,
-  <<C_int:256>> = Challenge,
-  <<L_int:256>> = LambdaId,
-  Factor = (Nu * ((C_int * L_int) rem ?SECP256K1_N)) rem ?SECP256K1_N,
-  RHS = ecu_secp256k1:p_add(SignedCommShare, ecu_secp256k1:scalar_mul(Factor, PtPubShare)),
+          <<Z_int:256>> = SigShare,
+          LHS = ecu_secp256k1:scalar_mul_base(Z_int),
 
-  <<Z_int:256>> = SigShare,
-  LHS = ecu_secp256k1:scalar_mul_base(Z_int),
-  LHS =:= RHS;
-verify_signature_share(secp256k1, Id, PublicKeyShare, {HidingNonceComm, BindingNonceComm},
-                       SigShare, CommitmentList, GroupPublicKey, Msg) ->
-  SortedList = sort_commitment_list(CommitmentList),
-  BindingFactorList = compute_binding_factors(secp256k1, GroupPublicKey, SortedList, Msg),
-  BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
-  GroupCommitment = compute_group_commitment(secp256k1, SortedList, BindingFactorList),
-  Challenge = compute_challenge(secp256k1, GroupCommitment, GroupPublicKey, Msg),
-  ParticipantList = participants_from_commitment_list(SortedList),
-  LambdaId = derive_lagrange_coefficient(secp256k1, Id, ParticipantList),
+          <<C_int:256>> = Challenge,
+          <<L_int:256>> = LambdaId,
+          Factor = (C_int * L_int) rem ?SECP256K1_N,
+          RHS = ecu_secp256k1:p_add(CommShare, ecu_secp256k1:scalar_mul(Factor, PtPub)),
 
-  PtHiding = ecu_secp256k1:decompress(HidingNonceComm),
-  PtBinding = ecu_secp256k1:decompress(BindingNonceComm),
-  <<BF_int:256>> = BindingFactor,
-  CommShare = ecu_secp256k1:p_add(PtHiding, ecu_secp256k1:scalar_mul(BF_int, PtBinding)),
-
-  <<Z_int:256>> = SigShare,
-  LHS = ecu_secp256k1:scalar_mul_base(Z_int),
-
-  <<C_int:256>> = Challenge,
-  <<L_int:256>> = LambdaId,
-  Factor = (C_int * L_int) rem ?SECP256K1_N,
-  PtPub = ecu_secp256k1:decompress(PublicKeyShare),
-  RHS = ecu_secp256k1:p_add(CommShare, ecu_secp256k1:scalar_mul(Factor, PtPub)),
-
-  LHS =:= RHS.
+          LHS =:= RHS
+      end
+  end;
+verify_signature_share_impl(_, _, _, _, _, _, _, _) ->
+  false.
 
 -spec aggregate(CommitmentList :: commitment_list(),
                 Msg :: binary(),
@@ -338,26 +398,44 @@ aggregate(CommitmentList, Msg, GroupPublicKey, SigShares) ->
                 Msg :: binary(),
                 GroupPublicKey :: compressed_pt(),
                 SigShares :: [sig_share()]) -> signature().
-aggregate(ed25519, CommitmentList, Msg, GroupPublicKey, SigShares) ->
+aggregate(Suite, CommitmentList, Msg, GroupPublicKey, SigShares) ->
+  case length(CommitmentList) =:= length(SigShares) andalso length(SigShares) >= 1 of
+    false ->
+      error({mismatched_shares_and_commitments, length(SigShares), length(CommitmentList)});
+    true ->
+      case lists:all(fun(S) -> is_canonical_scalar(Suite, S) end, SigShares) of
+        false ->
+          error(badarg);
+        true ->
+          aggregate_impl(Suite, CommitmentList, Msg, GroupPublicKey, SigShares)
+      end
+  end.
+
+-spec aggregate_impl(Suite :: ciphersuite(),
+                     CommitmentList :: commitment_list(),
+                     Msg :: binary(),
+                     GroupPublicKey :: compressed_pt(),
+                     SigShares :: [sig_share()]) -> signature().
+aggregate_impl(ed25519, CommitmentList, Msg, GroupPublicKey, SigShares) ->
   SortedList = sort_commitment_list(CommitmentList),
   BindingFactorList = compute_binding_factors(ed25519, GroupPublicKey, SortedList, Msg),
   GroupCommitment = compute_group_commitment(ed25519, SortedList, BindingFactorList),
   Z = lists:foldl(fun(Share, Acc) -> ecu_ed25519:s_add(Acc, Share) end, <<0:256>>, SigShares),
   <<GroupCommitment:32/binary, Z:32/binary>>;
-aggregate(ed448, CommitmentList, Msg, GroupPublicKey, SigShares) ->
+aggregate_impl(ed448, CommitmentList, Msg, GroupPublicKey, SigShares) ->
   SortedList = sort_commitment_list(CommitmentList),
   BindingFactorList = compute_binding_factors(ed448, GroupPublicKey, SortedList, Msg),
   GroupCommitment = compute_group_commitment(ed448, SortedList, BindingFactorList),
   Z = lists:foldl(fun(Share, Acc) -> ecu_ed448:s_add(Acc, Share) end, <<0:456>>, SigShares),
   <<GroupCommitment:57/binary, Z:57/binary>>;
-aggregate(bip340, CommitmentList, Msg, GroupPublicKey, SigShares) ->
+aggregate_impl(bip340, CommitmentList, Msg, GroupPublicKey, SigShares) ->
   SortedList = sort_commitment_list(CommitmentList),
   BindingFactorList = compute_binding_factors(bip340, GroupPublicKey, SortedList, Msg),
   GroupCommitment = compute_group_commitment(bip340, SortedList, BindingFactorList),
   <<_Tag:8, Rx_bin:32/binary>> = GroupCommitment,
   Z = lists:foldl(fun(<<S:256>>, Acc) -> (Acc + S) rem ?SECP256K1_N end, 0, SigShares),
   <<Rx_bin:32/binary, Z:256/big>>;
-aggregate(secp256k1, CommitmentList, Msg, GroupPublicKey, SigShares) ->
+aggregate_impl(secp256k1, CommitmentList, Msg, GroupPublicKey, SigShares) ->
   SortedList = sort_commitment_list(CommitmentList),
   BindingFactorList = compute_binding_factors(secp256k1, GroupPublicKey, SortedList, Msg),
   GroupCommitment = compute_group_commitment(secp256k1, SortedList, BindingFactorList),
@@ -386,14 +464,22 @@ verify(bip340, <<Sig:64/binary>>, Msg, GroupPublicKey) ->
   ecu_schnorr:verify(Sig, Msg, Px_bin);
 verify(secp256k1, <<R_enc:33/binary, Z_bin:32/binary>>, Msg, PK_enc) ->
   try
-    Challenge = compute_challenge(secp256k1, R_enc, PK_enc, Msg),
-    <<C_int:256>> = Challenge,
     <<Z_int:256>> = Z_bin,
-    PtR = ecu_secp256k1:decompress(R_enc),
-    PtPK = ecu_secp256k1:decompress(PK_enc),
-    LHS = ecu_secp256k1:scalar_mul_base(Z_int),
-    RHS = ecu_secp256k1:p_add(PtR, ecu_secp256k1:scalar_mul(C_int, PtPK)),
-    LHS =:= RHS
+    case Z_int < ?SECP256K1_N of
+      false -> false;
+      true ->
+        Challenge = compute_challenge(secp256k1, R_enc, PK_enc, Msg),
+        <<C_int:256>> = Challenge,
+        PtR = ecu_secp256k1:decompress(R_enc),
+        PtPK = ecu_secp256k1:decompress(PK_enc),
+        case is_valid_point(secp256k1, PtR) andalso is_valid_point(secp256k1, PtPK) of
+          false -> false;
+          true ->
+            LHS = ecu_secp256k1:scalar_mul_base(Z_int),
+            RHS = ecu_secp256k1:p_add(PtR, ecu_secp256k1:scalar_mul(C_int, PtPK)),
+            LHS =:= RHS
+        end
+    end
   catch
     _:_ ->
       false
@@ -454,10 +540,11 @@ compute_binding_factors(ed448, GroupPublicKey, CommitmentList, Msg) ->
   [ {Id, ecu_ed448:scalar_reduce(crypto:hash_xof(shake256, <<?ED448_CTX/binary, "rho", RhoInputPrefix/binary, Id:456/little>>, 114 * 8))}
     || {Id, _, _} <- SortedList ];
 compute_binding_factors(bip340, GroupPublicKey, CommitmentList, Msg) ->
-  PK_33 = case GroupPublicKey of
-            <<X:32/binary>> -> <<2:8, X/binary>>;
-            <<_:33/binary>> -> GroupPublicKey
-          end,
+  X = case GroupPublicKey of
+        <<_:8, X0:32/binary>> -> X0;
+        <<X0:32/binary>> -> X0
+      end,
+  PK_33 = <<2:8, X/binary>>,
   compute_binding_factors(secp256k1, PK_33, CommitmentList, Msg);
 compute_binding_factors(secp256k1, GroupPublicKey, CommitmentList, Msg) ->
   SortedList = sort_commitment_list(CommitmentList),
@@ -480,19 +567,37 @@ compute_group_commitment(ed25519, CommitmentList, BindingFactorList) ->
   Pts = [ begin
             PtHiding = ecu_ed25519:decompress(HidingComm),
             PtBinding = ecu_ed25519:decompress(BindingComm),
-            BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
-            ecu_ed25519:p_add(PtHiding, ecu_ed25519:scalar_mul_noclamp(BindingFactor, PtBinding))
+            case is_valid_point(ed25519, PtHiding) andalso is_valid_point(ed25519, PtBinding) of
+              true ->
+                BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
+                ecu_ed25519:p_add(PtHiding, ecu_ed25519:scalar_mul_noclamp(BindingFactor, PtBinding));
+              false ->
+                error(badarg)
+            end
           end || {Id, HidingComm, BindingComm} <- SortedList ],
-  ecu_ed25519:compress(fold_pts_ed25519(Pts));
+  Folded = fold_pts_ed25519(Pts),
+  case is_valid_point(ed25519, Folded) of
+    true  -> ecu_ed25519:compress(Folded);
+    false -> error(badarg)
+  end;
 compute_group_commitment(ed448, CommitmentList, BindingFactorList) ->
   SortedList = sort_commitment_list(CommitmentList),
   Pts = [ begin
             PtHiding = ecu_ed448:decompress(HidingComm),
             PtBinding = ecu_ed448:decompress(BindingComm),
-            BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
-            ecu_ed448:p_add(PtHiding, ecu_ed448:scalar_mul_noclamp(BindingFactor, PtBinding))
+            case is_valid_point(ed448, PtHiding) andalso is_valid_point(ed448, PtBinding) of
+              true ->
+                BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
+                ecu_ed448:p_add(PtHiding, ecu_ed448:scalar_mul_noclamp(BindingFactor, PtBinding));
+              false ->
+                error(badarg)
+            end
           end || {Id, HidingComm, BindingComm} <- SortedList ],
-  ecu_ed448:compress(fold_pts_ed448(Pts));
+  Folded = fold_pts_ed448(Pts),
+  case is_valid_point(ed448, Folded) of
+    true  -> ecu_ed448:compress(Folded);
+    false -> error(badarg)
+  end;
 compute_group_commitment(bip340, CommitmentList, BindingFactorList) ->
   compute_group_commitment(secp256k1, CommitmentList, BindingFactorList);
 compute_group_commitment(secp256k1, CommitmentList, BindingFactorList) ->
@@ -500,11 +605,20 @@ compute_group_commitment(secp256k1, CommitmentList, BindingFactorList) ->
   Pts = [ begin
             PtHiding = ecu_secp256k1:decompress(HidingComm),
             PtBinding = ecu_secp256k1:decompress(BindingComm),
-            BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
-            <<BF_int:256>> = BindingFactor,
-            ecu_secp256k1:p_add(PtHiding, ecu_secp256k1:scalar_mul(BF_int, PtBinding))
+            case is_valid_point(secp256k1, PtHiding) andalso is_valid_point(secp256k1, PtBinding) of
+              true ->
+                BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
+                <<BF_int:256>> = BindingFactor,
+                ecu_secp256k1:p_add(PtHiding, ecu_secp256k1:scalar_mul(BF_int, PtBinding));
+              false ->
+                error(badarg)
+            end
           end || {Id, HidingComm, BindingComm} <- SortedList ],
-  ecu_secp256k1:compress(fold_pts_secp256k1(Pts)).
+  Folded = fold_pts_secp256k1(Pts),
+  case is_valid_point(secp256k1, Folded) of
+    true  -> ecu_secp256k1:compress(Folded);
+    false -> error(badarg)
+  end.
 
 -spec compute_challenge(GroupCommitment :: compressed_pt(),
                         GroupPublicKey :: compressed_pt(),
@@ -565,13 +679,31 @@ derive_lagrange_coefficient(Id, ParticipantList) ->
 -spec derive_lagrange_coefficient(Suite :: ciphersuite(),
                                   Id :: participant_id(),
                                   ParticipantList :: [participant_id()]) -> scalar().
-derive_lagrange_coefficient(ed25519, Id, ParticipantList) ->
+derive_lagrange_coefficient(Suite, Id, ParticipantList) ->
+  case lists:member(Id, ParticipantList) of
+    false -> error({participant_not_in_list, Id});
+    true ->
+      case length(ParticipantList) =:= length(lists:usort(ParticipantList)) of
+        false -> error({duplicate_participant_ids, ParticipantList});
+        true ->
+          Order = suite_order(Suite),
+          case lists:all(fun(I) -> is_integer(I) andalso I > 0 andalso I < Order end, ParticipantList) of
+            false -> error({invalid_participant_ids, ParticipantList});
+            true -> derive_lagrange_coefficient_impl(Suite, Id, ParticipantList)
+          end
+      end
+  end.
+
+-spec derive_lagrange_coefficient_impl(Suite :: ciphersuite(),
+                                       Id :: participant_id(),
+                                       ParticipantList :: [participant_id()]) -> scalar().
+derive_lagrange_coefficient_impl(ed25519, Id, ParticipantList) ->
   derive_lagrange_ed25519(Id, ParticipantList, <<1:256/little>>, <<1:256/little>>);
-derive_lagrange_coefficient(ed448, Id, ParticipantList) ->
+derive_lagrange_coefficient_impl(ed448, Id, ParticipantList) ->
   derive_lagrange_ed448(Id, ParticipantList, <<1:456/little>>, <<1:456/little>>);
-derive_lagrange_coefficient(bip340, Id, ParticipantList) ->
-  derive_lagrange_coefficient(secp256k1, Id, ParticipantList);
-derive_lagrange_coefficient(secp256k1, Id, ParticipantList) ->
+derive_lagrange_coefficient_impl(bip340, Id, ParticipantList) ->
+  derive_lagrange_coefficient_impl(secp256k1, Id, ParticipantList);
+derive_lagrange_coefficient_impl(secp256k1, Id, ParticipantList) ->
   derive_lagrange_secp256k1(Id, ParticipantList, 1, 1).
 
 -spec derive_lagrange_ed25519(Id :: participant_id(),
@@ -656,48 +788,64 @@ trusted_dealer_keygen(SecretKey, MinParticipants, MaxParticipants)
   {[{participant_id(), scalar()}], compressed_pt(), [compressed_pt()]}.
 trusted_dealer_keygen(ed25519, SecretKey, MinParticipants, MaxParticipants)
     when MinParticipants >= 1, MaxParticipants >= MinParticipants ->
-  RandomCoeffs = [ rnd_scalar(ed25519) || _ <- lists:seq(1, MinParticipants - 1) ],
-  Coeffs = [SecretKey | RandomCoeffs],
-  Shares = [ {I, polynomial_evaluate(ed25519, I, Coeffs)} || I <- lists:seq(1, MaxParticipants) ],
-  VSSCommitment = [ ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(C)) || C <- Coeffs ],
-  GroupPublicKey = hd(VSSCommitment),
-  {Shares, GroupPublicKey, VSSCommitment};
+  case is_canonical_nonzero_scalar(ed25519, SecretKey) of
+    false -> error(badarg);
+    true ->
+      RandomCoeffs = [ rnd_scalar(ed25519) || _ <- lists:seq(1, MinParticipants - 1) ],
+      Coeffs = [SecretKey | RandomCoeffs],
+      Shares = [ {I, polynomial_evaluate(ed25519, I, Coeffs)} || I <- lists:seq(1, MaxParticipants) ],
+      VSSCommitment = [ ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(C)) || C <- Coeffs ],
+      GroupPublicKey = hd(VSSCommitment),
+      {Shares, GroupPublicKey, VSSCommitment}
+  end;
 trusted_dealer_keygen(ed448, SecretKey, MinParticipants, MaxParticipants)
     when MinParticipants >= 1, MaxParticipants >= MinParticipants ->
-  RandomCoeffs = [ rnd_scalar(ed448) || _ <- lists:seq(1, MinParticipants - 1) ],
-  Coeffs = [SecretKey | RandomCoeffs],
-  Shares = [ {I, polynomial_evaluate(ed448, I, Coeffs)} || I <- lists:seq(1, MaxParticipants) ],
-  VSSCommitment = [ ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(C)) || C <- Coeffs ],
-  GroupPublicKey = hd(VSSCommitment),
-  {Shares, GroupPublicKey, VSSCommitment};
+  case is_canonical_nonzero_scalar(ed448, SecretKey) of
+    false -> error(badarg);
+    true ->
+      RandomCoeffs = [ rnd_scalar(ed448) || _ <- lists:seq(1, MinParticipants - 1) ],
+      Coeffs = [SecretKey | RandomCoeffs],
+      Shares = [ {I, polynomial_evaluate(ed448, I, Coeffs)} || I <- lists:seq(1, MaxParticipants) ],
+      VSSCommitment = [ ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(C)) || C <- Coeffs ],
+      GroupPublicKey = hd(VSSCommitment),
+      {Shares, GroupPublicKey, VSSCommitment}
+  end;
 trusted_dealer_keygen(bip340, SecretKey, MinParticipants, MaxParticipants)
     when MinParticipants >= 1, MaxParticipants >= MinParticipants ->
-  <<S_int:256>> = SecretKey,
-  {X, Y} = ecu_secp256k1:scalar_mul_base(S_int),
-  EffSecret = case Y rem 2 of
-                0 -> S_int;
-                1 -> ?SECP256K1_N - S_int
-              end,
-  RandomCoeffs = [ rnd_scalar(secp256k1) || _ <- lists:seq(1, MinParticipants - 1) ],
-  Coeffs = [<<EffSecret:256/big>> | RandomCoeffs],
-  Shares = [ {I, polynomial_evaluate(secp256k1, I, Coeffs)} || I <- lists:seq(1, MaxParticipants) ],
-  VSSCommitment = [ begin
-                      <<C_int:256>> = C,
-                      ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(C_int))
-                    end || C <- Coeffs ],
-  GroupPublicKey = <<X:256/big>>,
-  {Shares, GroupPublicKey, VSSCommitment};
+  case is_canonical_nonzero_scalar(bip340, SecretKey) of
+    false -> error(badarg);
+    true ->
+      <<S_int:256>> = SecretKey,
+      {X, Y} = ecu_secp256k1:scalar_mul_base(S_int),
+      EffSecret = case Y rem 2 of
+                    0 -> S_int;
+                    1 -> ?SECP256K1_N - S_int
+                  end,
+      RandomCoeffs = [ rnd_scalar(secp256k1) || _ <- lists:seq(1, MinParticipants - 1) ],
+      Coeffs = [<<EffSecret:256/big>> | RandomCoeffs],
+      Shares = [ {I, polynomial_evaluate(secp256k1, I, Coeffs)} || I <- lists:seq(1, MaxParticipants) ],
+      VSSCommitment = [ begin
+                          <<C_int:256>> = C,
+                          ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(C_int))
+                        end || C <- Coeffs ],
+      GroupPublicKey = <<X:256/big>>,
+      {Shares, GroupPublicKey, VSSCommitment}
+  end;
 trusted_dealer_keygen(secp256k1, SecretKey, MinParticipants, MaxParticipants)
     when MinParticipants >= 1, MaxParticipants >= MinParticipants ->
-  RandomCoeffs = [ rnd_scalar(secp256k1) || _ <- lists:seq(1, MinParticipants - 1) ],
-  Coeffs = [SecretKey | RandomCoeffs],
-  Shares = [ {I, polynomial_evaluate(secp256k1, I, Coeffs)} || I <- lists:seq(1, MaxParticipants) ],
-  VSSCommitment = [ begin
-                      <<C_int:256>> = C,
-                      ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(C_int))
-                    end || C <- Coeffs ],
-  GroupPublicKey = hd(VSSCommitment),
-  {Shares, GroupPublicKey, VSSCommitment}.
+  case is_canonical_nonzero_scalar(secp256k1, SecretKey) of
+    false -> error(badarg);
+    true ->
+      RandomCoeffs = [ rnd_scalar(secp256k1) || _ <- lists:seq(1, MinParticipants - 1) ],
+      Coeffs = [SecretKey | RandomCoeffs],
+      Shares = [ {I, polynomial_evaluate(secp256k1, I, Coeffs)} || I <- lists:seq(1, MaxParticipants) ],
+      VSSCommitment = [ begin
+                          <<C_int:256>> = C,
+                          ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(C_int))
+                        end || C <- Coeffs ],
+      GroupPublicKey = hd(VSSCommitment),
+      {Shares, GroupPublicKey, VSSCommitment}
+  end.
 
 -spec vss_verify(Id :: participant_id(),
                  Share :: scalar(),
@@ -709,36 +857,73 @@ vss_verify(Id, Share, VSSCommitment) ->
                  Id :: participant_id(),
                  Share :: scalar(),
                  VSSCommitment :: [compressed_pt()]) -> boolean().
-vss_verify(ed25519, Id, Share, VSSCommitment) ->
-  LHS = ecu_ed25519:scalar_mul_base_noclamp(Share),
-  Terms = [ begin
-              Exp = pow_scalar_ed25519(<<Id:256/little>>, K),
-              Pt = ecu_ed25519:decompress(Comm),
-              ecu_ed25519:scalar_mul_noclamp(Exp, Pt)
-            end || {K, Comm} <- lists:zip(lists:seq(0, length(VSSCommitment) - 1), VSSCommitment) ],
-  RHS = fold_pts_ed25519(Terms),
-  ecu_ed25519:pt_eq(LHS, RHS);
-vss_verify(ed448, Id, Share, VSSCommitment) ->
-  LHS = ecu_ed448:scalar_mul_base_noclamp(Share),
-  Terms = [ begin
-              Exp = pow_scalar_ed448(<<Id:456/little>>, K),
-              Pt = ecu_ed448:decompress(Comm),
-              ecu_ed448:scalar_mul_noclamp(Exp, Pt)
-            end || {K, Comm} <- lists:zip(lists:seq(0, length(VSSCommitment) - 1), VSSCommitment) ],
-  RHS = fold_pts_ed448(Terms),
-  ecu_ed448:pt_eq(LHS, RHS);
-vss_verify(bip340, Id, Share, VSSCommitment) ->
-  vss_verify(secp256k1, Id, Share, VSSCommitment);
-vss_verify(secp256k1, Id, Share, VSSCommitment) ->
-  <<S_int:256>> = Share,
-  LHS = ecu_secp256k1:scalar_mul_base(S_int),
-  Terms = [ begin
-              Exp = pow_int(Id, K, ?SECP256K1_N),
-              Pt = ecu_secp256k1:decompress(Comm),
-              ecu_secp256k1:scalar_mul(Exp, Pt)
-            end || {K, Comm} <- lists:zip(lists:seq(0, length(VSSCommitment) - 1), VSSCommitment) ],
-  RHS = fold_pts_secp256k1(Terms),
-  LHS =:= RHS.
+vss_verify(Suite, Id, Share, VSSCommitment) ->
+  try
+    vss_verify_impl(Suite, Id, Share, VSSCommitment)
+  catch
+    _:_ -> false
+  end.
+
+-spec vss_verify_impl(Suite :: ciphersuite(),
+                      Id :: participant_id(),
+                      Share :: scalar(),
+                      VSSCommitment :: [compressed_pt()]) -> boolean().
+vss_verify_impl(ed25519, Id, Share, [_ | _] = VSSCommitment) ->
+  Order = suite_order(ed25519),
+  case Id > 0 andalso Id < Order andalso is_canonical_scalar(ed25519, Share) of
+    false -> false;
+    true ->
+      LHS = ecu_ed25519:scalar_mul_base_noclamp(Share),
+      Terms = [ begin
+                  Exp = pow_scalar_ed25519(<<Id:256/little>>, K),
+                  Pt = ecu_ed25519:decompress(Comm),
+                  case is_valid_point(ed25519, Pt) of
+                    true  -> ecu_ed25519:scalar_mul_noclamp(Exp, Pt);
+                    false -> error(badarg)
+                  end
+                end || {K, Comm} <- lists:zip(lists:seq(0, length(VSSCommitment) - 1), VSSCommitment) ],
+      RHS = fold_pts_ed25519(Terms),
+      ecu_ed25519:pt_eq(LHS, RHS)
+  end;
+vss_verify_impl(ed448, Id, Share, [_ | _] = VSSCommitment) ->
+  Order = suite_order(ed448),
+  case Id > 0 andalso Id < Order andalso is_canonical_scalar(ed448, Share) of
+    false -> false;
+    true ->
+      LHS = ecu_ed448:scalar_mul_base_noclamp(Share),
+      Terms = [ begin
+                  Exp = pow_scalar_ed448(<<Id:456/little>>, K),
+                  Pt = ecu_ed448:decompress(Comm),
+                  case is_valid_point(ed448, Pt) of
+                    true  -> ecu_ed448:scalar_mul_noclamp(Exp, Pt);
+                    false -> error(badarg)
+                  end
+                end || {K, Comm} <- lists:zip(lists:seq(0, length(VSSCommitment) - 1), VSSCommitment) ],
+      RHS = fold_pts_ed448(Terms),
+      ecu_ed448:pt_eq(LHS, RHS)
+  end;
+vss_verify_impl(bip340, Id, Share, VSSCommitment) ->
+  vss_verify_impl(secp256k1, Id, Share, VSSCommitment);
+vss_verify_impl(secp256k1, Id, Share, [_ | _] = VSSCommitment) ->
+  Order = suite_order(secp256k1),
+  case Id > 0 andalso Id < Order andalso is_canonical_scalar(secp256k1, Share) of
+    false -> false;
+    true ->
+      <<S_int:256>> = Share,
+      LHS = ecu_secp256k1:scalar_mul_base(S_int),
+      Terms = [ begin
+                  Exp = pow_int(Id, K, ?SECP256K1_N),
+                  Pt = ecu_secp256k1:decompress(Comm),
+                  case is_valid_point(secp256k1, Pt) of
+                    true  -> ecu_secp256k1:scalar_mul(Exp, Pt);
+                    false -> error(badarg)
+                  end
+                end || {K, Comm} <- lists:zip(lists:seq(0, length(VSSCommitment) - 1), VSSCommitment) ],
+      RHS = fold_pts_secp256k1(Terms),
+      LHS =:= RHS
+  end;
+vss_verify_impl(_, _, _, _) ->
+  false.
 
 -spec secret_share_combine(Shares :: [{participant_id(), scalar()}]) -> scalar().
 secret_share_combine(Shares) ->
@@ -836,9 +1021,15 @@ expand_message_xmd(Msg, DST, LenInBytes) ->
 
 -spec rnd_scalar(ciphersuite()) -> scalar().
 rnd_scalar(ed25519) ->
-  ecu_ed25519:scalar_reduce(crypto:strong_rand_bytes(64));
+  case ecu_ed25519:scalar_reduce(crypto:strong_rand_bytes(64)) of
+    <<0:256>> -> rnd_scalar(ed25519);
+    S -> S
+  end;
 rnd_scalar(ed448) ->
-  ecu_ed448:scalar_reduce(crypto:strong_rand_bytes(114));
+  case ecu_ed448:scalar_reduce(crypto:strong_rand_bytes(114)) of
+    <<0:456>> -> rnd_scalar(ed448);
+    S -> S
+  end;
 rnd_scalar(bip340) ->
   rnd_scalar(secp256k1);
 rnd_scalar(secp256k1) ->
@@ -925,4 +1116,59 @@ participants_from_commitment_list(CommitmentList) ->
 
 -spec sort_commitment_list(commitment_list()) -> commitment_list().
 sort_commitment_list(CommitmentList) ->
-  lists:sort(fun({IdA, _, _}, {IdB, _, _}) -> IdA =< IdB end, CommitmentList).
+  Sorted = lists:sort(fun({IdA, _, _}, {IdB, _, _}) -> IdA =< IdB end, CommitmentList),
+  Ids = [Id || {Id, _, _} <- Sorted],
+  case lists:all(fun(Id) -> is_integer(Id) andalso Id > 0 andalso Id < ?ED25519_N end, Ids) of
+    false -> error({invalid_participant_ids, Ids});
+    true ->
+      case length(Ids) =:= length(lists:usort(Ids)) of
+        false -> error({duplicate_participant_ids, Ids});
+        true -> Sorted
+      end
+  end.
+
+-spec suite_order(ciphersuite()) -> pos_integer().
+suite_order(ed25519)   -> ?ED25519_N;
+suite_order(ed448)     -> ?ED448_N;
+suite_order(bip340)    -> ?SECP256K1_N;
+suite_order(secp256k1) -> ?SECP256K1_N.
+
+-spec is_canonical_scalar(ciphersuite(), dynamic()) -> boolean().
+is_canonical_scalar(ed25519, S) when is_binary(S), byte_size(S) =:= 32 ->
+  binary:decode_unsigned(S, little) < ?ED25519_N;
+is_canonical_scalar(ed448, S) when is_binary(S), byte_size(S) =:= 57 ->
+  binary:decode_unsigned(S, little) < ?ED448_N;
+is_canonical_scalar(bip340, S) when is_binary(S), byte_size(S) =:= 32 ->
+  binary:decode_unsigned(S, big) < ?SECP256K1_N;
+is_canonical_scalar(secp256k1, S) when is_binary(S), byte_size(S) =:= 32 ->
+  binary:decode_unsigned(S, big) < ?SECP256K1_N;
+is_canonical_scalar(_, _) ->
+  false.
+
+-spec is_canonical_nonzero_scalar(ciphersuite(), dynamic()) -> boolean().
+is_canonical_nonzero_scalar(ed25519, S) when is_binary(S), byte_size(S) =:= 32 ->
+  Val = binary:decode_unsigned(S, little),
+  Val > 0 andalso Val < ?ED25519_N;
+is_canonical_nonzero_scalar(ed448, S) when is_binary(S), byte_size(S) =:= 57 ->
+  Val = binary:decode_unsigned(S, little),
+  Val > 0 andalso Val < ?ED448_N;
+is_canonical_nonzero_scalar(bip340, S) when is_binary(S), byte_size(S) =:= 32 ->
+  Val = binary:decode_unsigned(S, big),
+  Val > 0 andalso Val < ?SECP256K1_N;
+is_canonical_nonzero_scalar(secp256k1, S) when is_binary(S), byte_size(S) =:= 32 ->
+  Val = binary:decode_unsigned(S, big),
+  Val > 0 andalso Val < ?SECP256K1_N;
+is_canonical_nonzero_scalar(_, _) ->
+  false.
+
+-spec is_valid_point(ciphersuite(), dynamic()) -> boolean().
+is_valid_point(ed25519, Pt) ->
+  not ecu_ed25519:is_small_order(Pt);
+is_valid_point(ed448, Pt) ->
+  not ecu_ed448:is_small_order(Pt);
+is_valid_point(bip340, Pt) ->
+  Pt =/= {0, 0};
+is_valid_point(secp256k1, Pt) ->
+  Pt =/= {0, 0};
+is_valid_point(_, _) ->
+  false.

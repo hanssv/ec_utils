@@ -149,8 +149,7 @@ sign_verify_detached(<<Sig:114/bytes>>, Msg, <<PK:57/bytes>>, Context) when byte
             Dom = dom4(0, Context),
             Ks0 = crypto:hash_xof(shake256, <<Dom/binary, R/binary, PK/binary, BinMsg/binary>>, 114 * 8),
             <<K:456/little-unsigned-integer>> = ecu_ed448:scalar_reduce(Ks0),
-            NegK = (?N - K) rem ?N,
-            R_prime = ecu_ed448:scalar_mul_dual_base(S, NegK, A),
+            R_prime = ecu_ed448:scalar_mul_dual_base(S, K, ecu_ed448:p_neg(A)),
             case ecu_ed448:is_small_order(R_prime) of
               true  -> false;
               false -> ecu_ed448:compress(R_prime) == R
@@ -193,6 +192,10 @@ sign_verify_batch(_) ->
 ) -> boolean().
 sign_verify_batch([], _DefaultCtx) ->
   true;
+sign_verify_batch([{Sig, Msg, PK}], DefaultCtx) ->
+  sign_verify_detached(Sig, Msg, PK, DefaultCtx);
+sign_verify_batch([{Sig, Msg, PK, Context}], _DefaultCtx) ->
+  sign_verify_detached(Sig, Msg, PK, Context);
 sign_verify_batch(Items, DefaultCtx) when is_list(Items), byte_size(DefaultCtx) =< 255 ->
   try
     verify_batch_impl(Items, DefaultCtx)
@@ -212,7 +215,7 @@ verify_batch_impl(Items, DefaultCtx) ->
   P_others = ecu_ed448:multi_scalar_mul(Points),
   P_base = ecu_ed448:scalar_mul_base_noclamp(S_Batch),
   P_total = ecu_ed448:p_sub(P_others, P_base),
-  ecu_ed448:is_small_order(P_total).
+  ecu_ed448:pt_eq(P_total, {0, 1, 1}).
 
 -spec parse_batch([{signature() | binary(), iodata(), public_key() | binary()} |
                    {signature() | binary(), iodata(), public_key() | binary(), binary()}],

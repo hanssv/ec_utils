@@ -113,3 +113,15 @@ scalar_mul_benchmark_test() ->
   end),
   ?debugFmt("Average time for secp256k1 scalar_mul_base: ~.3f ms", [(T / 1000) / length(Scalars)]),
   [ ?assert(ecu_secp256k1:on_curve(Pt)) || Pt <- Results ].
+
+argon02_compress_zero_test() ->
+  ?assertError(badarg, ecu_secp256k1:compress({0, 0})).
+
+argon04_scalar_mul_dual_large_scalar_test() ->
+  LargeK1 = (1 bsl 256) + 12345,
+  LargeK2 = (1 bsl 256) + 67890,
+  P1 = ecu_secp256k1:scalar_mul_base(1),
+  P2 = ecu_secp256k1:scalar_mul_base(2),
+  ResLarge = ecu_secp256k1:scalar_mul_dual(LargeK1, P1, LargeK2, P2),
+  ResExpected = ecu_secp256k1:scalar_mul_dual(LargeK1 rem ?N, P1, LargeK2 rem ?N, P2),
+  ?assertEqual(ResExpected, ResLarge).

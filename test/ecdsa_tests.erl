@@ -82,3 +82,45 @@ sign_secp256k1_return_type_test() ->
   Res = ecu_ecdsa:sign_secp256k1(MsgHash, Priv),
   ?assertMatch({<<_:64/binary>>, Y} when is_integer(Y), Res).
 
+ecdsa_low_s_test() ->
+  MsgHash = crypto:hash(sha256, <<"test_low_s">>),
+  HalfN = ?N div 2,
+  [ begin
+      Priv = <<(I + 100):256>>,
+      {<<_R:256, S:256>>, _Y} = ecu_ecdsa:sign_secp256k1(MsgHash, Priv),
+      ?assert(S =< HalfN)
+    end || I <- lists:seq(1, 30) ].
+
+rfc6979_test_vectors_test() ->
+  %% Vector 1 from noble-secp256k1 / RFC 6979 secp256k1 test suite
+  Priv1 = <<1:256>>,
+  Msg1 = ecu_misc:hex_to_bin("06ef2b193b83b3d701f765f1db34672ab84897e1252343cc2197829af3a30456"),
+  ExpectedSig1 = ecu_misc:hex_to_bin("33a69cd2065432a30f3d1ce4eb0d59b8ab58c74f27c41a7fdb5696ad4e6108c9"
+                                     "6f807982866f785d3f6418d24163ddae117b7db4d5fdf0071de069fa54342262"),
+  Sig1 = ecu_ecdsa:sign(secp256k1, Msg1, Priv1),
+  ?assertEqual(ExpectedSig1, Sig1),
+  Pub1 = ecu_ecdsa:private_to_public(secp256k1, Priv1),
+  ?assert(ecu_ecdsa:verify(secp256k1, Msg1, Pub1, Sig1)),
+
+  %% Vector 2: High scalar boundary key (N - 1)
+  Priv2 = <<(?N - 1):256>>,
+  Msg2 = ecu_misc:hex_to_bin("5e9f0a0d593efdcf78ac923bc3313e4e7d408d574354ee2b3288c0da9fbba6ed"),
+  ExpectedSig2 = ecu_misc:hex_to_bin("54c4a33c6423d689378f160a7ff8b61330444abb58fb470f96ea16d99d4a2fed"
+                                     "07082304410efa6b2943111b6a4e0aaa7b7db55a07e9861d1fb3cb1f421044a5"),
+  Sig2 = ecu_ecdsa:sign(secp256k1, Msg2, Priv2),
+  ?assertEqual(ExpectedSig2, Sig2),
+  Pub2 = ecu_ecdsa:private_to_public(secp256k1, Priv2),
+  ?assert(ecu_ecdsa:verify(secp256k1, Msg2, Pub2, Sig2)).
+
+rfc6979_deterministic_signing_test() ->
+  Priv = gen_ecdsa_secp256k1_privkey(),
+  Msg = crypto:hash(sha256, <<"Deterministic signing test">>),
+  Sig1 = ecu_ecdsa:sign(secp256k1, Msg, Priv),
+  Sig2 = ecu_ecdsa:sign(secp256k1, Msg, Priv),
+  ?assertEqual(Sig1, Sig2),
+  K1 = ecu_ecdsa:rfc6979_k(secp256k1, Msg, Priv),
+  K2 = ecu_ecdsa:rfc6979_k(secp256k1, Msg, Priv),
+  ?assertEqual(K1, K2),
+  ?assert(K1 >= 1 andalso K1 < ?N),
+  ?assertError(badarg, ecu_ecdsa:rfc6979_k(secp256k1, Msg, <<0:256>>)),
+  ?assertError(badarg, ecu_ecdsa:rfc6979_k(secp256k1, Msg, <<?N:256>>)).

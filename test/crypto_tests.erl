@@ -61,3 +61,16 @@ private_to_short_ethereum_test() ->
 
 hex_to_bin_odd_length_test() ->
   ?assertError(badarg, ecu_misc:hex_to_bin("abc")).
+
+eth_sig_rsv_conversion_test() ->
+  Priv = gen_ecdsa_secp256k1_privkey(),
+  Msg = <<"Hello Ethereum">>,
+  SigVRS = ecu_crypto:eth_msg_sign(Msg, Priv),
+  <<V:8, R:256, S:256>> = SigVRS,
+  SigRSV = ecu_crypto:eth_sig_to_rsv(SigVRS),
+  ?assertEqual(<<R:256, S:256, V:8>>, SigRSV),
+  ?assertEqual(SigVRS, ecu_crypto:eth_sig_from_rsv(SigRSV)),
+  Addr = ecu_crypto:private_to_short(ethereum, Priv),
+  ?assertEqual(Addr, ecu_crypto:eth_msg_recover(Msg, ecu_crypto:eth_sig_from_rsv(SigRSV))),
+  ?assertError(badarg, ecu_crypto:eth_sig_to_rsv(<<1, 2, 3>>)),
+  ?assertError(badarg, ecu_crypto:eth_sig_from_rsv(<<1, 2, 3>>)).

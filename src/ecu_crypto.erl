@@ -10,6 +10,7 @@
          ec_recover/2,
          eth_sign/2, eth_recover/2, eth_verify/3,
          eth_msg_sign/2, eth_msg_recover/2, eth_msg_verify/3, eth_msg_hash/1,
+         eth_sig_to_rsv/1, eth_sig_from_rsv/1,
          keccak256/1]).
 
 -include("ecu_secp256k1.hrl").
@@ -48,6 +49,13 @@ eth_msg_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
 
 %% Recovery id V: Ethereum standard uses 27 + (Y rem 2). The case where
 %% X >= N (recovery id 2 or 3) occurs with probability ~ 2^-128 and is omitted.
+%%
+%% Signature Layout:
+%% Note that `ec_utils' serializes Ethereum signatures as `<<V:8, R:256, S:256>>'
+%% (VRS), adhering to Bitcoin compact signature layout and Aeternity conventions.
+%% Standard Ethereum web3/RPC tooling and Solidity ecrecover typically expect
+%% `<<R:256, S:256, V:8>>' (RSV). Callers interfacing with external Ethereum tools
+%% can use `eth_sig_to_rsv/1' and `eth_sig_from_rsv/1' to convert between layouts.
 -spec eth_sign(ecu_ecdsa:msg_hash(), ecu_ecdsa:privkey()) -> eth_signature().
 eth_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
   {BaseSig, YVal} = ecu_ecdsa:sign_secp256k1(Msg, PrivateKey),
@@ -100,6 +108,20 @@ eth_msg_verify(Msg, PublicKey, Sig) ->
 -spec eth_verify(ecu_ecdsa:msg_hash(), short_address(), eth_signature()) -> boolean().
 eth_verify(Msg, PublickKey, Sig) ->
   PublickKey == eth_recover(Msg, Sig).
+
+%% Conversion between internal VRS layout (<<V:8, R:256, S:256>>) and
+%% external Ethereum web3/Solidity RSV layout (<<R:256, S:256, V:8>>).
+-spec eth_sig_to_rsv(eth_signature()) -> <<_:520>>.
+eth_sig_to_rsv(<<V:8, R:256, S:256>>) ->
+  <<R:256, S:256, V:8>>;
+eth_sig_to_rsv(_) ->
+  error(badarg).
+
+-spec eth_sig_from_rsv(<<_:520>>) -> eth_signature().
+eth_sig_from_rsv(<<R:256, S:256, V:8>>) ->
+  <<V:8, R:256, S:256>>;
+eth_sig_from_rsv(_) ->
+  error(badarg).
 
 -spec eth_msg_hash(iodata()) -> ecu_ecdsa:msg_hash().
 eth_msg_hash(Msg0) ->

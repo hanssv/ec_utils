@@ -194,4 +194,11 @@ batch_verify_malformed_test() ->
   ?assertEqual(false, ecu_eddsa:sign_verify_batch([{<<0:256>>, <<"msg">>, <<0:256>>}])),
   ?assertEqual(false, ecu_eddsa:sign_verify_batch(Bad2)).
 
+argon04_scalar_window_truncation_test() ->
+  LargeK = (1 bsl 256) + 12345,
+  Pt = ecu_ed25519:scalar_mul_base(1),
+  ResLarge = ecu_ed25519:scalar_mul_noclamp(LargeK, Pt),
+  ResExpected = ecu_ed25519:scalar_mul_noclamp(LargeK rem ?N, Pt),
+  ?assert(ecu_ed25519:pt_eq(ResLarge, ResExpected)).
+
 id(X) -> X.

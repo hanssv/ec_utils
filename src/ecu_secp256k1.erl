@@ -112,9 +112,10 @@ to_affine({X, Y}) when is_integer(X), is_integer(Y) ->
 
 -spec integer_to_bitstring(scalar()) -> <<_:256>>.
 integer_to_bitstring(<<K:256>>) ->
-  <<K:256>>;
+  integer_to_bitstring(K);
 integer_to_bitstring(K) when is_integer(K) ->
-  <<K:256>>.
+  K_norm = ((K rem ?N) + ?N) rem ?N,
+  <<K_norm:256>>.
 
 -spec dual_loop(bitstring(), bitstring(), pt_affine(), pt_affine(), pt_affine(), pt_jacobian()) ->
     pt_jacobian().
@@ -189,6 +190,8 @@ j_add_affine({X1, Y1, Z1}, {X2, Y2}) ->
   end.
 
 -spec compress(pt_affine() | pt_uncompressed()) -> pt_compressed().
+compress({0, 0}) ->
+  error(badarg);
 compress({X, Y}) when is_integer(X), is_integer(Y), Y rem 2 == 0 ->
   <<2:8, (X rem ?P):256>>;
 compress({X, Y}) when is_integer(X), is_integer(Y) ->

@@ -8,7 +8,8 @@
 
 -export([sign/3, verify/4,
          sign_secp256k1/2,
-         private_to_public/2]).
+         private_to_public/2,
+         rfc6979_k/3]).
 
 -include("ecu_secp256k1.hrl").
 
@@ -63,21 +64,72 @@ verify_(<<E:256>>, PubKey, R, S) ->
     {X, _Y} -> R == (X rem ?N)
   end.
 
+-spec rfc6979_k(curve(), msg_hash(), privkey()) -> pos_integer().
+rfc6979_k(secp256k1, MsgHash = <<_:32/bytes>>, PrivKey = <<PrivateKey:256>>)
+    when PrivateKey >= 1, PrivateKey < ?N ->
+  {K, _V, _HMAC_K} = rfc6979_init(MsgHash, PrivKey),
+  K;
+rfc6979_k(_, _, _) ->
+  error(badarg).
+
 -spec sign_secp256k1(msg_hash(), privkey()) -> {signature(), non_neg_integer()}.
-sign_secp256k1(MsgHash = <<_:32/bytes>>, <<PrivateKey:256>>) when PrivateKey >= 1,
-                                                                 PrivateKey < ?N ->
+sign_secp256k1(MsgHash = <<_:32/bytes>>, PrivKey = <<PrivateKey:256>>)
+    when PrivateKey >= 1, PrivateKey < ?N ->
   <<E:256>> = MsgHash,
   Z = E rem ?N,
-  K = pick_k(secp256k1),
+  sign_secp256k1_loop(Z, PrivateKey, rfc6979_init(MsgHash, PrivKey));
+sign_secp256k1(_, _) ->
+  error(badarg).
+
+-spec sign_secp256k1_loop(non_neg_integer(), pos_integer(), {pos_integer(), binary(), binary()}) ->
+    {signature(), non_neg_integer()}.
+sign_secp256k1_loop(Z, PrivateKey, {K, V, HMAC_K}) ->
   {X, Y} = ecu_secp256k1:scalar_mul_base(K),
   R = X rem ?N,
   S = ecu_secp256k1:s_mul(ecu_secp256k1:s_inv(K),
                           ecu_secp256k1:s_add(Z, ecu_secp256k1:s_mul(R, PrivateKey))),
   if R == 0 orelse S == 0 ->
-       sign_secp256k1(MsgHash, <<PrivateKey:256>>);
+       sign_secp256k1_loop(Z, PrivateKey, rfc6979_step(V, HMAC_K));
      true ->
-       {<<R:256, S:256>>, Y}
+       {CanonicalS, FinalY} =
+         if S > (?N div 2) ->
+              {?N - S, ?P - Y};
+            true ->
+              {S, Y}
+         end,
+       {<<R:256, CanonicalS:256>>, FinalY}
   end.
+
+%% RFC 6979 Section 3.2 Deterministic Nonce Generation for secp256k1 (SHA-256)
+-spec rfc6979_init(msg_hash(), privkey()) -> {pos_integer(), binary(), binary()}.
+rfc6979_init(MsgHash, <<PrivateKey:256>>) ->
+  <<E:256>> = MsgHash,
+  Z = E rem ?N,
+  Bits2Octets = <<Z:256>>,
+  Int2Octets = <<PrivateKey:256>>,
+  V0 = binary:copy(<<1>>, 32),
+  K0 = binary:copy(<<0>>, 32),
+  K1 = crypto:mac(hmac, sha256, K0, <<V0/binary, 0:8, Int2Octets/binary, Bits2Octets/binary>>),
+  V1 = crypto:mac(hmac, sha256, K1, V0),
+  K2 = crypto:mac(hmac, sha256, K1, <<V1/binary, 1:8, Int2Octets/binary, Bits2Octets/binary>>),
+  V2 = crypto:mac(hmac, sha256, K2, V1),
+  rfc6979_loop(V2, K2).
+
+-spec rfc6979_loop(binary(), binary()) -> {pos_integer(), binary(), binary()}.
+rfc6979_loop(V, K) ->
+  V1 = crypto:mac(hmac, sha256, K, V),
+  <<KInt:256>> = V1,
+  if KInt >= 1 andalso KInt < ?N ->
+       {KInt, V1, K};
+     true ->
+       rfc6979_step(V1, K)
+  end.
+
+-spec rfc6979_step(binary(), binary()) -> {pos_integer(), binary(), binary()}.
+rfc6979_step(V, K) ->
+  KNext = crypto:mac(hmac, sha256, K, <<V/binary, 0:8>>),
+  VNext = crypto:mac(hmac, sha256, KNext, V),
+  rfc6979_loop(VNext, KNext).
 
 %% --- internal functions
 
@@ -90,11 +142,3 @@ valid_pubkey({X, Y}) when is_integer(X), is_integer(Y) ->
   andalso ecu_secp256k1:on_curve({X, Y});
 valid_pubkey(_) ->
   false.
-
--spec pick_k(curve()) -> pos_integer().
-pick_k(secp256k1) ->
-  <<K:256>> = crypto:strong_rand_bytes(32),
-  case K == 0 orelse K >= ?N of
-    true  -> pick_k(secp256k1);
-    false -> K
-  end.

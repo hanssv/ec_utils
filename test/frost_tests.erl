@@ -715,6 +715,138 @@ benchmark_frost_ed448_test() ->
   ?debugFmt("Final Verify:     ~.2f us/op", [VerifyTime / 1]).
 
 %% ===================================================================
+%% Security Regression Tests (Audit Findings)
+%% ===================================================================
+
+sec01_bip340_odd_y_signing_test() ->
+  FindOddY =
+    fun Loop() ->
+      Cs = [ ecu_frost_dkg:round1(bip340, I, 2, <<"ctx">>) || I <- [1, 2, 3] ],
+      PubCs = [ element(3, C) || C <- Cs ],
+      FullPub = ecu_frost_dkg:compute_public_key(secp256k1, PubCs),
+      case FullPub of
+        <<3:8, _:32/binary>> -> {Cs, PubCs, FullPub};
+        _ -> Loop()
+      end
+    end,
+  {Cs, PubCs, GroupPub33} = FindOddY(),
+  GroupPub32 = ecu_frost_dkg:compute_public_key(bip340, PubCs),
+
+  R2 = [ ecu_frost_dkg:round2(bip340, 3, element(1, C)) || C <- Cs ],
+  Shares = [ [ lists:nth(I, R2_i) || R2_i <- R2 ] || I <- [1, 2, 3] ],
+  PrivShares = [ ecu_frost_dkg:compute_private_sign_share(bip340, S, PubCs) || S <- Shares ],
+
+  Msg = <<"Test odd-Y BIP-340 signing">>,
+  Signers = [1, 2],
+  Noncess = [ ecu_frost:commit(bip340, lists:nth(I, PrivShares)) || I <- Signers ],
+  CommitList = [ {I, element(1, element(2, lists:nth(Idx, Noncess))), element(2, element(2, lists:nth(Idx, Noncess)))}
+                 || {Idx, I} <- lists:zip([1, 2], Signers) ],
+
+  SigShares33 = [ ecu_frost:sign(bip340, I, lists:nth(I, PrivShares), GroupPub33,
+                                 element(1, lists:nth(Idx, Noncess)), Msg, CommitList)
+                  || {Idx, I} <- lists:zip([1, 2], Signers) ],
+  AggSig33 = ecu_frost:aggregate(bip340, CommitList, Msg, GroupPub33, SigShares33),
+  ?assert(ecu_frost:verify(bip340, AggSig33, Msg, GroupPub33)),
+
+  SigShares32 = [ ecu_frost:sign(bip340, I, lists:nth(I, PrivShares), GroupPub32,
+                                 element(1, lists:nth(Idx, Noncess)), Msg, CommitList)
+                  || {Idx, I} <- lists:zip([1, 2], Signers) ],
+  AggSig32 = ecu_frost:aggregate(bip340, CommitList, Msg, GroupPub32, SigShares32),
+  ?assert(ecu_frost:verify(bip340, AggSig32, Msg, GroupPub32)).
+
+sec02_defensive_decompression_test() ->
+  BogusPt = <<255:8, 0:248>>,
+  ?assertEqual(false, ecu_frost_dkg:round1_check(ed25519, 1, <<"ctx">>, <<0:512>>, [BogusPt])),
+  ?assertEqual(false, ecu_frost_dkg:round2_check(ed25519, 1, <<1:256>>, [BogusPt])),
+  ?assertEqual(false, ecu_frost:verify_signature_share(ed25519, 1, BogusPt, {BogusPt, BogusPt},
+                                                       <<1:256>>, [{1, BogusPt, BogusPt}], BogusPt, <<"msg">>)),
+  ?assertEqual(false, ecu_frost:vss_verify(ed25519, 1, <<1:256>>, [BogusPt])).
+
+sec03_participant_validation_test() ->
+  ?assertError({participant_not_in_list, 999},
+               ecu_frost:derive_lagrange_coefficient(ed25519, 999, [1, 2, 3])),
+  ?assertError({duplicate_participant_ids, _},
+               ecu_frost:derive_lagrange_coefficient(ed25519, 1, [2, 1, 2])),
+  ?assertError({invalid_participant_ids, _},
+               ecu_frost:derive_lagrange_coefficient(ed25519, 0, [0, 1, 2])),
+  ValidComm = {1, <<0:256>>, <<0:256>>},
+  ?assertError({duplicate_participant_ids, _},
+               ecu_frost:aggregate(ed25519, [ValidComm, ValidComm], <<"msg">>, <<0:256>>, [<<0:256>>, <<0:256>>])),
+  InvalidComm = {0, <<0:256>>, <<0:256>>},
+  ?assertError({invalid_participant_ids, _},
+               ecu_frost:aggregate(ed25519, [InvalidComm], <<"msg">>, <<0:256>>, [<<0:256>>])).
+
+sec04_comb_bounds_test() ->
+  Large256 = 1 bsl 256,
+  Large456 = 1 bsl 456,
+  ?assertMatch({_, _, _, _}, ecu_ed25519:scalar_mul_base(Large256)),
+  ?assertMatch({_, _, _, _}, ecu_ed25519:scalar_mul_base_noclamp(Large256)),
+  ?assertMatch({_, _, _}, ecu_ed448:scalar_mul_base(Large456)),
+  ?assertMatch({_, _, _}, ecu_ed448:scalar_mul_base_noclamp(Large456)).
+
+sec06_aggregate_share_count_test() ->
+  CommitList = [{1, <<0:256>>, <<0:256>>}, {2, <<0:256>>, <<0:256>>}],
+  ?assertError({mismatched_shares_and_commitments, 1, 2},
+               ecu_frost:aggregate(ed25519, CommitList, <<"msg">>, <<0:256>>, [<<0:256>>])).
+
+argon01_secp256k1_signature_malleability_test() ->
+  T = 2,
+  N = 3,
+  {Shares, GroupPubKey, _} = ecu_frost:trusted_dealer_keygen(secp256k1, T, N),
+  Selected = lists:sublist(Shares, T),
+  Msg = <<"Test malleability">>,
+  Nonces = [ {Id, S, ecu_frost:commit(secp256k1, S)} || {Id, S} <- Selected ],
+  CommitList = [ {Id, HC, BC} || {Id, _, {_, {HC, BC}}} <- Nonces ],
+  SigShares = [ ecu_frost:sign(secp256k1, Id, S, GroupPubKey, NoncePair, Msg, CommitList)
+                || {Id, S, {NoncePair, _}} <- Nonces ],
+  <<R_enc:33/binary, Z_bin:32/binary>> = ecu_frost:aggregate(secp256k1, CommitList, Msg, GroupPubKey, SigShares),
+  <<Z_int:256>> = Z_bin,
+  Secp256k1N = 16#fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141,
+  ?assert(Z_int < Secp256k1N),
+  ?assert(ecu_frost:verify(secp256k1, <<R_enc:33/binary, Z_bin:32/binary>>, Msg, GroupPubKey)),
+  case Z_int + Secp256k1N < (1 bsl 256) of
+    true ->
+      MalleatedZ = Z_int + Secp256k1N,
+      MalleatedSig = <<R_enc:33/binary, MalleatedZ:256/big>>,
+      ?assertEqual(false, ecu_frost:verify(secp256k1, MalleatedSig, Msg, GroupPubKey));
+    false ->
+      ok
+  end,
+  NonCanonicalShare = <<(Secp256k1N + 1):256/big>>,
+  {Id1, S1, {_NoncePair1, _}} = hd(Nonces),
+  {HC1, BC1} = hd([ {HC, BC} || {Id, HC, BC} <- CommitList, Id =:= Id1 ]),
+  PubShare1 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(binary:decode_unsigned(S1, big))),
+  ?assertEqual(false, ecu_frost:verify_signature_share(secp256k1, Id1, PubShare1, {HC1, BC1},
+                                                       NonCanonicalShare, CommitList, GroupPubKey, Msg)).
+
+argon02_identity_and_small_order_rejection_test() ->
+  ?assertError(badarg, ecu_secp256k1:compress({0, 0})),
+  IdentityEd25519 = <<1:8, 0:248>>,
+  ZeroPoK = <<IdentityEd25519/binary, 0:256>>,
+  ?assertEqual(false, ecu_frost_dkg:round1_check(ed25519, 1, <<"ctx">>, ZeroPoK, [IdentityEd25519])),
+  IdentityEd448 = <<1:8, 0:448>>,
+  ZeroPoK448 = <<IdentityEd448/binary, 0:456>>,
+  ?assertEqual(false, ecu_frost_dkg:round1_check(ed448, 1, <<"ctx">>, ZeroPoK448, [IdentityEd448])).
+
+argon05_participant_id_bounds_test() ->
+  Ed25519N = 16#1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed,
+  ?assertError({invalid_participant_ids, _},
+               ecu_frost:derive_lagrange_coefficient(ed25519, 1, [1, Ed25519N + 1])),
+  ?assertError({invalid_participant_id, _},
+               ecu_frost_dkg:round1(ed25519, Ed25519N + 1, 2, <<"ctx">>)),
+  ?assertError(badarg, ecu_ed25519:s_inv(<<0:256>>)),
+  ?assertError(badarg, ecu_ed448:s_inv(<<0:456>>)),
+  ?assertError(badarg, ecu_frost:trusted_dealer_keygen(ed25519, <<0:256>>, 2, 3)).
+
+argon06_empty_pubc_rejection_test() ->
+  ?assertEqual(false, ecu_frost_dkg:round2_check(ed25519, 1, <<0:256>>, [])),
+  ?assertEqual(false, ecu_frost:vss_verify(ed25519, 1, <<0:256>>, [])),
+  PubC1 = [<<1:8, 0:248>>],
+  PubC2 = [<<1:8, 0:248>>, <<1:8, 0:248>>],
+  ?assertError({mismatched_pubc_lengths, _},
+               ecu_frost_dkg:compute_public_verification_share(ed25519, 1, [PubC1, PubC2])).
+
+%% ===================================================================
 %% Helpers
 %% ===================================================================
 

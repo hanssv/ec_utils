@@ -137,8 +137,7 @@ sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
             BinMsg = iolist_to_binary(Msg),
             Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
             <<K:256/little-unsigned-integer>> = ecu_ed25519:scalar_reduce(Ks0),
-            NegK = (?N - K) rem ?N,
-            R_prime = ecu_ed25519:scalar_mul_dual_base(S, NegK, A),
+            R_prime = ecu_ed25519:scalar_mul_dual_base(S, K, ecu_ed25519:p_neg(A)),
             case ecu_ed25519:is_small_order(R_prime) of
               true  -> false;
               false -> ecu_ed25519:compress(R_prime) == R
@@ -179,7 +178,7 @@ verify_batch_impl(Items) ->
   P_others = ecu_ed25519:multi_scalar_mul(Points),
   P_base = ecu_ed25519:scalar_mul_base_noclamp(S_Batch),
   P_total = ecu_ed25519:p_sub(P_others, P_base),
-  ecu_ed25519:is_small_order(P_total).
+  ecu_ed25519:pt_eq(P_total, {0, 1, 1, 0}).
 
 -spec parse_batch([{signature() | binary(), iodata(), public_key() | binary()}],
                   [{non_neg_integer(), ecu_ed25519:pt_hom_ext()}],

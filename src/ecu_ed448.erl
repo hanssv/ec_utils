@@ -296,8 +296,14 @@ s_div(A, B) when is_binary(A), is_binary(B) -> s_mul(A, s_inv(B)).
 
 -spec s_inv(<<_:456>>) -> <<_:456>>.
 s_inv(<<A:456/little>>) ->
-  {1, S, _T} = ecu_misc:eea(A, ?N),
-  <<((S + ?N) rem ?N):456/little>>.
+  case A rem ?N of
+    0 -> error(badarg);
+    A_red ->
+      case ecu_misc:eea(A_red, ?N) of
+        {1, S, _T} -> <<((S + ?N) rem ?N):456/little>>;
+        _ -> error(badarg)
+      end
+  end.
 
 -spec scalar_reduce(<<_:912>> | binary() | non_neg_integer()) -> <<_:456>>.
 scalar_reduce(<<S:912/little>>) ->
@@ -323,10 +329,15 @@ scalar_mul_(K, P) ->
 scalar_mul_window(0, _P) ->
   {0, 1, 1};
 scalar_mul_window(K, P) ->
-  Table = precompute_window_table(P),
-  <<W0:4, Rest/bitstring>> = <<K:456>>,
-  InitialAcc = element(W0 + 1, Table),
-  window_loop(Rest, Table, InitialAcc).
+  case K rem ?N of
+    0 ->
+      {0, 1, 1};
+    RedK ->
+      Table = precompute_window_table(P),
+      <<W0:4, Rest/bitstring>> = <<RedK:456>>,
+      InitialAcc = element(W0 + 1, Table),
+      window_loop(Rest, Table, InitialAcc)
+  end.
 
 -spec window_loop(bitstring(), dynamic(), dynamic()) -> pt_projective().
 window_loop(<<>>, _Table, Acc) ->
@@ -361,8 +372,13 @@ build_window_multiples(W, P, Acc) ->
 scalar_mul_base_comb(0) ->
   {0, 1, 1};
 scalar_mul_base_comb(K) ->
-  Table = get_base_comb(),
-  mul_comb(K, 1, Table, {0, 1, 1}).
+  RedK = K rem ?N,
+  case RedK of
+    0 -> {0, 1, 1};
+    _ ->
+      Table = get_base_comb(),
+      mul_comb(RedK, 1, Table, {0, 1, 1})
+  end.
 
 -spec mul_comb(non_neg_integer(), pos_integer(), dynamic(), pt_projective()) -> pt_projective().
 mul_comb(0, _I, _Table, Acc) ->
