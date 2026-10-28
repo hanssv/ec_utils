@@ -23,7 +23,7 @@
 -type participant_id() :: ecu_frost:participant_id().
 -type scalar() :: ecu_frost:scalar().
 -type compressed_pt() :: ecu_frost:compressed_pt().
--type pok() :: <<_:512>> | <<_:520>>.
+-type pok() :: <<_:512>> | <<_:520>> | <<_:912>>.
 -type polynomial() :: [scalar()].
 
 -export_type([ciphersuite/0, participant_id/0, scalar/0, compressed_pt/0, pok/0, polynomial/0]).
@@ -55,6 +55,16 @@ round1(ed25519, Id, T, CtxString) when T >= 1 ->
   Mu  = ecu_ed25519:s_add(K, ecu_ed25519:s_mul(C0, C)),
   C0Prf = <<R:32/binary, Mu:32/binary>>,
   PubC = [ ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Coeff)) || Coeff <- Cs ],
+  {Cs, C0Prf, PubC};
+round1(ed448, Id, T, CtxString) when T >= 1 ->
+  Cs = [C0 | _] = [ ecu_ed448:scalar_reduce(crypto:strong_rand_bytes(114)) || _ <- lists:seq(1, T) ],
+  K   = ecu_ed448:scalar_reduce(crypto:strong_rand_bytes(114)),
+  R   = ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(K)),
+  GC0 = ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(C0)),
+  C   = ecu_ed448:scalar_reduce(crypto:hash_xof(shake256, <<Id:456/little, CtxString/binary, GC0/binary, R/binary>>, 114 * 8)),
+  Mu  = ecu_ed448:s_add(K, ecu_ed448:s_mul(C0, C)),
+  C0Prf = <<R:57/binary, Mu:57/binary>>,
+  PubC = [ ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(Coeff)) || Coeff <- Cs ],
   {Cs, C0Prf, PubC};
 round1(secp256k1, Id, T, CtxString) when T >= 1 ->
   Cs = [C0 | _] = [ rnd_scalar_secp256k1() || _ <- lists:seq(1, T) ],
@@ -94,6 +104,13 @@ round1_check(ed25519, Id, CtxString, <<R:32/binary, Mu:32/binary>>, [C0 | _]) ->
   PtC0 = ecu_ed25519:decompress(C0),
   RHS = ecu_ed25519:p_add(PtR, ecu_ed25519:scalar_mul_noclamp(C, PtC0)),
   ecu_ed25519:pt_eq(LHS, RHS);
+round1_check(ed448, Id, CtxString, <<R:57/binary, Mu:57/binary>>, [C0 | _]) ->
+  C = ecu_ed448:scalar_reduce(crypto:hash_xof(shake256, <<Id:456/little, CtxString/binary, C0/binary, R/binary>>, 114 * 8)),
+  LHS = ecu_ed448:scalar_mul_base_noclamp(Mu),
+  PtR = ecu_ed448:decompress(R),
+  PtC0 = ecu_ed448:decompress(C0),
+  RHS = ecu_ed448:p_add(PtR, ecu_ed448:scalar_mul_noclamp(C, PtC0)),
+  ecu_ed448:pt_eq(LHS, RHS);
 round1_check(bip340, Id, CtxString, C0Prf, PubC) ->
   round1_check(secp256k1, Id, CtxString, C0Prf, PubC);
 round1_check(secp256k1, Id, CtxString, <<R:33/binary, Mu:32/binary>>, [C0 | _]) ->
@@ -139,6 +156,13 @@ round2_check(ed25519, Id, ShareVal, PubC) ->
          || {E, C} <- lists:zip(Exponents, PubC) ],
   RHS = fold_pts_ed25519(Ps),
   ecu_ed25519:pt_eq(LHS, RHS);
+round2_check(ed448, Id, ShareVal, PubC) ->
+  LHS = ecu_ed448:scalar_mul_base_noclamp(ShareVal),
+  Exponents = pows_ed448(<<Id:456/little>>, length(PubC)),
+  Ps = [ ecu_ed448:scalar_mul_noclamp(E, ecu_ed448:decompress(C))
+         || {E, C} <- lists:zip(Exponents, PubC) ],
+  RHS = fold_pts_ed448(Ps),
+  ecu_ed448:pt_eq(LHS, RHS);
 round2_check(bip340, Id, ShareVal, PubC) ->
   round2_check(secp256k1, Id, ShareVal, PubC);
 round2_check(secp256k1, Id, ShareVal, PubC) ->
@@ -162,6 +186,8 @@ compute_private_sign_share(Shares) ->
                                  Shares :: [{participant_id(), scalar()}]) -> scalar().
 compute_private_sign_share(ed25519, Shares) when length(Shares) >= 1 ->
   lists:foldl(fun({_, S}, Acc) -> ecu_ed25519:s_add(Acc, S) end, <<0:256>>, Shares);
+compute_private_sign_share(ed448, Shares) when length(Shares) >= 1 ->
+  lists:foldl(fun({_, S}, Acc) -> ecu_ed448:s_add(Acc, S) end, <<0:456>>, Shares);
 compute_private_sign_share(bip340, Shares) when length(Shares) >= 1 ->
   compute_private_sign_share(secp256k1, Shares);
 compute_private_sign_share(secp256k1, Shares) when length(Shares) >= 1 ->
@@ -193,6 +219,8 @@ compute_public_verification_share(Shares) ->
                                        (participant_id(), [[compressed_pt()]]) -> compressed_pt().
 compute_public_verification_share(ed25519, Shares) when is_list(Shares) ->
   ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(compute_private_sign_share(ed25519, Shares)));
+compute_public_verification_share(ed448, Shares) when is_list(Shares) ->
+  ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(compute_private_sign_share(ed448, Shares)));
 compute_public_verification_share(bip340, Shares) when is_list(Shares) ->
   compute_public_verification_share(secp256k1, Shares);
 compute_public_verification_share(secp256k1, Shares) when is_list(Shares) ->
@@ -215,6 +243,11 @@ compute_public_verification_share(ed25519, Id, [PubC1 | _] = PubCs) when is_inte
   Pts = [ ecu_ed25519:scalar_mul_noclamp(E, ecu_ed25519:decompress(C))
           || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC) ],
   ecu_ed25519:compress(fold_pts_ed25519(Pts));
+compute_public_verification_share(ed448, Id, [PubC1 | _] = PubCs) when is_integer(Id) ->
+  Exponents = pows_ed448(<<Id:456/little>>, length(PubC1)),
+  Pts = [ ecu_ed448:scalar_mul_noclamp(E, ecu_ed448:decompress(C))
+          || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC) ],
+  ecu_ed448:compress(fold_pts_ed448(Pts));
 compute_public_verification_share(bip340, Id, PubCs) when is_integer(Id) ->
   RawShare = compute_public_verification_share(secp256k1, Id, PubCs),
   GroupPubKey = compute_public_key(secp256k1, PubCs),
@@ -239,6 +272,9 @@ compute_public_key(PubCs) ->
 compute_public_key(ed25519, PubCs) when length(PubCs) >= 1 ->
   Pts = [ ecu_ed25519:decompress(C0) || [C0 | _] <- PubCs ],
   ecu_ed25519:compress(fold_pts_ed25519(Pts));
+compute_public_key(ed448, PubCs) when length(PubCs) >= 1 ->
+  Pts = [ ecu_ed448:decompress(C0) || [C0 | _] <- PubCs ],
+  ecu_ed448:compress(fold_pts_ed448(Pts));
 compute_public_key(bip340, PubCs) when length(PubCs) >= 1 ->
   Pts = [ ecu_secp256k1:decompress(C0) || [C0 | _] <- PubCs ],
   {X, _Y} = fold_pts_secp256k1(Pts),
@@ -269,6 +305,16 @@ pows_ed25519(_, _, 0) ->
 pows_ed25519(X, X0, N) ->
   [X | pows_ed25519(ecu_ed25519:s_mul(X, X0), X0, N - 1)].
 
+-spec pows_ed448(scalar(), non_neg_integer()) -> [scalar()].
+pows_ed448(X, N) ->
+  pows_ed448(<<1:456/little>>, X, N).
+
+-spec pows_ed448(scalar(), scalar(), non_neg_integer()) -> [scalar()].
+pows_ed448(_, _, 0) ->
+  [];
+pows_ed448(X, X0, N) ->
+  [X | pows_ed448(ecu_ed448:s_mul(X, X0), X0, N - 1)].
+
 -spec pows_secp256k1(non_neg_integer(), non_neg_integer()) -> [non_neg_integer()].
 pows_secp256k1(X, N) ->
   pows_secp256k1(1, X rem ?SECP256K1_N, N).
@@ -284,6 +330,12 @@ fold_pts_ed25519([]) ->
   ecu_ed25519:decompress(<<1:8, 0:248>>);
 fold_pts_ed25519([P | Pts]) ->
   lists:foldl(fun(Pt, Acc) -> ecu_ed25519:p_add(Acc, Pt) end, P, Pts).
+
+-spec fold_pts_ed448([ecu_ed448:pt()]) -> ecu_ed448:pt().
+fold_pts_ed448([]) ->
+  ecu_ed448:decompress(<<1:8, 0:448>>);
+fold_pts_ed448([P | Pts]) ->
+  lists:foldl(fun(Pt, Acc) -> ecu_ed448:p_add(Acc, Pt) end, P, Pts).
 
 -spec fold_pts_secp256k1([ecu_secp256k1:pt_affine()]) -> ecu_secp256k1:pt_affine().
 fold_pts_secp256k1([]) ->

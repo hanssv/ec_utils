@@ -7,7 +7,7 @@
 -include_lib("eqc/include/eqc.hrl").
 
 gen_ciphersuite() ->
-  elements([ed25519, secp256k1, bip340]).
+  elements([ed25519, secp256k1, bip340, ed448]).
 
 gen_params() ->
   ?LET(T, choose(2, 4),
@@ -16,6 +16,8 @@ gen_params() ->
 
 pub_from_priv(ed25519, Share) ->
   ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Share));
+pub_from_priv(ed448, Share) ->
+  ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(Share));
 pub_from_priv(bip340, Share) ->
   <<S:256>> = Share,
   {X, _} = ecu_secp256k1:scalar_mul_base(S),
@@ -25,6 +27,8 @@ pub_from_priv(secp256k1, Share) ->
 
 pub_share_for_verify(ed25519, Share) ->
   ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Share));
+pub_share_for_verify(ed448, Share) ->
+  ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(Share));
 pub_share_for_verify(bip340, Share) ->
   ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(Share));
 pub_share_for_verify(secp256k1, Share) ->

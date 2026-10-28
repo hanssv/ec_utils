@@ -192,14 +192,15 @@ Supported Curves & API
 
 - `ecu_frost`: Two-round FROST threshold signature scheme supporting ciphersuites:
   - `ed25519`: `FROST(Ed25519, SHA-512)` (default) producing standard 64-byte Ed25519 signatures.
+  - `ed448`: `FROST(Ed448, SHAKE256)` producing standard 114-byte Ed448 signatures ($R \parallel z$) verified with `ecu_eddsa448:sign_verify_detached/4`.
   - `secp256k1`: `FROST(secp256k1, SHA-256)` using RFC 9380 `expand_message_xmd` producing 65-byte signatures ($R \parallel z$).
   - `bip340`: BIP-340 Schnorr threshold signatures on secp256k1 producing 64-byte $x$-only signatures ($r \parallel s$) with tagged hashes, verified via `ecu_schnorr:verify/3`.
-  - API functions accept an optional `ciphersuite()` prefix (`ed25519 | secp256k1 | bip340`), defaulting to `ed25519`:
+  - API functions accept an optional `ciphersuite()` prefix (`ed25519 | secp256k1 | bip340 | ed448`), defaulting to `ed25519`:
     - `commit/1,2`: Round 1 preprocessing — generate hiding & binding nonces and commitments.
     - `sign/6,7`: Round 2 signing — compute partial signature share $z_i$ bound to group public key and message.
     - `verify_signature_share/7,8`: Coordinator verification of individual signature shares.
     - `aggregate/4,5`: Aggregate threshold signature shares into a group signature.
-    - `verify/3,4`: Verify aggregated FROST signatures (detached Ed25519, secp256k1 prime-order verify, or BIP-340).
+    - `verify/3,4`: Verify aggregated FROST signatures (detached Ed25519, Ed448, secp256k1 prime-order verify, or BIP-340).
     - `trusted_dealer_keygen/2,3,4`: Trusted dealer key generation ($t$-of-$n$) with Feldman VSS commitments.
     - `vss_verify/3,4`: Verifiable Secret Sharing share verification.
     - `secret_share_combine/1,2`: Lagrange polynomial secret reconstruction from $t$ shares.
@@ -257,6 +258,10 @@ the library incorporates key algorithmic optimizations:
 | **frost bip340 part sign** | — | **2.52 ms** | — | — | — |
 | **frost bip340 aggregate** | — | **2.59 ms** | — | — | — |
 | **frost bip340 verify** | — | **1.02 ms** | — | — | — |
+| **frost ed448 commit** | — | **1.11 ms** | — | — | — |
+| **frost ed448 part sign** | — | **5.95 ms** | — | — | — |
+| **frost ed448 aggregate** | — | **6.00 ms** | — | — | — |
+| **frost ed448 verify** | — | **2.38 ms** | — | — | — |
 
 *Note: Pure Erlang point addition is faster than `enacl` because calling the NIF
 incurs marshalling and point decompression overhead.*
@@ -267,7 +272,7 @@ Roadmap
 See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cryptographic extensions, including:
 - **Diffie-Hellman Key Exchange (X25519 / RFC 7748)**: Pure-Erlang Montgomery ladder on Curve25519.
 - **Ed448 Goldilocks Curve (RFC 8032 & RFC 7748)**: 448-bit Edwards curve arithmetic and SHAKE256 `[Completed]`.
-- **FROST(Ed448, SHAKE256)**: Threshold signing for Ed448.
+- **FROST(Ed448, SHAKE256)**: Threshold signing for Ed448 `[Completed]`.
 - **Pairing-Friendly Cryptography (BLS12-381)**: Primitives for threshold BLS signatures and ZK-SNARK verifiers.
 
 Security Considerations & Limitations

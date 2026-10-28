@@ -31,18 +31,18 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 3. FROST: Flexible Round-Optimized Schnorr Threshold Signatures (RFC 9591 & BIP-340) `[Completed for Ed25519 & secp256k1]`
+## 3. FROST: Flexible Round-Optimized Schnorr Threshold Signatures (RFC 9591 & BIP-340) `[Completed for Ed25519, secp256k1, and Ed448]`
 
 - **Standard**: [RFC 9591](https://datatracker.ietf.org/doc/html/rfc9591) / Komlo & Goldberg (2020) & [BIP-340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki).
 - **Goal**: Implement threshold multi-party signing ($t$-of-$n$) where any threshold subset of participants cooperatively produces standard Schnorr signatures indistinguishable from a single signer.
 - **Ciphersuites**:
   - **Stage 1: `FROST(Ed25519, SHA-512)` `[Completed]`**: Produces standard 64-byte Ed25519 signatures verifiable with `ecu_eddsa`.
   - **Stage 2: `FROST(secp256k1, SHA-256)` & `bip340` `[Completed]`**: Produces standard RFC 9591 65-byte signatures and BIP-340 64-byte $x$-only Taproot signatures verifiable with `ecu_schnorr`.
-  - **Stage 3: `FROST(Ed448, SHAKE256)`**: Threshold signing for the Ed448 Goldilocks curve.
+  - **Stage 3: `FROST(Ed448, SHAKE256)` `[Completed]`**: Threshold signing for the Ed448 Goldilocks curve using SHAKE256 XOF, producing standard 114-byte signatures ($R \parallel z$) verifiable with `ecu_eddsa448`.
 - **Protocol Features**:
   - Two-Round Signing: Nonce commitment generation (Round 1) and signature share aggregation (Round 2) using binding factors to prevent ROS/forgery attacks.
   - Two-Round Distributed Key Generation (DKG) with Schnorr Proof of Knowledge (PoK) and Feldman verifiable secret sharing (VSS).
-  - Validated against official RFC 9591 Appendix E.1 and E.5 test vectors, plus BIP-340 threshold verification.
+  - Validated against official RFC 9591 Appendix E.1, E.2, and E.5 test vectors, plus BIP-340 threshold verification.
 
 ---
 
@@ -68,7 +68,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
     - `ecu_eddsa448`: Complete RFC 8032 Ed448 signing and verification with Keccak SHAKE256 XOF, context string support ($0 \le |C| \le 255$), and batch signature verification.
     - Verified against all RFC 8032 Section 7.4 test vectors and cross-checked against OTP `crypto` as an oracle.
   - **X448 Key Exchange `[Planned]`**: Montgomery ladder over Curve448 for X448 key agreement.
-  - **FROST(Ed448, SHAKE256) `[Planned]`**: Threshold signing for Ed448.
+  - **FROST(Ed448, SHAKE256) `[Completed]`**: Threshold signing for Ed448.
 
 ---
 
