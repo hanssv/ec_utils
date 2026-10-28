@@ -2,7 +2,7 @@ ec_utils
 ========
 
 A pure Erlang library containing elliptic curve cryptography utilities for
-**Ed25519** and **secp256k1**.
+**Ed25519**, **Ed448**, and **secp256k1**.
 
 This library is intended for learning, experimentation, and as a portable
 pure-Erlang fallback when native C/Rust NIFs (such as `libsodium`/`enacl` or
@@ -58,6 +58,26 @@ Items = [
     {Sig3, Msg3, PK3}
 ],
 true = ecu_eddsa:sign_verify_batch(Items).
+```
+
+### Ed448 (RFC 8032 & SHAKE256)
+
+```erlang
+%% Keypair generation with 57-byte public key
+{SecretKey, PublicKey} = ecu_eddsa448:sign_keypair(),
+Msg = <<"High-security payload">>,
+
+%% Sign and verify 114-byte signature with optional context string
+Context = <<"custom-app-v1">>,
+Signature = ecu_eddsa448:sign_detached(Msg, SecretKey, Context),
+true = ecu_eddsa448:sign_verify_detached(Signature, Msg, PublicKey, Context).
+
+%% Batch verification of multiple Ed448 signatures in a single pass
+Batch = [
+    {SigA, MsgA, PKA, ContextA},
+    {SigB, MsgB, PKB, ContextB}
+],
+true = ecu_eddsa448:sign_verify_batch(Batch).
 ```
 
 ### BIP-340 Schnorr Signatures (Bitcoin Taproot)
@@ -123,6 +143,22 @@ Supported Curves & API
   - Point compression (`compress/1`) and decompression (`decompress/1`) with
     canonical encoding checks and small-order point detection
     (`is_small_order/1`).
+
+### Ed448 (Curve448 / Goldilocks)
+
+- `ecu_eddsa448`: High-level Ed448 digital signature API (RFC 8032) using SHAKE256:
+  - `sign_keypair/0`: Generate a fresh 57-byte `{secret, public}` keypair.
+  - `sign_seed_keypair/1`: Deterministically derive a keypair from a 57-byte seed.
+  - `sign/2,3`, `sign_open/2,3`: Create and open combined signed messages with optional context string ($0 \le |C| \le 255$).
+  - `sign_detached/2,3`, `sign_verify_detached/3,4`: Create and verify 114-byte detached signatures with optional context string.
+  - `sign_verify_batch/1,2`: Batch signature verification verifying a list of `{Sig, Msg, PK}` or `{Sig, Msg, PK, Context}` tuples in a single pass.
+- `ecu_ed448`: Curve point arithmetic and group operations using projective coordinates (`{X, Y, Z}` with $x = X/Z, y = Y/Z$):
+  - Point addition (`p_add/2`), subtraction (`p_sub/2`), doubling (`p_dbl/1`), and negation (`p_neg/1`) using complete Edwards formulas.
+  - Base-point scalar multiplication (`scalar_mul_base/1`, `scalar_mul_base_noclamp/1`) using a 114-window precomputed comb table.
+  - Variable-base scalar multiplication (`scalar_mul/2`, `scalar_mul_noclamp/2`) using a fixed 4-bit window method.
+  - Dual-scalar multiplication (`scalar_mul_dual_base/3`) for signature verification.
+  - Multi-scalar multiplication (`multi_scalar_mul/1`) using interleaved windowed Straus accumulation.
+  - Point compression (`compress/1`) and decompression (`decompress/1`) with canonical encoding checks and small-order detection (`is_small_order/1`).
 
 ### secp256k1 / ECDSA
 
@@ -205,6 +241,10 @@ the library incorporates key algorithmic optimizations:
 | **ed25519 verify** | 1,496 µs | **769 µs** | **~1.9×** | 44.2 µs (enacl) | 17.4× |
 | **ed25519 verify (batch of 32)** | 846 µs/sig | **368 µs/sig** | **~2.3×** | — | — |
 | **ed25519 point add** | 1.9 µs | **2.3 µs** | ~1.0× | 12.6 µs (enacl) | **5.6× faster** |
+| **ed448 scalar mul base** | — | **492 µs** | — | — | — |
+| **ed448 scalar mul** | — | **1.80 ms** | — | — | — |
+| **ed448 sign** | — | **1.06 ms** | — | — | — |
+| **ed448 verify** | — | **2.46 ms** | — | — | — |
 | **frost ed25519 commit** | — | **329 µs** | — | — | — |
 | **frost ed25519 part sign** | — | **2.12 ms** | — | — | — |
 | **frost ed25519 aggregate** | — | **2.32 ms** | — | — | — |
@@ -226,7 +266,8 @@ Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cryptographic extensions, including:
 - **Diffie-Hellman Key Exchange (X25519 / RFC 7748)**: Pure-Erlang Montgomery ladder on Curve25519.
-- **Ed448 Goldilocks Curve (RFC 8032 & RFC 7748)**: 448-bit Edwards curve arithmetic and SHAKE256.
+- **Ed448 Goldilocks Curve (RFC 8032 & RFC 7748)**: 448-bit Edwards curve arithmetic and SHAKE256 `[Completed]`.
+- **FROST(Ed448, SHAKE256)**: Threshold signing for Ed448.
 - **Pairing-Friendly Cryptography (BLS12-381)**: Primitives for threshold BLS signatures and ZK-SNARK verifiers.
 
 Security Considerations & Limitations

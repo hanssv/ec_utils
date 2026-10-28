@@ -58,15 +58,17 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 5. Ed448 / Curve448 (Goldilocks Curve / RFC 7748 & RFC 8032)
+## 5. Ed448 / Curve448 (Goldilocks Curve / RFC 7748 & RFC 8032) `[Ed448 Completed]`
 
 - **Standard**: [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) (X448 key exchange) and [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) (Ed448 digital signatures).
 - **Goal**: High-security (~224-bit security level) elliptic curve cryptography based on the Goldilocks prime $p = 2^{448} - 2^{224} - 1$.
 - **Features**:
-  - Pure-Erlang arithmetic over $\mathbb{F}_{2^{448} - 2^{224} - 1}$ with fast Karatsuba/Solinas reduction.
-  - Twisted Edwards point arithmetic for Ed448 signatures using SHAKE256.
-  - Montgomery ladder over Curve448 for X448 key agreement.
-  - Foundation for `FROST(Ed448, SHAKE256)`.
+  - **Ed448 Signatures `[Completed]`**:
+    - `ecu_ed448`: Projective Edwards curve arithmetic ($x^2 + y^2 = 1 + d x^2 y^2$, $d = -39081$), comb table base-point scalar multiplication (114 windows), windowed scalar multiplication, dual-base multiplication, and interleaved Straus multi-scalar multiplication (MSM).
+    - `ecu_eddsa448`: Complete RFC 8032 Ed448 signing and verification with Keccak SHAKE256 XOF, context string support ($0 \le |C| \le 255$), and batch signature verification.
+    - Verified against all RFC 8032 Section 7.4 test vectors and cross-checked against OTP `crypto` as an oracle.
+  - **X448 Key Exchange `[Planned]`**: Montgomery ladder over Curve448 for X448 key agreement.
+  - **FROST(Ed448, SHAKE256) `[Planned]`**: Threshold signing for Ed448.
 
 ---
 
