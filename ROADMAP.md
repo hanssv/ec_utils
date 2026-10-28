@@ -46,19 +46,21 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 4. Diffie-Hellman Key Exchange (X25519 / RFC 7748)
+## 4. Diffie-Hellman Key Exchange (X25519, X448, secp256k1 / RFC 7748) `[Completed]`
 
-- **Standard**: [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) (Curve25519 ECDH).
+- **Standard**: [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) (Curve25519 & Curve448 Diffie-Hellman) and SEC 1 §3.3.1 (secp256k1 ECDH).
 - **Goal**: Enable pure-Erlang key agreement and shared secret derivation.
-- **Features**:
+- **Features `[Completed]`**:
   - Point conversion between Ed25519 (twisted Edwards) and Curve25519 (Montgomery) via birational equivalence:
     $$u = \frac{1 + y}{1 - y}$$
-  - Montgomery ladder scalar multiplication on the $u$-coordinate (constant number of field operations).
-  - Interoperability with standard Curve25519 implementations (`enacl:box`, OpenSSL, and `crypto:compute_key`).
+  - Montgomery ladder scalar multiplication on the $u$-coordinate (constant number of field operations) for both X25519 and X448.
+  - Interoperability with standard Curve25519 and Curve448 implementations (`crypto:compute_key` as an oracle).
+  - RFC 7748 Section 6.1 (X25519) and Section 6.2 (X448) test vector compliance (Alice/Bob and 1,000-iteration tests).
+  - secp256k1 ECDH with support for compressed, uncompressed, and affine point inputs.
 
 ---
 
-## 5. Ed448 / Curve448 (Goldilocks Curve / RFC 7748 & RFC 8032) `[Ed448 Completed]`
+## 5. Ed448 / Curve448 (Goldilocks Curve / RFC 7748 & RFC 8032) `[Completed]`
 
 - **Standard**: [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) (X448 key exchange) and [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) (Ed448 digital signatures).
 - **Goal**: High-security (~224-bit security level) elliptic curve cryptography based on the Goldilocks prime $p = 2^{448} - 2^{224} - 1$.
@@ -67,7 +69,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
     - `ecu_ed448`: Projective Edwards curve arithmetic ($x^2 + y^2 = 1 + d x^2 y^2$, $d = -39081$), comb table base-point scalar multiplication (114 windows), windowed scalar multiplication, dual-base multiplication, and interleaved Straus multi-scalar multiplication (MSM).
     - `ecu_eddsa448`: Complete RFC 8032 Ed448 signing and verification with Keccak SHAKE256 XOF, context string support ($0 \le |C| \le 255$), and batch signature verification.
     - Verified against all RFC 8032 Section 7.4 test vectors and cross-checked against OTP `crypto` as an oracle.
-  - **X448 Key Exchange `[Planned]`**: Montgomery ladder over Curve448 for X448 key agreement.
+  - **X448 Key Exchange `[Completed]`**: Montgomery ladder over Curve448 for X448 key agreement (`ecu_ecdh:x448/2`, `ecu_ecdh:compute_key/3`).
   - **FROST(Ed448, SHAKE256) `[Completed]`**: Threshold signing for Ed448.
 
 ---

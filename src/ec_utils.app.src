@@ -4,7 +4,7 @@
   {registered, []},
   {applications, [kernel, stdlib, crypto, sha3]},
   {env,[]},
-  {modules, [ecu_secp256k1, ecu_ed25519, ecu_ed448, ecu_ecdsa, ecu_eddsa, ecu_eddsa448, ecu_crypto, ecu_misc, ecu_schnorr, ecu_frost, ecu_frost_dkg]},
+  {modules, [ecu_secp256k1, ecu_ed25519, ecu_ed448, ecu_ecdsa, ecu_eddsa, ecu_eddsa448, ecu_crypto, ecu_misc, ecu_schnorr, ecu_frost, ecu_frost_dkg, ecu_ecdh]},
   {licenses, ["MIT"]},
   {links, []}
  ]}.

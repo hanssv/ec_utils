@@ -114,6 +114,25 @@ Signature = ecu_frost:aggregate(bip340, Commitments, Msg, GroupPK, [Z1, Z2]),
 true = ecu_schnorr:verify(Signature, Msg, GroupPK).
 ```
 
+### Diffie-Hellman Key Exchange (X25519, X448, secp256k1)
+
+```erlang
+%% X25519 (RFC 7748)
+{PubA, PrivA} = ecu_ecdh:keypair(x25519),
+{PubB, PrivB} = ecu_ecdh:keypair(x25519),
+SharedSecret = ecu_ecdh:compute_key(x25519, PubB, PrivA),
+SharedSecret = ecu_ecdh:compute_key(x25519, PubA, PrivB).
+
+%% X448 (RFC 7748 Goldilocks)
+{PubA448, PrivA448} = ecu_ecdh:keypair(x448),
+{PubB448, PrivB448} = ecu_ecdh:keypair(x448),
+Shared448 = ecu_ecdh:compute_key(x448, PubB448, PrivA448).
+
+%% Ed25519 to X25519 conversion (birational equivalence)
+XPub = ecu_ecdh:ed25519_public_to_x25519(Ed25519PubKey),
+XPriv = ecu_ecdh:ed25519_secret_to_x25519(Ed25519SecretKey).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -208,6 +227,18 @@ Supported Curves & API
   - `round1/3,4`, `round1_check/4,5`: Coefficient commitment and zero-knowledge Proof of Knowledge (PoK).
   - `round2/2,3`, `round2_check/3,4`: Share distribution and verification against public commitments.
   - `compute_private_sign_share/1,2,3`, `compute_public_verification_share/1,2,3`, `compute_public_key/1,2`: Joint key derivation.
+
+### Diffie-Hellman / ECDH (X25519, X448, secp256k1)
+
+- `ecu_ecdh`: Diffie-Hellman key exchange and Montgomery curve functions:
+  - `keypair/1`: Fresh `{PublicKey, PrivateKey}` keypair generation (`x25519`, `x448`, `secp256k1`).
+  - `keypair_from_seed/2`: Deterministic keypair generation from seed bytes.
+  - `compute_key/3`: Key agreement returning shared secret binary (`32` bytes for X25519 and secp256k1, `56` bytes for X448).
+  - `x25519/2`: RFC 7748 §5 scalar multiplication over Montgomery Curve25519 ($u$-coordinate).
+  - `x448/2`: RFC 7748 §5 scalar multiplication over Montgomery Curve448 ($u$-coordinate).
+  - `clamp/2`: RFC 7748 scalar pruning/clamping.
+  - `ed25519_public_to_x25519/1`: Twisted Edwards public key conversion to Montgomery $u$-coordinate via birational map $u = (1 + y) / (1 - y) \pmod p$.
+  - `ed25519_secret_to_x25519/1`: Ed25519 secret key conversion via SHA-512 and clamping.
 
 Performance & Benchmarks
 ------------------------
