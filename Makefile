@@ -1,4 +1,4 @@
-.PHONY: all compile test eqc dialyzer schnorr_reference frost_reference reference_nifs clean
+.PHONY: all compile test eqc dialyzer rustcrypto_reference schnorr_reference frost_reference reference_nifs clean
 
 all: compile
 
@@ -14,16 +14,18 @@ eqc:
 dialyzer:
 	rebar3 dialyzer
 
-schnorr_reference:
+rustcrypto_reference:
 	mkdir -p priv
-	cd crates/schnorr_nif && cargo build --release
-	@if [ -f crates/schnorr_nif/target/release/libecu_schnorr_nif.dylib ]; then \
-		cp crates/schnorr_nif/target/release/libecu_schnorr_nif.dylib priv/ecu_schnorr_nif.so; \
-	elif [ -f crates/schnorr_nif/target/release/libecu_schnorr_nif.so ]; then \
-		cp crates/schnorr_nif/target/release/libecu_schnorr_nif.so priv/ecu_schnorr_nif.so; \
-	elif [ -f crates/schnorr_nif/target/release/ecu_schnorr_nif.dll ]; then \
-		cp crates/schnorr_nif/target/release/ecu_schnorr_nif.dll priv/ecu_schnorr_nif.dll; \
+	cd crates/rustcrypto_nif && cargo build --release
+	@if [ -f crates/rustcrypto_nif/target/release/libecu_rustcrypto_nif.dylib ]; then \
+		cp crates/rustcrypto_nif/target/release/libecu_rustcrypto_nif.dylib priv/ecu_rustcrypto_nif.so; \
+	elif [ -f crates/rustcrypto_nif/target/release/libecu_rustcrypto_nif.so ]; then \
+		cp crates/rustcrypto_nif/target/release/libecu_rustcrypto_nif.so priv/ecu_rustcrypto_nif.so; \
+	elif [ -f crates/rustcrypto_nif/target/release/ecu_rustcrypto_nif.dll ]; then \
+		cp crates/rustcrypto_nif/target/release/ecu_rustcrypto_nif.dll priv/ecu_rustcrypto_nif.dll; \
 	fi
+
+schnorr_reference: rustcrypto_reference
 
 frost_reference:
 	mkdir -p priv
@@ -36,8 +38,8 @@ frost_reference:
 		cp crates/frost_nif/target/release/ecu_frost_nif.dll priv/ecu_frost_nif.dll; \
 	fi
 
-reference_nifs: schnorr_reference frost_reference
+reference_nifs: rustcrypto_reference frost_reference
 
 clean:
 	rebar3 clean
-	rm -rf priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* crates/schnorr_nif/target crates/frost_nif/target
+	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* crates/rustcrypto_nif/target crates/frost_nif/target

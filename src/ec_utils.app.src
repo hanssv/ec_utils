@@ -2,9 +2,9 @@
  [{description, "A collection of elliptic curve utility functions"},
   {vsn, "0.1.0"},
   {registered, []},
-  {applications, [kernel, stdlib, crypto, sha3]},
+  {applications, [kernel, stdlib, crypto]},
   {env,[]},
-  {modules, [ecu_secp256k1, ecu_ed25519, ecu_ed448, ecu_ecdsa, ecu_eddsa, ecu_eddsa448, ecu_crypto, ecu_misc, ecu_schnorr, ecu_frost, ecu_frost_dkg, ecu_ecdh]},
+  {modules, [ecu_secp256k1, ecu_ed25519, ecu_ed448, ecu_ecdsa, ecu_eddsa, ecu_eddsa448, ecu_crypto, ecu_misc, ecu_schnorr, ecu_frost, ecu_frost_dkg, ecu_ecdh, ecu_keccak]},
   {licenses, ["MIT"]},
   {links, []}
  ]}.

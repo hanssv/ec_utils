@@ -74,7 +74,52 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 6. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
+## 6. Pure-Erlang Keccak-256 & SHA-3 (Zero External Dependencies)
+
+- **Standard**: Keccak Sponge Function Family / FIPS 202 (SHA-3, SHAKE) & Ethereum Keccak-256.
+- **Goal**: Implement pure-Erlang Keccak-f[1600] state permutations to eliminate the `erlang-sha3` C NIF dependency.
+- **Features**:
+  - `ecu_keccak`: Pure-Erlang Keccak-256 (pad `0x01` / Ethereum format) and NIST SHA3-224/256/384/512 (pad `0x06`).
+  - Seamless zero-dependency address recovery in `ecu_crypto:eth_recover/2` and Ethereum signing.
+  - Test vectors and differential testing against OTP `crypto` and `erlang-sha3`.
+
+---
+
+## 7. BIP-327: MuSig2 (Simple Two-Round Schnorr Multi-Signatures)
+
+- **Standard**: [BIP-327](https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki) (MuSig2 multi-signatures for BIP-340).
+- **Goal**: Enable compact $n$-of-$n$ Schnorr multi-signatures aggregated into standard 64-byte BIP-340 signatures.
+- **Features**:
+  - Key aggregation algorithm ($\mathrm{KeyAgg}$) with rogue-key attack resistance.
+  - Two-round signing protocol with nonces and partial signature aggregation.
+  - Interoperability with `ecu_schnorr` and BIP-340 Taproot verifiers.
+  - Verification against official BIP-327 test vectors.
+
+---
+
+## 8. Hierarchical Deterministic (HD) Wallets (BIP-32, BIP-44 & SLIP-0010)
+
+- **Standard**: [BIP-32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki), [BIP-44](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki), and [SLIP-0010](https://github.com/satoshilabs/slips/blob/master/slip-0010.md).
+- **Goal**: Pure-Erlang hierarchical deterministic wallet key derivation for secp256k1 and Ed25519.
+- **Features**:
+  - Extended keys (`xprv`, `xpub`) with Base58Check encoding.
+  - Hardened and unhardened child key derivation (`CKDpriv`, `CKDpub`).
+  - Standard derivation paths (`m/44'/60'/0'/0/0`, etc.).
+  - SLIP-0010 master seed derivation for Ed25519 curves.
+
+---
+
+## 9. Hash-to-Curve (RFC 9380) & Verifiable Random Functions (VRF / RFC 9381)
+
+- **Standard**: [RFC 9380](https://datatracker.ietf.org/doc/html/rfc9380) (Hashing to Elliptic Curves) and [RFC 9381](https://datatracker.ietf.org/doc/html/rfc9381) (Verifiable Random Functions).
+- **Goal**: Map arbitrary byte strings deterministically to curve points and evaluate verifiable pseudorandom proofs.
+- **Features**:
+  - Simplified SWU (Shallue-van de Woestijne-Ulas) and Elligator2 point mapping.
+  - ECVRF-EDWARDS25519-SHA512-ELL2 and ECVRF-SECP256K1-SHA256 evaluation and verification.
+
+---
+
+## 10. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
 
 - **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Ethereum / Filecoin / Zcash zk-SNARK primitives.
 - **Goal**: Support pairing-based cryptography, short aggregate signatures, and zero-knowledge proof verification.
@@ -86,7 +131,15 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 7. Packaging & Release Readiness
+## 11. Algorithmic Performance Optimizations (Deferred)
+
+- **GLV Endomorphism Decomposition (secp256k1)**: Decomposing 256-bit scalars into 128-bit halves ($k \cdot P = k_1 \cdot P + k_2 \cdot \phi(P)$) to halve doubling chains.
+- **wNAF Variable Scalar Multiplication**: Windowed Non-Adjacent Form ($w=4, 5$) to reduce point additions by 33–50%.
+- **BIP-340 Batch Verification**: Batch verification of Taproot signatures using 128-bit random weights.
+
+---
+
+## 12. Packaging & Release Readiness
 
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.

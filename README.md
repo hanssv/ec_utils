@@ -240,6 +240,13 @@ Supported Curves & API
   - `ed25519_public_to_x25519/1`: Twisted Edwards public key conversion to Montgomery $u$-coordinate via birational map $u = (1 + y) / (1 - y) \pmod p$.
   - `ed25519_secret_to_x25519/1`: Ed25519 secret key conversion via SHA-512 and clamping.
 
+### Pure-Erlang Keccak & SHA-3 (FIPS 202)
+
+- `ecu_keccak`: High-speed unrolled 64-bit Keccak-f[1600] permutation and sponge construction (zero external C dependencies):
+  - `keccak256/1`: Ethereum Keccak-256 hash function (zero padding delimiter).
+  - `sha3_224/1`, `sha3_256/1`, `sha3_384/1`, `sha3_512/1`: Standard NIST FIPS 202 SHA-3 hash functions.
+  - `shake128/2`, `shake256/2`: Keccak extendable-output functions (XOF).
+
 Performance & Benchmarks
 ------------------------
 
@@ -296,11 +303,13 @@ the library incorporates key algorithmic optimizations:
 | **frost ed448 part sign** | — | **5.95 ms** | — | 560 µs (frost-ed448 Rust NIF) | 10.6× |
 | **frost ed448 aggregate** | — | **6.00 ms** | — | 1.10 ms (frost-ed448 Rust NIF) | 5.5× |
 | **frost ed448 verify** | — | **2.38 ms** | — | 691 µs (frost-ed448 Rust NIF) | 3.4× |
+| **keccak256 (Ethereum)** | — | **166 µs** | — | 0.31 µs (rustcrypto NIF) | 535× |
+| **sha3_256 (NIST)** | — | **167 µs** | — | 0.44 µs (crypto / OpenSSL) | 380× |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
 - *Pure Erlang `secp256k1` base-point scalar multiplication is faster than OpenSSL due to the precomputed 1,024-entry comb table.*
-- *BIP-340 Schnorr reference benchmarks use an optional test NIF (`k256`) buildable via `make schnorr_reference`.*
+- *BIP-340 Schnorr and Keccak-256 reference benchmarks use an optional test NIF (`k256` and `sha3`) buildable via `make rustcrypto_reference`.*
 - *FROST threshold reference benchmarks use optional RFC 9591 test NIFs (Zcash Foundation `frost-core` crates) buildable via `make frost_reference`.*
 - *Both reference NIFs can be built together using `make reference_nifs`.*
 

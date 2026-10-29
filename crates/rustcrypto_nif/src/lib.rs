@@ -1,5 +1,6 @@
 use k256::schnorr::{Signature, SigningKey, VerifyingKey};
 use rustler::{Binary, Env, NewBinary};
+use sha3::{Digest, Keccak256};
 
 #[rustler::nif]
 fn sign<'a>(
@@ -60,4 +61,14 @@ fn public_key<'a>(env: Env<'a>, privkey: Binary) -> Result<Binary<'a>, rustler::
     Ok(erl_bin.into())
 }
 
-rustler::init!("ecu_schnorr_nif");
+#[rustler::nif]
+fn keccak256<'a>(env: Env<'a>, data: Binary) -> Binary<'a> {
+    let mut hasher = Keccak256::new();
+    hasher.update(data.as_slice());
+    let res = hasher.finalize();
+    let mut erl_bin = NewBinary::new(env, res.len());
+    erl_bin.as_mut_slice().copy_from_slice(&res);
+    erl_bin.into()
+}
+
+rustler::init!("ecu_rustcrypto_nif");

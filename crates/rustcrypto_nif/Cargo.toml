@@ -1,12 +1,13 @@
 [package]
-name = "ecu_schnorr_nif"
+name = "ecu_rustcrypto_nif"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "ecu_schnorr_nif"
+name = "ecu_rustcrypto_nif"
 crate-type = ["cdylib"]
 
 [dependencies]
 k256 = { version = "0.14.0", features = ["schnorr"] }
+sha3 = "0.10.8"
 rustler = "0.39.0"

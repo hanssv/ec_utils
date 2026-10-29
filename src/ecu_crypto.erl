@@ -131,4 +131,4 @@ eth_msg_hash(Msg0) ->
 
 -spec keccak256(iodata()) -> binary().
 keccak256(Data) ->
-  sha3:hash(256, iolist_to_binary(Data)).
+  ecu_keccak:keccak256(Data).

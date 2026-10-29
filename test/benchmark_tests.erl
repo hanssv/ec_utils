@@ -346,6 +346,29 @@ bench_frost_test() ->
   end,
   ok.
 
+bench_keccak_test() ->
+  N = 500,
+  Msgs = [crypto:strong_rand_bytes(100) || _ <- lists:seq(1, N)],
+  {TimeEcuKek, _} = timer:tc(fun() -> [ecu_keccak:keccak256(M) || M <- Msgs] end),
+  {TimeEcuSha3, _} = timer:tc(fun() -> [ecu_keccak:sha3_256(M) || M <- Msgs] end),
+  {TimeCryptoSha3, _} = timer:tc(fun() -> [crypto:hash(sha3_256, M) || M <- Msgs] end),
+
+  ?debugFmt("", []),
+  stats("NIST SHA3-256", "crypto (OpenSSL)", N, TimeCryptoSha3),
+  stats("NIST SHA3-256", "ecu_keccak      ", N, TimeEcuSha3),
+  diff(TimeCryptoSha3 / N, TimeEcuSha3 / N),
+
+  case ecu_rustcrypto_nif:is_available() of
+    true ->
+      {TimeRustKek, _} = timer:tc(fun() -> [ecu_rustcrypto_nif:keccak256(M) || M <- Msgs] end),
+      stats("Keccak-256", "rustcrypto (NIF)", N, TimeRustKek),
+      stats("Keccak-256", "ecu_keccak      ", N, TimeEcuKek),
+      diff(TimeRustKek / N, TimeEcuKek / N);
+    false ->
+      stats("Keccak-256", "ecu_keccak      ", N, TimeEcuKek)
+  end,
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 
