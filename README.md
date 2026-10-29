@@ -274,7 +274,7 @@ the library incorporates key algorithmic optimizations:
 | **ed25519 verify** | 1,496 µs | **769 µs** | **~1.9×** | 44.2 µs (enacl) | 17.4× |
 | **ed25519 verify (batch of 32)** | 846 µs/sig | **368 µs/sig** | **~2.3×** | — | — |
 | **ed25519 point add** | 1.9 µs | **2.3 µs** | ~1.0× | 12.6 µs (enacl) | **5.5× faster** |
-| **ed448 scalar mul base** | — | **492 µs** | — | — | — |
+| **ed448 scalar mul base** | — | **492 µs** | — | 61 µs (crypto / OpenSSL) | 8.1× |
 | **ed448 scalar mul** | — | **1.80 ms** | — | — | — |
 | **ed448 sign** | — | **1.06 ms** | — | 128 µs (crypto / OpenSSL) | 8.3× |
 | **ed448 verify** | — | **2.46 ms** | — | 154 µs (crypto / OpenSSL) | 16.0× |

@@ -38,19 +38,27 @@ bench_scalar_mul_base_test() ->
   ScalarsSecpRef = lists:append(lists:duplicate(10, Scalars0)),
   ScalarsEnacl   = lists:append(lists:duplicate(100, Scalars0)),
   ScalarsEd25519 = lists:append(lists:duplicate(30, Scalars0)),
+  Scalars448 = [ crypto:strong_rand_bytes(57) || _ <- lists:seq(1, 50) ],
+  ScalarsEd448 = Scalars448,
+  ScalarsEd448Ref = lists:append(lists:duplicate(4, Scalars448)),
 
-  {TimeSecp,    _} = timer:tc(fun() -> [ecu_secp256k1:scalar_mul_base(S)        || S <- ScalarsSecp], ok end),
-  {TimeSecpRef, _} = timer:tc(fun() -> [crypto:generate_key(ecdh, secp256k1)    || _ <- ScalarsSecpRef], ok end),
-  {TimeEnacl,   _} = timer:tc(fun() -> [enacl:crypto_ed25519_scalarmult_base(S) || S <- ScalarsEnacl], ok end),
-  {TimeEd25519, _} = timer:tc(fun() -> [ecu_ed25519:scalar_mul_base(S)          || S <- ScalarsEd25519], ok end),
+  {TimeSecp,    _} = timer:tc(fun() -> [ecu_secp256k1:scalar_mul_base(S)        || S <- ScalarsSecp] end),
+  {TimeSecpRef, _} = timer:tc(fun() -> [crypto:generate_key(ecdh, secp256k1)    || _ <- ScalarsSecpRef] end),
+  {TimeEnacl,   _} = timer:tc(fun() -> [enacl:crypto_ed25519_scalarmult_base(S) || S <- ScalarsEnacl] end),
+  {TimeEd25519, _} = timer:tc(fun() -> [ecu_ed25519:scalar_mul_base(S)          || S <- ScalarsEd25519] end),
+  {TimeEd448,   _} = timer:tc(fun() -> [ecu_ed448:scalar_mul_base(S)            || S <- ScalarsEd448] end),
+  {TimeEd448Ref,_} = timer:tc(fun() -> [crypto:generate_key(eddsa, ed448, S)    || S <- ScalarsEd448Ref] end),
 
   ?debugFmt("", []),
   stats("Scalar mul base", "ecu_secp256k1   ", length(ScalarsSecp), TimeSecp),
   stats("Scalar mul base", "crypto (secp256k1)", length(ScalarsSecpRef), TimeSecpRef),
   stats("Scalar mul base", "enacl/libsodium ", length(ScalarsEnacl), TimeEnacl),
   stats("Scalar mul base", "ecu_ed25519     ", length(ScalarsEd25519), TimeEd25519),
+  stats("Scalar mul base", "crypto (ed448)  ", length(ScalarsEd448Ref), TimeEd448Ref),
+  stats("Scalar mul base", "ecu_ed448       ", length(ScalarsEd448), TimeEd448),
   diff(TimeSecpRef / length(ScalarsSecpRef), TimeSecp / length(ScalarsSecp)),
   diff(TimeEnacl / length(ScalarsEnacl), TimeEd25519 / length(ScalarsEd25519)),
+  diff(TimeEd448Ref / length(ScalarsEd448Ref), TimeEd448 / length(ScalarsEd448)),
   ok.
 
 bench_scalar_mul_test() ->
