@@ -303,8 +303,8 @@ the library incorporates key algorithmic optimizations:
 | **frost ed448 part sign** | — | **5.95 ms** | — | 560 µs (frost-ed448 Rust NIF) | 10.6× |
 | **frost ed448 aggregate** | — | **6.00 ms** | — | 1.10 ms (frost-ed448 Rust NIF) | 5.5× |
 | **frost ed448 verify** | — | **2.38 ms** | — | 691 µs (frost-ed448 Rust NIF) | 3.4× |
-| **keccak256 (Ethereum)** | — | **166 µs** | — | 0.31 µs (rustcrypto NIF) | 535× |
-| **sha3_256 (NIST)** | — | **167 µs** | — | 0.44 µs (crypto / OpenSSL) | 380× |
+| **keccak256 (Ethereum)** | — | **81.9 µs** | — | 0.35 µs (rustcrypto NIF) | 234× |
+| **sha3_256 (NIST)** | — | **81.5 µs** | — | 0.44 µs (crypto / OpenSSL) | 185× |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
