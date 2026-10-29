@@ -280,28 +280,29 @@ the library incorporates key algorithmic optimizations:
 | **ed448 verify** | — | **2.46 ms** | — | 154 µs (crypto / OpenSSL) | 16.0× |
 | **x25519 compute_key** | — | **575 µs** | — | 47.6 µs (enacl) / 63.2 µs (crypto) | 12.1× |
 | **x448 compute_key** | — | **1.69 ms** | — | 205 µs (crypto / OpenSSL) | 8.2× |
-| **frost ed25519 commit** | — | **329 µs** | — | —* | — |
-| **frost ed25519 part sign** | — | **2.12 ms** | — | —* | — |
-| **frost ed25519 aggregate** | — | **2.32 ms** | — | —* | — |
-| **frost ed25519 verify** | — | **929 µs** | — | —* | — |
-| **frost secp256k1 commit** | — | **331 µs** | — | —* | — |
-| **frost secp256k1 part sign** | — | **2.50 ms** | — | —* | — |
-| **frost secp256k1 aggregate** | — | **2.64 ms** | — | —* | — |
-| **frost secp256k1 verify** | — | **1.02 ms** | — | —* | — |
-| **frost bip340 commit** | — | **351 µs** | — | —* | — |
-| **frost bip340 part sign** | — | **2.52 ms** | — | —* | — |
-| **frost bip340 aggregate** | — | **2.59 ms** | — | —* | — |
-| **frost bip340 verify** | — | **1.02 ms** | — | —* | — |
-| **frost ed448 commit** | — | **1.11 ms** | — | —* | — |
-| **frost ed448 part sign** | — | **5.95 ms** | — | —* | — |
-| **frost ed448 aggregate** | — | **6.00 ms** | — | —* | — |
-| **frost ed448 verify** | — | **2.38 ms** | — | —* | — |
+| **frost ed25519 commit** | — | **329 µs** | — | 63.5 µs (frost-ed25519 Rust NIF) | 5.2× |
+| **frost ed25519 part sign** | — | **2.12 ms** | — | 102 µs (frost-ed25519 Rust NIF) | 20.8× |
+| **frost ed25519 aggregate** | — | **2.32 ms** | — | 183 µs (frost-ed25519 Rust NIF) | 12.7× |
+| **frost ed25519 verify** | — | **929 µs** | — | 99.9 µs (frost-ed25519 Rust NIF) | 9.3× |
+| **frost secp256k1 commit** | — | **331 µs** | — | 75.1 µs (frost-secp256k1 Rust NIF) | 4.4× |
+| **frost secp256k1 part sign** | — | **2.50 ms** | — | 150 µs (frost-secp256k1 Rust NIF) | 16.7× |
+| **frost secp256k1 aggregate** | — | **2.64 ms** | — | 245 µs (frost-secp256k1 Rust NIF) | 10.8× |
+| **frost secp256k1 verify** | — | **1.02 ms** | — | 117 µs (frost-secp256k1 Rust NIF) | 8.7× |
+| **frost bip340 commit** | — | **351 µs** | — | 75.7 µs (frost-secp256k1-tr Rust NIF) | 4.6× |
+| **frost bip340 part sign** | — | **2.52 ms** | — | 165 µs (frost-secp256k1-tr Rust NIF) | 15.3× |
+| **frost bip340 aggregate** | — | **2.59 ms** | — | 262 µs (frost-secp256k1-tr Rust NIF) | 9.9× |
+| **frost bip340 verify** | — | **1.02 ms** | — | 133 µs (frost-secp256k1-tr Rust NIF) | 7.7× |
+| **frost ed448 commit** | — | **1.11 ms** | — | 441 µs (frost-ed448 Rust NIF) | 2.5× |
+| **frost ed448 part sign** | — | **5.95 ms** | — | 560 µs (frost-ed448 Rust NIF) | 10.6× |
+| **frost ed448 aggregate** | — | **6.00 ms** | — | 1.10 ms (frost-ed448 Rust NIF) | 5.5× |
+| **frost ed448 verify** | — | **2.38 ms** | — | 691 µs (frost-ed448 Rust NIF) | 3.4× |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
 - *Pure Erlang `secp256k1` base-point scalar multiplication is faster than OpenSSL due to the precomputed 1,024-entry comb table.*
 - *BIP-340 Schnorr reference benchmarks use an optional test NIF (`k256`) buildable via `make schnorr_reference`.*
-- `*` *FROST threshold operations do not have standard native OpenSSL or libsodium NIF bindings in the Erlang ecosystem.*
+- *FROST threshold reference benchmarks use optional RFC 9591 test NIFs (Zcash Foundation `frost-core` crates) buildable via `make frost_reference`.*
+- *Both reference NIFs can be built together using `make reference_nifs`.*
 
 Roadmap
 -------

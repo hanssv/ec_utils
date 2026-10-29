@@ -178,3 +178,29 @@ prop_default_ed25519() ->
     Sig = ecu_frost:aggregate(CommitmentList, Msg, GroupPubKey, SigShares),
     ecu_frost:verify(Sig, Msg, GroupPubKey)
   end).
+
+%% Differential property against official Zcash FROST reference implementation (RFC 9591)
+prop_frost_reference_equivalence() ->
+  case ecu_frost_nif:is_available() of
+    false ->
+      true;
+    true ->
+      ?FORALL({CS, {T, N}, Msg}, {gen_ciphersuite(), gen_params(), binary()},
+      begin
+        %% 1. Generate signature in Erlang, verify with Rust NIF
+        {Shares, GroupPubKey, _} = ecu_frost:trusted_dealer_keygen(CS, T, N),
+        Selected = lists:sublist(Shares, T),
+        Nonces = [ {Id, S, ecu_frost:commit(CS, S)} || {Id, S} <- Selected ],
+        CommitmentList = [ {Id, HC, BC} || {Id, _, {_, {HC, BC}}} <- Nonces ],
+        SigShares = [ ecu_frost:sign(CS, Id, S, GroupPubKey, NoncePair, Msg, CommitmentList)
+                      || {Id, S, {NoncePair, _}} <- Nonces ],
+        Signature = ecu_frost:aggregate(CS, CommitmentList, Msg, GroupPubKey, SigShares),
+        RustVerifiesErlang = ecu_frost_nif:verify(CS, Signature, Msg, GroupPubKey),
+
+        %% 2. Generate signature in Rust, verify with Erlang
+        {RustSig, RustPK} = ecu_frost_nif:sign_sample(CS, T, N, Msg),
+        ErlangVerifiesRust = ecu_frost:verify(CS, RustSig, Msg, RustPK),
+
+        RustVerifiesErlang andalso ErlangVerifiesRust
+      end)
+  end.

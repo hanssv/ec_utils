@@ -21,3 +21,4 @@ rebar3.crashdump
 current_counterexample.eqc
 crates/**/target
 priv/ecu_schnorr_nif.*
+priv/ecu_frost_nif.*

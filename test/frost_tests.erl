@@ -597,11 +597,11 @@ benchmark_frost_ed25519_test() ->
   end),
 
   ?assert(Valid),
-  ?debugFmt("~nFROST Ed25519 (t=~p, n=~p) Benchmarks:", [T, N]),
-  ?debugFmt("Commit (x~p):     ~.2f us/op (~.2f us/participant)", [T, CommitTime / 1, CommitTime / T]),
-  ?debugFmt("Part Sign (x~p):  ~.2f us/op (~.2f us/participant)", [T, SignTime / 1, SignTime / T]),
-  ?debugFmt("Aggregate:        ~.2f us/op", [AggTime / 1]),
-  ?debugFmt("Final Verify:     ~.2f us/op", [VerifyTime / 1]).
+  case ecu_frost_nif:is_available() of
+    true -> ?assert(ecu_frost_nif:verify(ed25519, Signature, Msg, GroupPubKey));
+    false -> ok
+  end,
+  report_frost_bench(ed25519, T, CommitTime, SignTime, AggTime, VerifyTime).
 
 benchmark_frost_secp256k1_test() ->
   T = 3,
@@ -634,11 +634,11 @@ benchmark_frost_secp256k1_test() ->
   end),
 
   ?assert(Valid),
-  ?debugFmt("~nFROST secp256k1 (t=~p, n=~p) Benchmarks:", [T, N]),
-  ?debugFmt("Commit (x~p):     ~.2f us/op (~.2f us/participant)", [T, CommitTime / 1, CommitTime / T]),
-  ?debugFmt("Part Sign (x~p):  ~.2f us/op (~.2f us/participant)", [T, SignTime / 1, SignTime / T]),
-  ?debugFmt("Aggregate:        ~.2f us/op", [AggTime / 1]),
-  ?debugFmt("Final Verify:     ~.2f us/op", [VerifyTime / 1]).
+  case ecu_frost_nif:is_available() of
+    true -> ?assert(ecu_frost_nif:verify(secp256k1, Signature, Msg, GroupPubKey));
+    false -> ok
+  end,
+  report_frost_bench(secp256k1, T, CommitTime, SignTime, AggTime, VerifyTime).
 
 benchmark_frost_bip340_test() ->
   T = 3,
@@ -671,11 +671,11 @@ benchmark_frost_bip340_test() ->
   end),
 
   ?assert(Valid),
-  ?debugFmt("~nFROST BIP-340 (t=~p, n=~p) Benchmarks:", [T, N]),
-  ?debugFmt("Commit (x~p):     ~.2f us/op (~.2f us/participant)", [T, CommitTime / 1, CommitTime / T]),
-  ?debugFmt("Part Sign (x~p):  ~.2f us/op (~.2f us/participant)", [T, SignTime / 1, SignTime / T]),
-  ?debugFmt("Aggregate:        ~.2f us/op", [AggTime / 1]),
-  ?debugFmt("Final Verify:     ~.2f us/op", [VerifyTime / 1]).
+  case ecu_frost_nif:is_available() of
+    true -> ?assert(ecu_frost_nif:verify(bip340, Signature, Msg, GroupPubKey));
+    false -> ok
+  end,
+  report_frost_bench(bip340, T, CommitTime, SignTime, AggTime, VerifyTime).
 
 benchmark_frost_ed448_test() ->
   T = 3,
@@ -708,11 +708,35 @@ benchmark_frost_ed448_test() ->
   end),
 
   ?assert(Valid),
-  ?debugFmt("~nFROST Ed448 (t=~p, n=~p) Benchmarks:", [T, N]),
+  case ecu_frost_nif:is_available() of
+    true -> ?assert(ecu_frost_nif:verify(ed448, Signature, Msg, GroupPubKey));
+    false -> ok
+  end,
+  report_frost_bench(ed448, T, CommitTime, SignTime, AggTime, VerifyTime).
+
+report_frost_bench(Suite, T, CommitTime, SignTime, AggTime, VerifyTime) ->
+  SuiteName = case Suite of
+                ed25519 -> "Ed25519";
+                secp256k1 -> "secp256k1";
+                bip340 -> "BIP-340";
+                ed448 -> "Ed448"
+              end,
+  ?debugFmt("~nFROST ~s (t=~p, n=5) Benchmarks:", [SuiteName, T]),
   ?debugFmt("Commit (x~p):     ~.2f us/op (~.2f us/participant)", [T, CommitTime / 1, CommitTime / T]),
   ?debugFmt("Part Sign (x~p):  ~.2f us/op (~.2f us/participant)", [T, SignTime / 1, SignTime / T]),
   ?debugFmt("Aggregate:        ~.2f us/op", [AggTime / 1]),
-  ?debugFmt("Final Verify:     ~.2f us/op", [VerifyTime / 1]).
+  ?debugFmt("Final Verify:     ~.2f us/op", [VerifyTime / 1]),
+  case ecu_frost_nif:is_available() of
+    true ->
+      {RefCommit, RefSign, RefAgg, RefVerify} = ecu_frost_nif:bench_round(Suite, T, 5),
+      ?debugFmt("Reference (Rust RFC 9591 NIF):", []),
+      ?debugFmt("  Commit:     ~.2f us/op (diff x~.2f)", [RefCommit, (CommitTime / T) / RefCommit]),
+      ?debugFmt("  Part Sign:  ~.2f us/op (diff x~.2f)", [RefSign, (SignTime / T) / RefSign]),
+      ?debugFmt("  Aggregate:  ~.2f us/op (diff x~.2f)", [RefAgg, AggTime / RefAgg]),
+      ?debugFmt("  Verify:     ~.2f us/op (diff x~.2f)", [RefVerify, VerifyTime / RefVerify]);
+    false ->
+      ok
+  end.
 
 %% ===================================================================
 %% Security Regression Tests (Audit Findings)

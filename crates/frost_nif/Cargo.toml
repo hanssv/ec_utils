@@ -1,0 +1,17 @@
+[package]
+name = "ecu_frost_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ecu_frost_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+frost-core = "3.0.0"
+frost-ed25519 = "3.0.0"
+frost-secp256k1 = "3.0.0"
+frost-secp256k1-tr = "3.0.0"
+frost-ed448 = "3.0.0"
+rand = "0.8"
+rustler = "0.39.0"

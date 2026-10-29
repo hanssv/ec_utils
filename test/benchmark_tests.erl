@@ -304,6 +304,48 @@ bench_bip340_test() ->
   end,
   ok.
 
+bench_frost_test() ->
+  case ecu_frost_nif:is_available() of
+    true ->
+      lists:foreach(fun(Suite) ->
+        {Shares, GroupPubKey, _} = ecu_frost:trusted_dealer_keygen(Suite, 3, 5),
+        Selected = lists:sublist(Shares, 3),
+        Msg = <<"Benchmark FROST message">>,
+        {CommitTime, Nonces} = timer:tc(fun() ->
+          [ {Id, S, ecu_frost:commit(Suite, S)} || {Id, S} <- Selected ]
+        end),
+        CommitmentList = [ {Id, HC, BC} || {Id, _, {_, {HC, BC}}} <- Nonces ],
+        {SignTime, SigShares} = timer:tc(fun() ->
+          [ ecu_frost:sign(Suite, Id, S, GroupPubKey, NoncePair, Msg, CommitmentList)
+            || {Id, S, {NoncePair, _}} <- Nonces ]
+        end),
+        {AggTime, Signature} = timer:tc(fun() ->
+          ecu_frost:aggregate(Suite, CommitmentList, Msg, GroupPubKey, SigShares)
+        end),
+        {VerifyTime, _} = timer:tc(fun() ->
+          ecu_frost:verify(Suite, Signature, Msg, GroupPubKey)
+        end),
+        {RefCommit, RefSign, RefAgg, RefVerify} = ecu_frost_nif:bench_round(Suite, 3, 5),
+        SuiteStr = atom_to_list(Suite),
+        ?debugFmt("", []),
+        stats("FROST " ++ SuiteStr ++ " commit", "ecu_frost       ", 3, CommitTime),
+        stats("FROST " ++ SuiteStr ++ " commit", "frost (Rust NIF)", 1, RefCommit),
+        diff(RefCommit, CommitTime / 3),
+        stats("FROST " ++ SuiteStr ++ " part sign", "ecu_frost       ", 3, SignTime),
+        stats("FROST " ++ SuiteStr ++ " part sign", "frost (Rust NIF)", 1, RefSign),
+        diff(RefSign, SignTime / 3),
+        stats("FROST " ++ SuiteStr ++ " aggregate", "ecu_frost       ", 1, AggTime),
+        stats("FROST " ++ SuiteStr ++ " aggregate", "frost (Rust NIF)", 1, RefAgg),
+        diff(RefAgg, AggTime),
+        stats("FROST " ++ SuiteStr ++ " verify", "ecu_frost       ", 1, VerifyTime),
+        stats("FROST " ++ SuiteStr ++ " verify", "frost (Rust NIF)", 1, RefVerify),
+        diff(RefVerify, VerifyTime)
+      end, [ed25519, secp256k1, bip340, ed448]);
+    false ->
+      ?debugFmt("FROST: reference NIF not built (run 'make frost_reference' to enable)", [])
+  end,
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 
