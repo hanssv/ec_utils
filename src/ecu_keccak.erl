@@ -20,6 +20,14 @@
 %%%      a single function pass to eliminate intermediate 25-tuple heap allocations.
 %%%   4. Branchless 64-bit uint arithmetic using bitwise operations (`?CAN64`,
 %%%      `?ROTL64`) that stay strictly within 64-bit positive integers.
+%%%
+%%% Note on usage:
+%%%   `ecu_keccak` is provided to ensure `ec_utils` remains completely self-contained
+%%%   with zero external C dependencies for Ethereum message signing/recovery
+%%%   (`ecu_crypto:eth_msg_recover/2`), address derivation, and Ed448/SHAKE256.
+%%%   Do NOT use this library if you only require standalone, high-throughput hash
+%%%   functions! For bulk or streaming hashing, use OTP's built-in `crypto:hash/2`
+%%%   (for NIST SHA-3) or a dedicated native NIF, which are ~40x–70x faster.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(ecu_keccak).

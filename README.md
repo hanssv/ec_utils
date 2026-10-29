@@ -247,6 +247,10 @@ Supported Curves & API
   - `sha3_224/1`, `sha3_256/1`, `sha3_384/1`, `sha3_512/1`: Standard NIST FIPS 202 SHA-3 hash functions.
   - `shake128/2`, `shake256/2`: Keccak extendable-output functions (XOF).
 
+> [!NOTE]
+> `ecu_keccak` exists to keep `ec_utils` fully self-contained with zero external C dependencies for Ethereum message signing and recovery (`eth_msg_recover/2`), address derivation, and Ed448/SHAKE256.
+> **Do not use this library for standalone hash functions alone!** If your application only requires high-throughput hashing or processes large volumes of data, use OTP's built-in `crypto:hash/2` (for NIST SHA-3) or a dedicated C/Rust NIF (such as `sha3`), which are ~40×–70× faster.
+
 Performance & Benchmarks
 ------------------------
 

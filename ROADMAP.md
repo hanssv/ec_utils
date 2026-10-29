@@ -74,14 +74,16 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 6. Pure-Erlang Keccak-256 & SHA-3 (Zero External Dependencies)
+## 6. Pure-Erlang Keccak-256 & SHA-3 (Zero External Dependencies) `[Completed]`
 
 - **Standard**: Keccak Sponge Function Family / FIPS 202 (SHA-3, SHAKE) & Ethereum Keccak-256.
 - **Goal**: Implement pure-Erlang Keccak-f[1600] state permutations to eliminate the `erlang-sha3` C NIF dependency.
-- **Features**:
-  - `ecu_keccak`: Pure-Erlang Keccak-256 (pad `0x01` / Ethereum format) and NIST SHA3-224/256/384/512 (pad `0x06`).
+- **Features `[Completed]`**:
+  - `ecu_keccak`: Pure-Erlang Keccak-256 (pad `0x01` / Ethereum format), NIST SHA3-224/256/384/512 (pad `0x06`), and SHAKE128/256 XOF.
+  - Zero external production dependencies (`{deps, []}` in `rebar.config`).
   - Seamless zero-dependency address recovery in `ecu_crypto:eth_recover/2` and Ethereum signing.
-  - Test vectors and differential testing against OTP `crypto` and `erlang-sha3`.
+  - Optimized direct binary padding, zero-bignum state pipeline, and fused 4-round permutation achieving ~80.7 µs/op.
+  - Test vectors and differential testing against OTP `crypto` and `ecu_rustcrypto_nif`.
 
 ---
 
