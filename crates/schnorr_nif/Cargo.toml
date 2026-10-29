@@ -1,0 +1,12 @@
+[package]
+name = "ecu_schnorr_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ecu_schnorr_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+k256 = { version = "0.14.0", features = ["schnorr"] }
+rustler = "0.39.0"

@@ -266,8 +266,8 @@ the library incorporates key algorithmic optimizations:
 | **secp256k1 scalar mul base** | 5,377 µs | **166 µs** | **~32×** | 225 µs (crypto / OpenSSL) | **1.35× faster** |
 | **secp256k1 scalar mul** | — | **760 µs** | — | 243 µs (crypto / OpenSSL) | 3.1× |
 | **secp256k1 eth_recover** | 7,810 µs | **893 µs** | **~8.7×** | 54.1 µs (Rust NIF) | 16.5× |
-| **secp256k1 bip340 sign** | — | **370 µs** | — | —* | — |
-| **secp256k1 bip340 verify** | — | **996 µs** | — | —* | — |
+| **secp256k1 bip340 sign** | — | **370 µs** | — | 54.2 µs (k256 Rust NIF) | 6.8× |
+| **secp256k1 bip340 verify** | — | **996 µs** | — | 49.6 µs (k256 Rust NIF) | 19.9× |
 | **ed25519 scalar mul base** | 746 µs | **122 µs** | **~6.1×** | 14.9 µs (enacl) | 8.2× |
 | **ed25519 scalar mul** | 741 µs | **614 µs** | **~1.2×** | 71.8 µs (enacl) | 8.6× |
 | **ed25519 sign** | 739 µs | **272 µs** | **~2.7×** | 16.1 µs (enacl) | 16.9× |
@@ -300,7 +300,8 @@ the library incorporates key algorithmic optimizations:
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
 - *Pure Erlang `secp256k1` base-point scalar multiplication is faster than OpenSSL due to the precomputed 1,024-entry comb table.*
-- `*` *BIP-340 Schnorr and FROST threshold operations do not have standard native OpenSSL or libsodium NIF bindings in the Erlang ecosystem.*
+- *BIP-340 Schnorr reference benchmarks use an optional test NIF (`k256`) buildable via `make schnorr_reference`.*
+- `*` *FROST threshold operations do not have standard native OpenSSL or libsodium NIF bindings in the Erlang ecosystem.*
 
 Roadmap
 -------

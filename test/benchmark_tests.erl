@@ -266,6 +266,36 @@ bench_ecdh_test() ->
   diff(TimeSecpCrypto / N256Ref, TimeSecpECU / N256),
   ok.
 
+bench_bip340_test() ->
+  Priv = <<1:256>>,
+  Msg = <<"Benchmark BIP-340 Schnorr">>,
+  Aux = <<0:256>>,
+  #{public := Pub} = ecu_schnorr:sign_keypair_from_secret(Priv),
+  Sig = ecu_schnorr:sign(Msg, Priv, Aux),
+
+  case ecu_schnorr_nif:is_available() of
+    true ->
+      NRef = 1000,
+      NECU = 50,
+      {TimeNifSign, _} = timer:tc(fun() -> [ecu_schnorr_nif:sign(Priv, Msg, Aux) || _ <- lists:seq(1, NRef)] end),
+      {TimeEcuSign, _} = timer:tc(fun() -> [ecu_schnorr:sign(Msg, Priv, Aux) || _ <- lists:seq(1, NECU)] end),
+
+      {TimeNifVerify, _} = timer:tc(fun() -> [ecu_schnorr_nif:verify(Sig, Msg, Pub) || _ <- lists:seq(1, NRef)] end),
+      {TimeEcuVerify, _} = timer:tc(fun() -> [ecu_schnorr:verify(Sig, Msg, Pub) || _ <- lists:seq(1, NECU)] end),
+
+      ?debugFmt("", []),
+      stats("BIP-340 sign", "k256 (Rust NIF) ", NRef, TimeNifSign),
+      stats("BIP-340 sign", "ecu_schnorr     ", NECU, TimeEcuSign),
+      diff(TimeNifSign / NRef, TimeEcuSign / NECU),
+
+      stats("BIP-340 verify", "k256 (Rust NIF) ", NRef, TimeNifVerify),
+      stats("BIP-340 verify", "ecu_schnorr     ", NECU, TimeEcuVerify),
+      diff(TimeNifVerify / NRef, TimeEcuVerify / NECU);
+    false ->
+      ?debugFmt("BIP-340: k256 reference NIF not built (run 'make schnorr_reference' to enable)", [])
+  end,
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

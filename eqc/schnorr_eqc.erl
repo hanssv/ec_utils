@@ -83,3 +83,26 @@ prop_verify_tampered_pubkey() ->
       false -> not ecu_schnorr:verify(Sig1, Msg, Pub2)
     end
   end).
+
+%% Cross-validation against Rust k256 reference NIF (when available)
+prop_k256_reference_equivalence() ->
+  case ecu_schnorr_nif:is_available() of
+    false ->
+      true;
+    true ->
+      ?FORALL({Priv, Msg, Aux}, {gen_privkey(), binary(), binary(32)},
+      begin
+        #{public := EcuPub, secret := Sec} = ecu_schnorr:sign_keypair_from_secret(Priv),
+        NifPub = ecu_schnorr_nif:public_key(Priv),
+
+        EcuSig = ecu_schnorr:sign(Msg, Sec, Aux),
+        NifSig = ecu_schnorr_nif:sign(Priv, Msg, Aux),
+
+        conjunction([
+          {pubkeys_match, equals(EcuPub, NifPub)},
+          {signatures_match, equals(EcuSig, NifSig)},
+          {ecu_verifies_nif, equals(true, ecu_schnorr:verify(NifSig, Msg, EcuPub))},
+          {nif_verifies_ecu, equals(true, ecu_schnorr_nif:verify(EcuSig, Msg, NifPub))}
+        ])
+      end)
+  end.

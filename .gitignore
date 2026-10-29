@@ -19,3 +19,5 @@ rebar3.crashdump
 *~
 .eqc-info
 current_counterexample.eqc
+crates/**/target
+priv/ecu_schnorr_nif.*
