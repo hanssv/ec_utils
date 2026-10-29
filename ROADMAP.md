@@ -86,16 +86,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 7. Side-Channel & Timing Mitigation (Exploratory)
-
-While pure Erlang bignum arithmetic on the BEAM is fundamentally variable-time (reliant on runtime bignum routines), high-level algorithmic timing variances can be mitigated for defense-in-depth:
-- **Branch-Free Scalar Loops**: Use uniform Montgomery ladder steps for scalar multiplication so the sequence of point operations is identical regardless of scalar bit values.
-- **Constant-Time Table Lookups**: Replace secret-indexed tuple lookups (`element(W + 1, Table)`) with branchless bitwise selection across table entries.
-- **Scalar & Coordinate Blinding**: Randomize Jacobian/projective coordinates ($(X \cdot r^2, Y \cdot r^3, Z \cdot r)$) and blind secret scalars ($k' = k + r \cdot N$) during signing to decorrelate execution timing from secret keys.
-
----
-
-## 8. Packaging & Packaging Readiness
+## 7. Packaging & Release Readiness
 
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.
