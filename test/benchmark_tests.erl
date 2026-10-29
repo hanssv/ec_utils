@@ -35,36 +35,47 @@ bench_point_add_test() ->
 bench_scalar_mul_base_test() ->
   Scalars0 = [ <<(gen_scalar()):256/little>> || _ <- lists:seq(1, 100) ],
   ScalarsSecp    = lists:append(lists:duplicate(1, Scalars0)),
+  ScalarsSecpRef = lists:append(lists:duplicate(10, Scalars0)),
   ScalarsEnacl   = lists:append(lists:duplicate(100, Scalars0)),
   ScalarsEd25519 = lists:append(lists:duplicate(30, Scalars0)),
 
   {TimeSecp,    _} = timer:tc(fun() -> [ecu_secp256k1:scalar_mul_base(S)        || S <- ScalarsSecp], ok end),
+  {TimeSecpRef, _} = timer:tc(fun() -> [crypto:generate_key(ecdh, secp256k1)    || _ <- ScalarsSecpRef], ok end),
   {TimeEnacl,   _} = timer:tc(fun() -> [enacl:crypto_ed25519_scalarmult_base(S) || S <- ScalarsEnacl], ok end),
   {TimeEd25519, _} = timer:tc(fun() -> [ecu_ed25519:scalar_mul_base(S)          || S <- ScalarsEd25519], ok end),
 
   ?debugFmt("", []),
-  stats("Scalar mul base", "ecu_secp256k1  ", length(ScalarsSecp), TimeSecp),
-  stats("Scalar mul base", "enacl/libsodium", length(ScalarsEnacl), TimeEnacl),
-  stats("Scalar mul base", "ecu_ed25519    ", length(ScalarsEd25519), TimeEd25519),
+  stats("Scalar mul base", "ecu_secp256k1   ", length(ScalarsSecp), TimeSecp),
+  stats("Scalar mul base", "crypto (secp256k1)", length(ScalarsSecpRef), TimeSecpRef),
+  stats("Scalar mul base", "enacl/libsodium ", length(ScalarsEnacl), TimeEnacl),
+  stats("Scalar mul base", "ecu_ed25519     ", length(ScalarsEd25519), TimeEd25519),
+  diff(TimeSecpRef / length(ScalarsSecpRef), TimeSecp / length(ScalarsSecp)),
   diff(TimeEnacl / length(ScalarsEnacl), TimeEd25519 / length(ScalarsEd25519)),
   ok.
 
 bench_scalar_mul_test() ->
   Scalars0 = [ <<(gen_scalar()):256/little>> || _ <- lists:seq(1, 100) ],
   ScalarsSecp    = lists:append(lists:duplicate(1, Scalars0)),
+  ScalarsSecpRef = lists:append(lists:duplicate(10, Scalars0)),
   ScalarsEnacl   = lists:append(lists:duplicate(100, Scalars0)),
   ScalarsEd25519 = lists:append(lists:duplicate(10, Scalars0)),
 
   Test = fun(F, P0, Ss) -> lists:foldl(fun(S, P) -> F(S, P) end, P0, Ss) end,
 
   {TimeSecp,    _} = timer:tc(fun() -> Test(fun ecu_secp256k1:scalar_mul/2,        ecu_secp256k1:scalar_mul_base(hd(ScalarsSecp)),         tl(ScalarsSecp)) end),
+  {TimeSecpRef, _} = timer:tc(fun() ->
+    BasePub = ecu_ecdsa:private_to_public(secp256k1, hd(ScalarsSecp)),
+    [crypto:compute_key(ecdh, BasePub, S, secp256k1) || S <- ScalarsSecpRef]
+  end),
   {TimeEnacl,   _} = timer:tc(fun() -> Test(fun enacl:crypto_ed25519_scalarmult/2, enacl:crypto_ed25519_scalarmult_base(hd(ScalarsEnacl)), tl(ScalarsEnacl)) end),
   {TimeEd25519, _} = timer:tc(fun() -> Test(fun ecu_ed25519:scalar_mul/2,          ecu_ed25519:scalar_mul_base(hd(ScalarsEd25519)),        tl(ScalarsEd25519)) end),
 
   ?debugFmt("", []),
-  stats("Scalar mul", "ecu_secp256k1  ", length(ScalarsSecp), TimeSecp),
-  stats("Scalar mul", "enacl/libsodium", length(ScalarsEnacl), TimeEnacl),
-  stats("Scalar mul", "ecu_ed25519    ", length(ScalarsEd25519), TimeEd25519),
+  stats("Scalar mul", "ecu_secp256k1   ", length(ScalarsSecp), TimeSecp),
+  stats("Scalar mul", "crypto (secp256k1)", length(ScalarsSecpRef), TimeSecpRef),
+  stats("Scalar mul", "enacl/libsodium ", length(ScalarsEnacl), TimeEnacl),
+  stats("Scalar mul", "ecu_ed25519     ", length(ScalarsEd25519), TimeEd25519),
+  diff(TimeSecpRef / length(ScalarsSecpRef), TimeSecp / length(ScalarsSecp)),
   diff(TimeEnacl / length(ScalarsEnacl), TimeEd25519 / length(ScalarsEd25519)),
   ok.
 
@@ -151,6 +162,108 @@ bench_ecverify_test() ->
   stats("Message verify", "ecrecover (Rust)", length(RustData), TimeRust),
   stats("Message verify", "ecu_crypto      ", length(ECUData), TimeECU),
   diff(TimeRust / length(RustData), TimeECU / length(ECUData)),
+  ok.
+
+bench_ed448_sign_verify_test() ->
+  Seeds = [ crypto:strong_rand_bytes(57) || _ <- lists:seq(1, 10) ],
+  KeyPairs = [ ecu_eddsa448:sign_seed_keypair(S) || S <- Seeds ],
+  Messages = [ crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49) ],
+  Data = [ {maps:get(secret, K), maps:get(public, K), Seed, Msg}
+           || {{K, Seed}, Msg} <- lists:zip(lists:append(lists:duplicate(3, lists:zip(KeyPairs, Seeds))),
+                                            Messages) ],
+
+  CryptoData = lists:append(lists:duplicate(10, Data)),
+  ECUData = lists:append(lists:duplicate(1, Data)),
+
+  %% Sign
+  {TimeSignCrypto, _} = timer:tc(fun() ->
+    [ crypto:sign(eddsa, none, Msg, [Seed, ed448]) || {_, _, Seed, Msg} <- CryptoData ]
+  end),
+  {TimeSignECU, _} = timer:tc(fun() ->
+    [ ecu_eddsa448:sign_detached(Msg, Sec) || {Sec, _, _, Msg} <- ECUData ]
+  end),
+
+  ?debugFmt("", []),
+  stats("Ed448 sign", "crypto (OpenSSL)", length(CryptoData), TimeSignCrypto),
+  stats("Ed448 sign", "ecu_eddsa448   ", length(ECUData), TimeSignECU),
+  diff(TimeSignCrypto / length(CryptoData), TimeSignECU / length(ECUData)),
+
+  %% Verify
+  Sigs = [ {Sec, Pub, Msg, ecu_eddsa448:sign_detached(Msg, Sec)} || {Sec, Pub, _, Msg} <- Data ],
+  CryptoVerifyData = lists:append(lists:duplicate(10, Sigs)),
+  ECUVerifyData = lists:append(lists:duplicate(1, Sigs)),
+
+  {TimeVerifyCrypto, _} = timer:tc(fun() ->
+    [ crypto:verify(eddsa, none, Msg, Sig, [Pub, ed448]) || {_, Pub, Msg, Sig} <- CryptoVerifyData ]
+  end),
+  {TimeVerifyECU, _} = timer:tc(fun() ->
+    [ ecu_eddsa448:sign_verify_detached(Sig, Msg, Pub) || {_, Pub, Msg, Sig} <- ECUVerifyData ]
+  end),
+
+  ?debugFmt("", []),
+  stats("Ed448 verify", "crypto (OpenSSL)", length(CryptoVerifyData), TimeVerifyCrypto),
+  stats("Ed448 verify", "ecu_eddsa448   ", length(ECUVerifyData), TimeVerifyECU),
+  diff(TimeVerifyCrypto / length(CryptoVerifyData), TimeVerifyECU / length(ECUVerifyData)),
+  ok.
+
+bench_ecdh_test() ->
+  %% X25519
+  {_PubA25519, PrivA25519} = ecu_ecdh:keypair(x25519),
+  {PubB25519, _PrivB25519} = ecu_ecdh:keypair(x25519),
+  N25519 = 50,
+  N25519Ref = 500,
+
+  {TimeX25519Enacl, _} = timer:tc(fun() ->
+    [ enacl:curve25519_scalarmult(PrivA25519, PubB25519) || _ <- lists:seq(1, N25519Ref) ]
+  end),
+  {TimeX25519Crypto, _} = timer:tc(fun() ->
+    [ crypto:compute_key(ecdh, PubB25519, PrivA25519, x25519) || _ <- lists:seq(1, N25519Ref) ]
+  end),
+  {TimeX25519ECU, _} = timer:tc(fun() ->
+    [ ecu_ecdh:compute_key(x25519, PubB25519, PrivA25519) || _ <- lists:seq(1, N25519) ]
+  end),
+
+  ?debugFmt("", []),
+  stats("X25519 compute_key", "enacl/libsodium ", N25519Ref, TimeX25519Enacl),
+  stats("X25519 compute_key", "crypto (OpenSSL)", N25519Ref, TimeX25519Crypto),
+  stats("X25519 compute_key", "ecu_ecdh        ", N25519, TimeX25519ECU),
+  diff(TimeX25519Enacl / N25519Ref, TimeX25519ECU / N25519),
+
+  %% X448
+  {_PubA448, PrivA448} = ecu_ecdh:keypair(x448),
+  {PubB448, _PrivB448} = ecu_ecdh:keypair(x448),
+  N448 = 20,
+  N448Ref = 200,
+
+  {TimeX448Crypto, _} = timer:tc(fun() ->
+    [ crypto:compute_key(ecdh, PubB448, PrivA448, x448) || _ <- lists:seq(1, N448Ref) ]
+  end),
+  {TimeX448ECU, _} = timer:tc(fun() ->
+    [ ecu_ecdh:compute_key(x448, PubB448, PrivA448) || _ <- lists:seq(1, N448) ]
+  end),
+
+  ?debugFmt("", []),
+  stats("X448 compute_key", "crypto (OpenSSL)", N448Ref, TimeX448Crypto),
+  stats("X448 compute_key", "ecu_ecdh        ", N448, TimeX448ECU),
+  diff(TimeX448Crypto / N448Ref, TimeX448ECU / N448),
+
+  %% secp256k1 ECDH
+  {_PubA256, PrivA256} = ecu_ecdh:keypair(secp256k1),
+  {PubB256, _PrivB256} = ecu_ecdh:keypair(secp256k1),
+  N256 = 30,
+  N256Ref = 300,
+
+  {TimeSecpCrypto, _} = timer:tc(fun() ->
+    [ crypto:compute_key(ecdh, PubB256, PrivA256, secp256k1) || _ <- lists:seq(1, N256Ref) ]
+  end),
+  {TimeSecpECU, _} = timer:tc(fun() ->
+    [ ecu_ecdh:compute_key(secp256k1, PubB256, PrivA256) || _ <- lists:seq(1, N256) ]
+  end),
+
+  ?debugFmt("", []),
+  stats("secp256k1 ECDH", "crypto (OpenSSL)", N256Ref, TimeSecpCrypto),
+  stats("secp256k1 ECDH", "ecu_ecdh        ", N256, TimeSecpECU),
+  diff(TimeSecpCrypto / N256Ref, TimeSecpECU / N256),
   ok.
 
 stats(What, Who, N, T) ->

@@ -261,41 +261,46 @@ the library incorporates key algorithmic optimizations:
 
 ### Measured Performance (`rebar3 eunit -m benchmark_tests`, Apple Silicon)
 
-| Operation | Baseline | Optimized | Speedup | Reference (Native NIF) | vs Reference |
+| Operation | Baseline | Optimized | Speedup | Reference (Native NIF / OpenSSL) | vs Reference |
 |:---|---:|---:|---:|---:|---:|
-| **secp256k1 scalar mul base** | 5,377 µs | **166 µs** | **~32×** | — | — |
+| **secp256k1 scalar mul base** | 5,377 µs | **166 µs** | **~32×** | 225 µs (crypto / OpenSSL) | **1.35× faster** |
+| **secp256k1 scalar mul** | — | **760 µs** | — | 243 µs (crypto / OpenSSL) | 3.1× |
 | **secp256k1 eth_recover** | 7,810 µs | **893 µs** | **~8.7×** | 54.1 µs (Rust NIF) | 16.5× |
-| **secp256k1 bip340 sign** | — | **370 µs** | — | — | — |
-| **secp256k1 bip340 verify** | — | **996 µs** | — | — | — |
+| **secp256k1 bip340 sign** | — | **370 µs** | — | —* | — |
+| **secp256k1 bip340 verify** | — | **996 µs** | — | —* | — |
 | **ed25519 scalar mul base** | 746 µs | **122 µs** | **~6.1×** | 14.9 µs (enacl) | 8.2× |
 | **ed25519 scalar mul** | 741 µs | **614 µs** | **~1.2×** | 71.8 µs (enacl) | 8.6× |
 | **ed25519 sign** | 739 µs | **272 µs** | **~2.7×** | 16.1 µs (enacl) | 16.9× |
 | **ed25519 verify** | 1,496 µs | **769 µs** | **~1.9×** | 44.2 µs (enacl) | 17.4× |
 | **ed25519 verify (batch of 32)** | 846 µs/sig | **368 µs/sig** | **~2.3×** | — | — |
-| **ed25519 point add** | 1.9 µs | **2.3 µs** | ~1.0× | 12.6 µs (enacl) | **5.6× faster** |
+| **ed25519 point add** | 1.9 µs | **2.3 µs** | ~1.0× | 12.6 µs (enacl) | **5.5× faster** |
 | **ed448 scalar mul base** | — | **492 µs** | — | — | — |
 | **ed448 scalar mul** | — | **1.80 ms** | — | — | — |
-| **ed448 sign** | — | **1.06 ms** | — | — | — |
-| **ed448 verify** | — | **2.46 ms** | — | — | — |
-| **frost ed25519 commit** | — | **329 µs** | — | — | — |
-| **frost ed25519 part sign** | — | **2.12 ms** | — | — | — |
-| **frost ed25519 aggregate** | — | **2.32 ms** | — | — | — |
-| **frost ed25519 verify** | — | **929 µs** | — | — | — |
-| **frost secp256k1 commit** | — | **331 µs** | — | — | — |
-| **frost secp256k1 part sign** | — | **2.50 ms** | — | — | — |
-| **frost secp256k1 aggregate** | — | **2.64 ms** | — | — | — |
-| **frost secp256k1 verify** | — | **1.02 ms** | — | — | — |
-| **frost bip340 commit** | — | **351 µs** | — | — | — |
-| **frost bip340 part sign** | — | **2.52 ms** | — | — | — |
-| **frost bip340 aggregate** | — | **2.59 ms** | — | — | — |
-| **frost bip340 verify** | — | **1.02 ms** | — | — | — |
-| **frost ed448 commit** | — | **1.11 ms** | — | — | — |
-| **frost ed448 part sign** | — | **5.95 ms** | — | — | — |
-| **frost ed448 aggregate** | — | **6.00 ms** | — | — | — |
-| **frost ed448 verify** | — | **2.38 ms** | — | — | — |
+| **ed448 sign** | — | **1.06 ms** | — | 128 µs (crypto / OpenSSL) | 8.3× |
+| **ed448 verify** | — | **2.46 ms** | — | 154 µs (crypto / OpenSSL) | 16.0× |
+| **x25519 compute_key** | — | **575 µs** | — | 47.6 µs (enacl) / 63.2 µs (crypto) | 12.1× |
+| **x448 compute_key** | — | **1.69 ms** | — | 205 µs (crypto / OpenSSL) | 8.2× |
+| **frost ed25519 commit** | — | **329 µs** | — | —* | — |
+| **frost ed25519 part sign** | — | **2.12 ms** | — | —* | — |
+| **frost ed25519 aggregate** | — | **2.32 ms** | — | —* | — |
+| **frost ed25519 verify** | — | **929 µs** | — | —* | — |
+| **frost secp256k1 commit** | — | **331 µs** | — | —* | — |
+| **frost secp256k1 part sign** | — | **2.50 ms** | — | —* | — |
+| **frost secp256k1 aggregate** | — | **2.64 ms** | — | —* | — |
+| **frost secp256k1 verify** | — | **1.02 ms** | — | —* | — |
+| **frost bip340 commit** | — | **351 µs** | — | —* | — |
+| **frost bip340 part sign** | — | **2.52 ms** | — | —* | — |
+| **frost bip340 aggregate** | — | **2.59 ms** | — | —* | — |
+| **frost bip340 verify** | — | **1.02 ms** | — | —* | — |
+| **frost ed448 commit** | — | **1.11 ms** | — | —* | — |
+| **frost ed448 part sign** | — | **5.95 ms** | — | —* | — |
+| **frost ed448 aggregate** | — | **6.00 ms** | — | —* | — |
+| **frost ed448 verify** | — | **2.38 ms** | — | —* | — |
 
-*Note: Pure Erlang point addition is faster than `enacl` because calling the NIF
-incurs marshalling and point decompression overhead.*
+*Notes:*
+- *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
+- *Pure Erlang `secp256k1` base-point scalar multiplication is faster than OpenSSL due to the precomputed 1,024-entry comb table.*
+- `*` *BIP-340 Schnorr and FROST threshold operations do not have standard native OpenSSL or libsodium NIF bindings in the Erlang ecosystem.*
 
 Roadmap
 -------
