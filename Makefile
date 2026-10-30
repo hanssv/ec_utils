@@ -38,8 +38,20 @@ frost_reference:
 		cp crates/frost_nif/target/release/ecu_frost_nif.dll priv/ecu_frost_nif.dll; \
 	fi
 
-reference_nifs: rustcrypto_reference frost_reference
+musig2_reference:
+	mkdir -p priv
+	cd crates/musig2_nif && cargo build --release
+	@if [ -f crates/musig2_nif/target/release/libecu_musig2_nif.dylib ]; then \
+		cp crates/musig2_nif/target/release/libecu_musig2_nif.dylib priv/ecu_musig2_nif.so; \
+	elif [ -f crates/musig2_nif/target/release/libecu_musig2_nif.so ]; then \
+		cp crates/musig2_nif/target/release/libecu_musig2_nif.so priv/ecu_musig2_nif.so; \
+	elif [ -f crates/musig2_nif/target/release/ecu_musig2_nif.dll ]; then \
+		cp crates/musig2_nif/target/release/ecu_musig2_nif.dll priv/ecu_musig2_nif.dll; \
+	fi
+
+reference_nifs: rustcrypto_reference frost_reference musig2_reference
 
 clean:
 	rebar3 clean
-	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* crates/rustcrypto_nif/target crates/frost_nif/target
+	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target
+

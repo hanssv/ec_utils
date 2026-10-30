@@ -251,6 +251,19 @@ Supported Curves & API
 > `ecu_keccak` exists to keep `ec_utils` fully self-contained with zero external C dependencies for Ethereum message signing and recovery (`eth_msg_recover/2`), address derivation, and Ed448/SHAKE256.
 > **Do not use this library for standalone hash functions alone!** If your application only requires high-throughput hashing or processes large volumes of data, use OTP's built-in `crypto:hash/2` (for NIST SHA-3) or a dedicated C/Rust NIF (such as `sha3`), which are ~40×–70× faster.
 
+### MuSig2 Two-Round Multi-Signatures (BIP-327 & Ed25519)
+
+- `ecu_musig2`: Two-round Schnorr multi-signature scheme producing standard 64-byte BIP-340 or Ed25519 signatures:
+  - Supports both `bip340` (secp256k1 default) and `ed25519` ciphersuites.
+  - `key_agg/1,2`: Aggregate individual signers' public keys with rogue-key attack defense ($L$-hash and second unique key optimization).
+  - `key_agg_pubkey/1,2`: Extract the aggregated 32-byte $x$-only or compressed public key.
+  - `key_agg_coeff/2,3`: Retrieve key aggregation coefficients for individual public keys (with duplicate key support).
+  - `nonce_gen/0,1,2`: Generate secret and public nonce pairs.
+  - `nonce_agg/1,2`: Aggregate participant public nonces into an aggregate nonce point.
+  - `sign_partial/5,6`: Generate partial signatures bound to the group key, aggregate nonce, and message.
+  - `verify_partial/6,7`: Verify individual partial signatures prior to aggregation.
+  - `aggregate_partial/4,5`: Combine partial signatures into a standard 64-byte Schnorr signature with optional tweak accumulator support.
+
 Performance & Benchmarks
 ------------------------
 
@@ -309,13 +322,21 @@ the library incorporates key algorithmic optimizations:
 | **frost ed448 verify** | — | **2.38 ms** | — | 691 µs (frost-ed448 Rust NIF) | 3.4× |
 | **keccak256 (Ethereum)** | — | **81.9 µs** | — | 0.35 µs (rustcrypto NIF) | 234× |
 | **sha3_256 (NIST)** | — | **81.5 µs** | — | 0.44 µs (crypto / OpenSSL) | 185× |
+| **musig2 bip327 key_agg** | — | **1.62 ms** | — | 73.4 µs (musig2 Rust NIF) | 22.1× |
+| **musig2 bip327 nonce_gen** | — | **320 µs** | — | 51.5 µs (musig2 Rust NIF) | 6.2× |
+| **musig2 bip327 nonce_agg** | — | **145 µs** | — | 30.7 µs (musig2 Rust NIF) | 4.7× |
+| **musig2 bip327 sign_part** | — | **1.00 ms** | — | 67.3 µs (musig2 Rust NIF) | 14.9× |
+| **musig2 bip327 verify_part** | — | **2.64 ms** | — | 190 µs (musig2 Rust NIF) | 13.9× |
+| **musig2 bip327 aggregate** | — | **1.83 ms** | — | 159 µs (musig2 Rust NIF) | 11.5× |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
 - *Pure Erlang `secp256k1` base-point scalar multiplication is faster than OpenSSL due to the precomputed 1,024-entry comb table.*
 - *BIP-340 Schnorr and Keccak-256 reference benchmarks use an optional test NIF (`k256` and `sha3`) buildable via `make rustcrypto_reference`.*
 - *FROST threshold reference benchmarks use optional RFC 9591 test NIFs (Zcash Foundation `frost-core` crates) buildable via `make frost_reference`.*
-- *Both reference NIFs can be built together using `make reference_nifs`.*
+- *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
+- *All reference NIFs can be built together using `make reference_nifs`.*
+
 
 Roadmap
 -------

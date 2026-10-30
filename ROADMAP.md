@@ -87,15 +87,21 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 7. BIP-327: MuSig2 (Simple Two-Round Schnorr Multi-Signatures)
+## 7. BIP-327: MuSig2 (Simple Two-Round Schnorr Multi-Signatures) `[Completed]`
 
-- **Standard**: [BIP-327](https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki) (MuSig2 multi-signatures for BIP-340).
-- **Goal**: Enable compact $n$-of-$n$ Schnorr multi-signatures aggregated into standard 64-byte BIP-340 signatures.
-- **Features**:
-  - Key aggregation algorithm ($\mathrm{KeyAgg}$) with rogue-key attack resistance.
-  - Two-round signing protocol with nonces and partial signature aggregation.
-  - Interoperability with `ecu_schnorr` and BIP-340 Taproot verifiers.
-  - Verification against official BIP-327 test vectors.
+- **Standard**: [BIP-327](https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki) (MuSig2 multi-signatures for BIP-340) and Ed25519 MuSig2.
+- **Goal**: Enable compact $n$-of-$n$ Schnorr multi-signatures aggregated into standard 64-byte BIP-340 or Ed25519 signatures.
+- **Features `[Completed]`**:
+  - `ecu_musig2`: Pure-Erlang MuSig2 implementation supporting both `bip340` (secp256k1 default) and `ed25519`:
+    - `key_agg/1,2`, `key_agg_pubkey/1,2`, `key_agg_coeff/2,3`: Key aggregation with rogue-key attack resistance, second-unique-key handling, and duplicate public key handling.
+    - `nonce_gen/0,1,2`: Secure nonce generation (pair of secret/public nonces).
+    - `nonce_agg/1,2`: Nonce aggregation into a combined public nonce.
+    - `sign_partial/5,6`: Partial signing bound to aggregate key, aggregate nonce, and message.
+    - `verify_partial/6,7`: Verification of individual partial signatures prior to aggregation.
+    - `aggregate_partial/4,5`: Aggregation of partial signatures into standard 64-byte Schnorr signatures with optional tweak accumulator support.
+  - Optional reference NIF `ecu_musig2_nif` wrapping the official Rust `musig2` crate (`make musig2_reference`).
+  - Unit tests (`musig2_tests.erl`) and property-based differential tests (`musig2_eqc.erl`) cross-verifying pure Erlang vs Rust `musig2`.
+
 
 ---
 

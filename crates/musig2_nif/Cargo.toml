@@ -1,0 +1,13 @@
+[package]
+name = "ecu_musig2_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ecu_musig2_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+musig2 = { version = "0.4.1", default-features = true }
+rand = "0.8"
+rustler = "0.39.0"

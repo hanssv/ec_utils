@@ -369,6 +369,76 @@ bench_keccak_test() ->
   end,
   ok.
 
+bench_musig2_test() ->
+  Iters = 50,
+  SKs = [crypto:strong_rand_bytes(32) || _ <- lists:seq(1, 3)],
+  PKs = [ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK)) || SK <- SKs],
+  Msg = <<"Benchmark BIP-327">>,
+
+  %% 1. Key Aggregation
+  {TimeKeyAgg, _} = timer:tc(fun() -> [ecu_musig2:key_agg(PKs) || _ <- lists:seq(1, Iters)] end),
+  {ok, Ctx} = ecu_musig2:key_agg(PKs),
+
+  %% 2. Nonce Gen
+  {TimeNonceGen, _} = timer:tc(fun() -> [ecu_musig2:nonce_gen(hd(SKs)) || _ <- lists:seq(1, Iters)] end),
+
+  %% 3. Nonce Agg
+  NoncesList = [[begin {SN, <<_:33/binary, _:33/binary>> = PN} = ecu_musig2:nonce_gen(SK), {SN, PN} end || SK <- SKs] || _ <- lists:seq(1, Iters)],
+  {TimeNonceAgg, _} = timer:tc(fun() -> [ecu_musig2:nonce_agg([PN || {_, PN} <- Ns]) || Ns <- NoncesList] end),
+
+  {<<_:64/binary>> = SN1, <<_:33/binary, _:33/binary>> = PN1} = hd(hd(NoncesList)),
+  {ok, <<_:33/binary, _:33/binary>> = AggN} = ecu_musig2:nonce_agg([PN || {_, PN} <- hd(NoncesList)]),
+
+  %% 4. Sign Partial
+  {TimeSignPart, _} = timer:tc(fun() -> [ecu_musig2:sign_partial(Ctx, hd(SKs), SN1, AggN, Msg) || _ <- lists:seq(1, Iters)] end),
+  {ok, Psig1} = ecu_musig2:sign_partial(Ctx, hd(SKs), SN1, AggN, Msg),
+
+  %% 5. Verify Partial
+  {TimeVerifyPart, _} = timer:tc(fun() -> [ecu_musig2:verify_partial(Ctx, Psig1, PN1, hd(PKs), AggN, Msg) || _ <- lists:seq(1, Iters)] end),
+
+  Psigs = [begin {ok, P} = ecu_musig2:sign_partial(Ctx, SK, SN, AggN, Msg), P end
+           || {SK, {SN, _}} <- lists:zip(SKs, hd(NoncesList))],
+
+  %% 6. Aggregate
+  {TimeAggPart, _} = timer:tc(fun() -> [ecu_musig2:aggregate_partial(Ctx, AggN, Msg, Psigs) || _ <- lists:seq(1, Iters)] end),
+
+  ?debugFmt("", []),
+  stats("MuSig2 BIP-327 key_agg", "ecu_musig2      ", Iters, TimeKeyAgg),
+  stats("MuSig2 BIP-327 nonce_gen", "ecu_musig2    ", Iters, TimeNonceGen),
+  stats("MuSig2 BIP-327 nonce_agg", "ecu_musig2    ", Iters, TimeNonceAgg),
+  stats("MuSig2 BIP-327 sign_part", "ecu_musig2    ", Iters, TimeSignPart),
+  stats("MuSig2 BIP-327 verify_part", "ecu_musig2  ", Iters, TimeVerifyPart),
+  stats("MuSig2 BIP-327 aggregate", "ecu_musig2    ", Iters, TimeAggPart),
+
+  case ecu_musig2_nif:is_available() of
+    true ->
+      {TimeNifKeyAgg, _} = timer:tc(fun() -> [ecu_musig2_nif:key_agg(PKs) || _ <- lists:seq(1, Iters)] end),
+      {ok, {_, NifCtx}} = ecu_musig2_nif:key_agg(PKs),
+      {TimeNifNonceGen, _} = timer:tc(fun() -> [ecu_musig2_nif:nonce_gen(hd(SKs)) || _ <- lists:seq(1, Iters)] end),
+      {TimeNifNonceAgg, _} = timer:tc(fun() -> [ecu_musig2_nif:nonce_agg([PN || {_, PN} <- Ns]) || Ns <- NoncesList] end),
+      {TimeNifSignPart, _} = timer:tc(fun() -> [ecu_musig2_nif:sign(NifCtx, hd(SKs), SN1, AggN, Msg) || _ <- lists:seq(1, Iters)] end),
+      {TimeNifVerifyPart, _} = timer:tc(fun() -> [ecu_musig2_nif:verify(NifCtx, Psig1, PN1, hd(PKs), AggN, Msg) || _ <- lists:seq(1, Iters)] end),
+      {TimeNifAggPart, _} = timer:tc(fun() -> [ecu_musig2_nif:aggregate(NifCtx, AggN, Msg, Psigs) || _ <- lists:seq(1, Iters)] end),
+
+
+      stats("MuSig2 BIP-327 key_agg", "musig2 (Rust NIF)", Iters, TimeNifKeyAgg),
+      diff(TimeNifKeyAgg / Iters, TimeKeyAgg / Iters),
+      stats("MuSig2 BIP-327 nonce_gen", "musig2 (Rust NIF)", Iters, TimeNifNonceGen),
+      diff(TimeNifNonceGen / Iters, TimeNonceGen / Iters),
+      stats("MuSig2 BIP-327 nonce_agg", "musig2 (Rust NIF)", Iters, TimeNifNonceAgg),
+      diff(TimeNifNonceAgg / Iters, TimeNonceAgg / Iters),
+      stats("MuSig2 BIP-327 sign_part", "musig2 (Rust NIF)", Iters, TimeNifSignPart),
+      diff(TimeNifSignPart / Iters, TimeSignPart / Iters),
+      stats("MuSig2 BIP-327 verify_part", "musig2 (Rust NIF)", Iters, TimeNifVerifyPart),
+      diff(TimeNifVerifyPart / Iters, TimeVerifyPart / Iters),
+      stats("MuSig2 BIP-327 aggregate", "musig2 (Rust NIF)", Iters, TimeNifAggPart),
+      diff(TimeNifAggPart / Iters, TimeAggPart / Iters);
+    false ->
+      ok
+  end,
+  ok.
+
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 
