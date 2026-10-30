@@ -105,11 +105,18 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 8. Hierarchical Deterministic (HD) Wallets (BIP-32, BIP-44 & SLIP-0010) `[Completed]`
+## 8. Hierarchical Deterministic (HD) Wallets (BIP-32, BIP-44, SLIP-0010) & BIP-39 `[Completed]`
 
-- **Standard**: [BIP-32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki), [BIP-44](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki), [SLIP-0010](https://github.com/satoshilabs/slips/blob/master/slip-0010.md), and [AEX-10](https://github.com/aeternity/AEXs/blob/master/AEXS/aex-10.md).
-- **Goal**: Pure-Erlang hierarchical deterministic wallet key derivation for secp256k1 and Ed25519 with zero external dependencies.
+- **Standard**: [BIP-32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki), [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki), [BIP-44](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki), [SLIP-0010](https://github.com/satoshilabs/slips/blob/master/slip-0010.md), and [AEX-10](https://github.com/aeternity/AEXs/blob/master/AEXS/aex-10.md).
+- **Goal**: Pure-Erlang hierarchical deterministic wallet key derivation and mnemonic seed generation for secp256k1 and Ed25519 with zero external dependencies.
 - **Features `[Completed]`**:
+  - `ecu_bip39`: Pure-Erlang BIP-39 mnemonic phrase generation, validation, and seed derivation:
+    - Mnemonic generation from 128–256 bit entropy or 12–24 words (`generate_mnemonic/1,2`).
+    - Bidirectional conversion between entropy and mnemonic phrases (`entropy_to_mnemonic/1,2`, `mnemonic_to_entropy/1,2`).
+    - Structure, checksum, and dictionary validation (`validate_mnemonic/1,2`).
+    - PBKDF2-HMAC-SHA512 seed derivation (2,048 rounds) with UTF-8 NFKD normalization (`mnemonic_to_seed/1,2`).
+    - Direct bridge to HD master key (`mnemonic_to_master_key/2,3`).
+  - `ecu_bip39_words`: Embedded official 2,048 English wordlist with $O(1)$ lookups and zero filesystem dependencies.
   - `ecu_base58`: High-performance pure-Erlang Base58 and Base58Check encoding and decoding using Radix-$58^{10}$ chunking (~3.5–3.6 µs/op encode/decode; ~5.5–6.0 µs/op Base58Check).
   - `ecu_hd`: Complete BIP-32 and SLIP-0010 implementation:
     - Master key derivation from seeds (`master_key/2`).
@@ -118,8 +125,8 @@ This document outlines planned enhancements, cryptographic extensions, and archi
     - Extended key serialization (`xprv`, `xpub`) with Base58Check encoding (`to_base58/1,2`, `from_base58/1`).
     - Flexible derivation paths (`derive_path/2`, `derive_path_from_seed/3`), supporting `m/44'/0'/0'/0/0`, `m/44H/457H/0H`, and `M/0/1`.
     - BIP-44 shortcut (`derive_bip44/5,6`) and Aeternity AEX-10 shortcut (`derive_aex10/3,4`).
-  - Unit tests (`hd_tests.erl`) covering official BIP-32 test vectors 1–4, SLIP-0010 vectors, and AEX-10 test vectors.
-  - Property tests (`hd_eqc.erl`) verifying Base58 round-trips, tamper resistance, and public vs private derivation equivalence.
+  - Unit tests (`hd_tests.erl`, `bip39_tests.erl`) covering official BIP-32 test vectors 1–4, SLIP-0010 vectors, AEX-10 test vectors, and all 24 Trezor BIP-39 test vectors.
+  - Property tests (`hd_eqc.erl`, `bip39_eqc.erl`) verifying Base58 round-trips, mnemonic entropy round-trips, tamper resistance, and public vs private derivation equivalence.
 
 ---
 

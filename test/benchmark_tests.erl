@@ -582,6 +582,37 @@ bench_hd_and_base58_test() ->
   stats("SLIP-0010 CKDpriv (Ed25519)", "ecu_hd       ", Iters, TimeEdPriv),
   ok.
 
+bench_bip39_test() ->
+  Iters = 2000,
+  Entropy16 = crypto:strong_rand_bytes(16),
+  {ok, Mnemonic12} = ecu_bip39:entropy_to_mnemonic(Entropy16),
+
+  {TimeGenMnemonic, _} = timer:tc(fun() ->
+    [ecu_bip39:generate_mnemonic(128) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeEntropyToMnemonic, _} = timer:tc(fun() ->
+    [ecu_bip39:entropy_to_mnemonic(Entropy16) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeMnemonicToEntropy, _} = timer:tc(fun() ->
+    [ecu_bip39:mnemonic_to_entropy(Mnemonic12) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeValidateMnemonic, _} = timer:tc(fun() ->
+    [ecu_bip39:validate_mnemonic(Mnemonic12) || _ <- lists:seq(1, Iters)]
+  end),
+
+  Pbkdf2Iters = 100,
+  {TimeMnemonicToSeed, _} = timer:tc(fun() ->
+    [ecu_bip39:mnemonic_to_seed(Mnemonic12, "TREZOR") || _ <- lists:seq(1, Pbkdf2Iters)]
+  end),
+
+  ?debugFmt("", []),
+  stats("BIP-39 generate_mnemonic (12w)", "ecu_bip39    ", Iters, TimeGenMnemonic),
+  stats("BIP-39 entropy_to_mnemonic (16B)", "ecu_bip39    ", Iters, TimeEntropyToMnemonic),
+  stats("BIP-39 mnemonic_to_entropy (12w)", "ecu_bip39    ", Iters, TimeMnemonicToEntropy),
+  stats("BIP-39 validate_mnemonic (12w)", "ecu_bip39    ", Iters, TimeValidateMnemonic),
+  stats("BIP-39 mnemonic_to_seed (2048 iters)", "ecu_bip39    ", Pbkdf2Iters, TimeMnemonicToSeed),
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

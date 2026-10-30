@@ -20,7 +20,9 @@
     ecu_keccak,
     ecu_musig2,
     ecu_base58,
-    ecu_hd
+    ecu_hd,
+    ecu_bip39_words,
+    ecu_bip39
   ]},
   {licenses, ["MIT"]},
   {links, []}

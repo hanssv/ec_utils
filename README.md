@@ -153,6 +153,21 @@ XPrv = ecu_hd:to_base58(private, ChildKey),
 {ok, AexKey} = ecu_hd:derive_aex10(Seed, 0, 0).
 ```
 
+### BIP-39 Mnemonic Seed Generation
+
+```erlang
+%% Generate 12-word or 24-word mnemonic phrases
+Mnemonic12 = ecu_bip39:generate_mnemonic(12),
+Mnemonic24 = ecu_bip39:generate_mnemonic(256),
+ok = ecu_bip39:validate_mnemonic(Mnemonic12),
+
+%% Derive 512-bit binary seed with optional passphrase (PBKDF2-HMAC-SHA512 with UTF-8 NFKD)
+Seed = ecu_bip39:mnemonic_to_seed(Mnemonic12, "optional_passphrase"),
+
+%% One-step derivation from mnemonic directly to HD master key
+{ok, MasterKey} = ecu_bip39:mnemonic_to_master_key(secp256k1, Mnemonic12, "passphrase").
+```
+
 Supported Curves & API
 ----------------------
 
@@ -284,7 +299,7 @@ Supported Curves & API
   - `verify_partial/6,7`: Verify individual partial signatures prior to aggregation.
   - `aggregate_partial/4,5`: Combine partial signatures into a standard 64-byte Schnorr signature with optional tweak accumulator support.
 
-### Hierarchical Deterministic (HD) Wallets & Base58
+### Hierarchical Deterministic (HD) Wallets, BIP-39 & Base58
 
 - `ecu_hd`: BIP-32 and SLIP-0010 hierarchical deterministic wallet key derivation:
   - `master_key/2`: Master key derivation from seed (`secp256k1` or `ed25519`).
@@ -293,6 +308,14 @@ Supported Curves & API
   - `derive_bip44/5,6`: Standard BIP-44 multi-account derivation.
   - `derive_aex10/3,4`, `derive_aex10_from_masterkey/3,4`: Aeternity AEX-10 account/address derivation.
   - `to_base58/1,2`, `from_base58/1`: Extended key serialization with Base58Check (`xprv`, `xpub`).
+- `ecu_bip39`: BIP-39 mnemonic sentence generation, entropy round-trips, and seed derivation:
+  - `generate_mnemonic/1,2`: Cryptographically secure mnemonic generation (12–24 words).
+  - `entropy_to_mnemonic/1,2`: Convert 16–32 byte entropy to mnemonic words with SHA-256 checksums (~1.5 µs/op).
+  - `mnemonic_to_entropy/1,2`: Validate and convert mnemonic back to entropy (~6.2 µs/op).
+  - `validate_mnemonic/1,2`: Complete structure, dictionary, and checksum verification (~6.2 µs/op).
+  - `mnemonic_to_seed/1,2`: PBKDF2-HMAC-SHA512 seed derivation (2,048 rounds) with UTF-8 NFKD normalization (~558 µs/op).
+  - `mnemonic_to_master_key/2,3`: Direct bridge from mnemonic to validated HD master key.
+- `ecu_bip39_words`: Embedded official 2,048 English wordlist for $O(1)$ indexed lookup with zero filesystem IO.
 - `ecu_base58`: High-performance pure-Erlang Base58 and Base58Check encoding:
   - Optimized Radix-$58^{10}$ chunking (~3.5 µs/op encode/decode; ~5.5–6.0 µs/op Base58Check).
   - `encode/1`, `decode/1`: Raw Base58 with leading-zero preservation.
@@ -369,6 +392,11 @@ the library incorporates key algorithmic optimizations:
 | **bip32 ckd_priv (secp256k1)** | — | **172 µs** | — | — | — |
 | **bip32 ckd_pub (secp256k1)** | — | **205 µs** | — | — | — |
 | **slip10 ckd_priv (ed25519)** | — | **163 µs** | — | — | — |
+| **bip39 generate_mnemonic (12w)** | — | **1.9 µs** | — | — | — |
+| **bip39 entropy_to_mnemonic (16B)** | — | **1.5 µs** | — | — | — |
+| **bip39 mnemonic_to_entropy (12w)** | — | **6.2 µs** | — | — | — |
+| **bip39 validate_mnemonic (12w)** | — | **6.2 µs** | — | — | — |
+| **bip39 mnemonic_to_seed (2048 iters)** | — | **558 µs** | — | — | — |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
