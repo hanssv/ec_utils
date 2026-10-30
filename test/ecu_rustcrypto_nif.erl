@@ -10,7 +10,11 @@
   sign/3,
   verify/3,
   public_key/1,
-  keccak256/1
+  keccak256/1,
+  bech32_encode/3,
+  bech32_decode/1,
+  bech32_segwit_encode/3,
+  bech32_segwit_decode/1
 ]).
 -export([init/0]).
 
@@ -62,4 +66,16 @@ public_key(_Priv) ->
   erlang:nif_error(not_loaded).
 
 keccak256(_Data) ->
+  erlang:nif_error(not_loaded).
+
+bech32_encode(_Hrp, _Data5Bit, _Variant) ->
+  erlang:nif_error(not_loaded).
+
+bech32_decode(_String) ->
+  erlang:nif_error(not_loaded).
+
+bech32_segwit_encode(_Hrp, _WitVer, _Program) ->
+  erlang:nif_error(not_loaded).
+
+bech32_segwit_decode(_String) ->
   erlang:nif_error(not_loaded).

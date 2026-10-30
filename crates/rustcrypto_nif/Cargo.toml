@@ -11,3 +11,4 @@ crate-type = ["cdylib"]
 k256 = { version = "0.14.0", features = ["schnorr"] }
 sha3 = "0.10.8"
 rustler = "0.39.0"
+bech32 = "0.12.0"
