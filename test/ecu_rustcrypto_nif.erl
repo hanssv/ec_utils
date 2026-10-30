@@ -1,12 +1,17 @@
-%%% File        : ecu_rustcrypto_nif.erl
-%%% Description : Optional reference NIF wrapping RustCrypto (k256, sha3)
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Optional reference NIF wrapping RustCrypto (k256, sha3).
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_rustcrypto_nif).
 
--export([is_available/0,
-         sign/3,
-         verify/3,
-         public_key/1,
-         keccak256/1]).
+-export([
+  is_available/0,
+  sign/3,
+  verify/3,
+  public_key/1,
+  keccak256/1
+]).
 -export([init/0]).
 
 -on_load(init/0).
@@ -15,17 +20,18 @@
 -define(LIBNAME, ecu_rustcrypto_nif).
 
 init() ->
-  PrivDir = case code:priv_dir(?APPNAME) of
-              {error, bad_name} ->
-                case code:which(?MODULE) of
-                  Filename when is_list(Filename) ->
-                    filename:join([filename:dirname(Filename), "..", "priv"]);
-                  _ ->
-                    "priv"
-                end;
-              Dir ->
-                Dir
-            end,
+  PrivDir =
+    case code:priv_dir(?APPNAME) of
+      {error, bad_name} ->
+        case code:which(?MODULE) of
+          Filename when is_list(Filename) ->
+            filename:join([filename:dirname(Filename), "..", "priv"]);
+          _ ->
+            "priv"
+        end;
+      Dir ->
+        Dir
+    end,
   SoPath = filename:join(PrivDir, ?LIBNAME),
   case filelib:is_file(SoPath ++ ".so") orelse filelib:is_file(SoPath ++ ".dylib") of
     true ->

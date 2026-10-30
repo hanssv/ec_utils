@@ -1,7 +1,8 @@
-%%% File        : ecdh_tests.erl
-%%% Author      : Hans Svensson
-%%% Description : Unit tests and RFC 7748 test vectors for ecu_ecdh
-%%% Created     : 28 Oct 2026 by Hans Svensson
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% EUnit tests and RFC 7748 test vectors for ecu_ecdh.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecdh_tests).
 
 -compile([export_all, nowarn_export_all]).
@@ -31,11 +32,13 @@ rfc7748_x25519_alice_bob_test() ->
 rfc7748_x25519_iterative_test() ->
   KInit = <<9:256/little>>,
   UInit = <<9:256/little>>,
-  Loop = fun F(0, K, _U) -> K;
-             F(N, K, U) ->
-               NextK = ecu_ecdh:x25519(K, U),
-               F(N - 1, NextK, K)
-         end,
+  Loop = fun
+    F(0, K, _U) ->
+      K;
+    F(N, K, U) ->
+      NextK = ecu_ecdh:x25519(K, U),
+      F(N - 1, NextK, K)
+  end,
 
   %% After 1 iteration
   Res1 = Loop(1, KInit, UInit),
@@ -50,22 +53,32 @@ rfc7748_x25519_iterative_test() ->
 %% --- RFC 7748 Section 6.2 (X448 Test Vectors)
 
 rfc7748_x448_alice_bob_test() ->
-  PrivA = ecu_misc:hex_to_bin("9a8f4925d1519f5775cf46b04b5800d4ee9ee8bae8bc5565d498c28dd9c9baf5"
-                             "74a9419744897391006382a6f127ab1d9ac2d8c0a598726b"),
-  ExpPubA = ecu_misc:hex_to_bin("9b08f7cc31b7e3e67d22d5aea121074a273bd2b83de09c63faa73d2c"
-                               "22c5d9bbc836647241d953d40c5b12da88120d53177f80e532c41fa0"),
+  PrivA = ecu_misc:hex_to_bin(
+    "9a8f4925d1519f5775cf46b04b5800d4ee9ee8bae8bc5565d498c28dd9c9baf5"
+    "74a9419744897391006382a6f127ab1d9ac2d8c0a598726b"
+  ),
+  ExpPubA = ecu_misc:hex_to_bin(
+    "9b08f7cc31b7e3e67d22d5aea121074a273bd2b83de09c63faa73d2c"
+    "22c5d9bbc836647241d953d40c5b12da88120d53177f80e532c41fa0"
+  ),
   PubA = ecu_ecdh:x448(PrivA, <<5:448/little>>),
   ?assertEqual(ExpPubA, PubA),
 
-  PrivB = ecu_misc:hex_to_bin("1c306a7ac2a0e2e0990b294470cba339e6453772b075811d8fad0d1d"
-                             "6927c120bb5ee8972b0d3e21374c9c921b09d1b0366f10b65173992d"),
-  ExpPubB = ecu_misc:hex_to_bin("3eb7a829b0cd20f5bcfc0b599b6feccf6da4627107bdb0d4f345b430"
-                               "27d8b972fc3e34fb4232a13ca706dcb57aec3dae07bdc1c67bf33609"),
+  PrivB = ecu_misc:hex_to_bin(
+    "1c306a7ac2a0e2e0990b294470cba339e6453772b075811d8fad0d1d"
+    "6927c120bb5ee8972b0d3e21374c9c921b09d1b0366f10b65173992d"
+  ),
+  ExpPubB = ecu_misc:hex_to_bin(
+    "3eb7a829b0cd20f5bcfc0b599b6feccf6da4627107bdb0d4f345b430"
+    "27d8b972fc3e34fb4232a13ca706dcb57aec3dae07bdc1c67bf33609"
+  ),
   PubB = ecu_ecdh:x448(PrivB, <<5:448/little>>),
   ?assertEqual(ExpPubB, PubB),
 
-  ExpShared = ecu_misc:hex_to_bin("07fff4181ac6cc95ec1c16a94a0f74d12da232ce40a77552281d282b"
-                                 "b60c0b56fd2464c335543936521c24403085d59a449a5037514a879d"),
+  ExpShared = ecu_misc:hex_to_bin(
+    "07fff4181ac6cc95ec1c16a94a0f74d12da232ce40a77552281d282b"
+    "b60c0b56fd2464c335543936521c24403085d59a449a5037514a879d"
+  ),
   SharedA = ecu_ecdh:compute_key(x448, PubB, PrivA),
   SharedB = ecu_ecdh:compute_key(x448, PubA, PrivB),
   ?assertEqual(ExpShared, SharedA),
@@ -75,22 +88,28 @@ rfc7748_x448_alice_bob_test() ->
 rfc7748_x448_iterative_test() ->
   KInit = <<5:448/little>>,
   UInit = <<5:448/little>>,
-  Loop = fun F(0, K, _U) -> K;
-             F(N, K, U) ->
-               NextK = ecu_ecdh:x448(K, U),
-               F(N - 1, NextK, K)
-         end,
+  Loop = fun
+    F(0, K, _U) ->
+      K;
+    F(N, K, U) ->
+      NextK = ecu_ecdh:x448(K, U),
+      F(N - 1, NextK, K)
+  end,
 
   %% After 1 iteration
   Res1 = Loop(1, KInit, UInit),
-  Exp1 = ecu_misc:hex_to_bin("3f482c8a9f19b01e6c46ee9711d9dc14fd4bf67af30765c2ae2b846a"
-                             "4d23a8cd0db897086239492caf350b51f833868b9bc2b3bca9cf4113"),
+  Exp1 = ecu_misc:hex_to_bin(
+    "3f482c8a9f19b01e6c46ee9711d9dc14fd4bf67af30765c2ae2b846a"
+    "4d23a8cd0db897086239492caf350b51f833868b9bc2b3bca9cf4113"
+  ),
   ?assertEqual(Exp1, Res1),
 
   %% After 1,000 iterations
   Res1000 = Loop(1000, KInit, UInit),
-  Exp1000 = ecu_misc:hex_to_bin("aa3b4749d55b9daf1e5b00288826c467274ce3ebbdd5c17b975e09d4"
-                               "af6c67cf10d087202db88286e2b79fceea3ec353ef54faa26e219f38"),
+  Exp1000 = ecu_misc:hex_to_bin(
+    "aa3b4749d55b9daf1e5b00288826c467274ce3ebbdd5c17b975e09d4"
+    "af6c67cf10d087202db88286e2b79fceea3ec353ef54faa26e219f38"
+  ),
   ?assertEqual(Exp1000, Res1000).
 
 %% --- secp256k1 ECDH Tests
@@ -147,15 +166,18 @@ ed25519_to_x25519_conversion_test() ->
 %% --- Keypair Generation and Seed Tests
 
 keypair_generation_test() ->
-  lists:foreach(fun(Curve) ->
-    {Pub1, Priv1} = ecu_ecdh:keypair(Curve),
-    {Pub2, Priv2} = ecu_ecdh:keypair(Curve),
-    ?assertNotEqual(Priv1, Priv2),
-    ?assertNotEqual(Pub1, Pub2),
-    Sec1 = ecu_ecdh:compute_key(Curve, Pub2, Priv1),
-    Sec2 = ecu_ecdh:compute_key(Curve, Pub1, Priv2),
-    ?assertEqual(Sec1, Sec2)
-  end, [x25519, x448, secp256k1]).
+  lists:foreach(
+    fun(Curve) ->
+      {Pub1, Priv1} = ecu_ecdh:keypair(Curve),
+      {Pub2, Priv2} = ecu_ecdh:keypair(Curve),
+      ?assertNotEqual(Priv1, Priv2),
+      ?assertNotEqual(Pub1, Pub2),
+      Sec1 = ecu_ecdh:compute_key(Curve, Pub2, Priv1),
+      Sec2 = ecu_ecdh:compute_key(Curve, Pub1, Priv2),
+      ?assertEqual(Sec1, Sec2)
+    end,
+    [x25519, x448, secp256k1]
+  ).
 
 keypair_from_seed_deterministic_test() ->
   Seed256 = crypto:strong_rand_bytes(32),

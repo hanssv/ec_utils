@@ -1,5 +1,8 @@
-%%% File        : ecu_secp256k1.hrl
-%%% Description : Curve parameters for secp256k1
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Curve parameters for secp256k1.
+%%% @end
+%%%-------------------------------------------------------------------
 
 -define(P, 16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F).
 -define(A, 16#00).

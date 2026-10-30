@@ -1,6 +1,8 @@
-%%% Author      : Hans Svensson
-%%% Description :
-%%% Created     : 14 Jan 2022 by Hans Svensson
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% QuickCheck properties for ecu_ed25519 against enacl/libsodium.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ed25519_eqc).
 
 -compile([export_all, nowarn_export_all]).
@@ -20,28 +22,38 @@ gen_point() ->
   ?LET(S, gen_scalar(), enacl:crypto_ed25519_scalarmult_base_noclamp(S)).
 
 prop_compress() ->
-  ?FORALL(S, gen_scalar(),
+  ?FORALL(
+    S,
+    gen_scalar(),
     begin
       CompP = enacl:crypto_ed25519_scalarmult_base_noclamp(S),
-      DecP  = ecu_ed25519:scalar_mul_base_noclamp(S),
+      DecP = ecu_ed25519:scalar_mul_base_noclamp(S),
       equals(CompP, ecu_ed25519:compress(DecP))
-    end).
+    end
+  ).
 
 prop_decompress() ->
-  ?FORALL(S, gen_scalar(),
+  ?FORALL(
+    S,
+    gen_scalar(),
     begin
       CompP = enacl:crypto_ed25519_scalarmult_base_noclamp(S),
-      DecP  = ecu_ed25519:scalar_mul_base_noclamp(S),
+      DecP = ecu_ed25519:scalar_mul_base_noclamp(S),
       equal_pts(DecP, ecu_ed25519:decompress(CompP))
-    end).
+    end
+  ).
 
 prop_compress_decompress() ->
-  ?FORALL(P, gen_point(),
+  ?FORALL(
+    P,
+    gen_point(),
     equals(P, ecu_ed25519:compress(ecu_ed25519:decompress(P)))
   ).
 
 prop_compress_decompress2() ->
-  ?FORALL(S, gen_scalar(),
+  ?FORALL(
+    S,
+    gen_scalar(),
     begin
       P = ecu_ed25519:scalar_mul_base(S),
       equal_pts(P, ecu_ed25519:decompress(ecu_ed25519:compress(P)))
@@ -65,75 +77,104 @@ prop_compress_decompress2() ->
 %%   end).
 
 prop_generate_valid_point() ->
-  ?FORALL(P, gen_point(),  ecu_ed25519:on_curve(ecu_ed25519:decompress(P))).
+  ?FORALL(P, gen_point(), ecu_ed25519:on_curve(ecu_ed25519:decompress(P))).
 
 prop_scalar_mul_base() ->
-  ?FORALL(S, gen_scalar(),
-  begin
-    E = enacl:crypto_ed25519_scalarmult_base(S),
-    P = ecu_ed25519:scalar_mul_base(S),
-    equals(E, ecu_ed25519:compress(P))
-  end).
+  ?FORALL(
+    S,
+    gen_scalar(),
+    begin
+      E = enacl:crypto_ed25519_scalarmult_base(S),
+      P = ecu_ed25519:scalar_mul_base(S),
+      equals(E, ecu_ed25519:compress(P))
+    end
+  ).
 
 prop_scalar_mul_base_noclamp() ->
-  ?FORALL(S, gen_scalar(),
-  begin
-    E = enacl:crypto_ed25519_scalarmult_base_noclamp(S),
-    P = ecu_ed25519:scalar_mul_base_noclamp(S),
-    equals(E, ecu_ed25519:compress(P))
-  end).
+  ?FORALL(
+    S,
+    gen_scalar(),
+    begin
+      E = enacl:crypto_ed25519_scalarmult_base_noclamp(S),
+      P = ecu_ed25519:scalar_mul_base_noclamp(S),
+      equals(E, ecu_ed25519:compress(P))
+    end
+  ).
 
 prop_scalar_mul() ->
-  ?FORALL({S, P0}, {gen_scalar(), gen_point()},
-  begin
-    E = enacl:crypto_ed25519_scalarmult(S, P0),
-    P = ecu_ed25519:scalar_mul(S, P0),
-    equals(E, ecu_ed25519:compress(P))
-  end).
+  ?FORALL(
+    {S, P0},
+    {gen_scalar(), gen_point()},
+    begin
+      E = enacl:crypto_ed25519_scalarmult(S, P0),
+      P = ecu_ed25519:scalar_mul(S, P0),
+      equals(E, ecu_ed25519:compress(P))
+    end
+  ).
 
 prop_scalar_mul_noclamp() ->
-  ?FORALL({S, P0}, {gen_scalar(), gen_point()},
-  begin
-    E = enacl:crypto_ed25519_scalarmult_noclamp(S, P0),
-    P = ecu_ed25519:scalar_mul_noclamp(S, ecu_ed25519:decompress(P0)),
-    equals(E, ecu_ed25519:compress(P))
-  end).
+  ?FORALL(
+    {S, P0},
+    {gen_scalar(), gen_point()},
+    begin
+      E = enacl:crypto_ed25519_scalarmult_noclamp(S, P0),
+      P = ecu_ed25519:scalar_mul_noclamp(S, ecu_ed25519:decompress(P0)),
+      equals(E, ecu_ed25519:compress(P))
+    end
+  ).
 
 prop_arithmetics1() ->
-  ?FORALL({P1, P2, P3}, {gen_point(), gen_point(), gen_point()},
-  begin
-    Res1 = ecu_ed25519:p_add(P1, ecu_ed25519:p_add(P2, P3)),
-    Res2 = ecu_ed25519:p_add(ecu_ed25519:p_add(P1, P2), P3),
-    equal_pts(Res1, Res2)
-  end).
+  ?FORALL(
+    {P1, P2, P3},
+    {gen_point(), gen_point(), gen_point()},
+    begin
+      Res1 = ecu_ed25519:p_add(P1, ecu_ed25519:p_add(P2, P3)),
+      Res2 = ecu_ed25519:p_add(ecu_ed25519:p_add(P1, P2), P3),
+      equal_pts(Res1, Res2)
+    end
+  ).
 
 prop_arithmetics2() ->
-  ?FORALL({P1, P2}, {gen_point(), gen_point()},
-  begin
-    Res1 = ecu_ed25519:p_sub(ecu_ed25519:p_add(P1, P2), P2),
-    equal_pts(P1, Res1)
-  end).
+  ?FORALL(
+    {P1, P2},
+    {gen_point(), gen_point()},
+    begin
+      Res1 = ecu_ed25519:p_sub(ecu_ed25519:p_add(P1, P2), P2),
+      equal_pts(P1, Res1)
+    end
+  ).
 
 prop_dbl() ->
-  ?FORALL(P, gen_point(),
-  begin
-    A = ecu_ed25519:p_add(P, P),
-    B = ecu_ed25519:p_dbl(P),
-    ?WHENFAIL(eqc:format("~p\n  /=\n~p\n", [ecu_ed25519:to_affine(A), ecu_ed25519:to_affine(B)]),
-              ecu_ed25519:pt_eq(A, B))
-  end).
+  ?FORALL(
+    P,
+    gen_point(),
+    begin
+      A = ecu_ed25519:p_add(P, P),
+      B = ecu_ed25519:p_dbl(P),
+      ?WHENFAIL(
+        eqc:format("~p\n  /=\n~p\n", [ecu_ed25519:to_affine(A), ecu_ed25519:to_affine(B)]),
+        ecu_ed25519:pt_eq(A, B)
+      )
+    end
+  ).
 
 equal_pts(P1, P2) ->
-  ?WHENFAIL(eqc:format("~p\n  /=\n~p\n", [ecu_ed25519:to_affine(P1), ecu_ed25519:to_affine(P2)]),
-            ecu_ed25519:pt_eq(P1, P2)).
+  ?WHENFAIL(
+    eqc:format("~p\n  /=\n~p\n", [ecu_ed25519:to_affine(P1), ecu_ed25519:to_affine(P2)]),
+    ecu_ed25519:pt_eq(P1, P2)
+  ).
 
 %% Shamir's trick: scalar_mul_dual_base(K1, K2, P2) == K1*B + K2*P2
 prop_ed25519_scalar_mul_dual() ->
-  ?FORALL({K1, K2, P2}, {choose(0, ?N - 1), choose(0, ?N - 1), gen_point()},
-  begin
-    Expected = ecu_ed25519:p_add(
-                 ecu_ed25519:scalar_mul_base_noclamp(K1),
-                 ecu_ed25519:scalar_mul_noclamp(K2, P2)),
-    Actual = ecu_ed25519:scalar_mul_dual_base(K1, K2, P2),
-    equal_pts(Expected, Actual)
-  end).
+  ?FORALL(
+    {K1, K2, P2},
+    {choose(0, ?N - 1), choose(0, ?N - 1), gen_point()},
+    begin
+      Expected = ecu_ed25519:p_add(
+        ecu_ed25519:scalar_mul_base_noclamp(K1),
+        ecu_ed25519:scalar_mul_noclamp(K2, P2)
+      ),
+      Actual = ecu_ed25519:scalar_mul_dual_base(K1, K2, P2),
+      equal_pts(Expected, Actual)
+    end
+  ).

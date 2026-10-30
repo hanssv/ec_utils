@@ -1,22 +1,32 @@
-%%% File        : ecu_ed25519.erl
-%%% Author      : Hans Svensson
-%%% Description : Trying to whip together a pure Erlang ed25519
-%%%               Just for usage when speed isn't crucial...
-%%% Created     : 13 Jan 2022 by Hans Svensson
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Pure Erlang Ed25519 (Curve25519) elliptic curve arithmetic.
+%%%
+%%% Reference:
+%%%   RFC 8032: https://datatracker.ietf.org/doc/html/rfc8032
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_ed25519).
 
 -typing([eqwalizer]).
 
 -include("ecu_ed25519.hrl").
 
--type pt_affine() :: {field_elem(), field_elem()}. %% {X, Y}
--type pt_hom_ext() :: {field_elem(), field_elem(),
-                       field_elem(), field_elem()}. %% {X, Y, Z, T}
--type pt_compressed() :: <<_:256>>. %% Y coord + odd/even X.
+%% {X, Y}
+-type pt_affine() :: {field_elem(), field_elem()}.
+-type pt_hom_ext() :: {
+  field_elem(),
+  field_elem(),
+  %% {X, Y, Z, T}
+  field_elem(),
+  field_elem()
+}.
+%% Y coord + odd/even X.
+-type pt_compressed() :: <<_:256>>.
 
 -type pt() :: pt_affine() | pt_hom_ext() | pt_compressed().
 
--type scalar_elem() :: 0..(?N-1).
+-type scalar_elem() :: 0..(?N - 1).
 -type scalar() :: non_neg_integer() | <<_:256>>.
 -type field_elem() :: non_neg_integer().
 
@@ -25,18 +35,46 @@
 -define(SUB(A, B), ((A - B + ?P) rem ?P)).
 -define(DIV(A, B), f_div(A, B)).
 
--export_type([pt/0, pt_affine/0, pt_hom_ext/0, pt_compressed/0,
-              scalar/0, scalar_elem/0, field_elem/0]).
+-export_type([
+  pt/0,
+  pt_affine/0,
+  pt_hom_ext/0,
+  pt_compressed/0,
+  scalar/0,
+  scalar_elem/0,
+  field_elem/0
+]).
 
--export([on_curve/1, p/0, n/0, pt_eq/2,
-         scalar_mul/2, scalar_mul_base/1, scalar_mul_dual_base/3,
-         scalar_mul_noclamp/2, scalar_mul_base_noclamp/1,
-         multi_scalar_mul/1,
-         scalar_reduce/1,
-         p_add/2, p_sub/2, p_neg/1, p_dbl/1,
-         compress/1, decompress/1, is_small_order/1,
-         f_add/2, f_mul/2, f_sub/2, f_div/2, f_inv/1,
-         s_add/2, s_mul/2, s_sub/2, s_div/2, s_inv/1]).
+-export([
+  on_curve/1,
+  p/0,
+  n/0,
+  pt_eq/2,
+  scalar_mul/2,
+  scalar_mul_base/1,
+  scalar_mul_dual_base/3,
+  scalar_mul_noclamp/2,
+  scalar_mul_base_noclamp/1,
+  multi_scalar_mul/1,
+  scalar_reduce/1,
+  p_add/2,
+  p_sub/2,
+  p_neg/1,
+  p_dbl/1,
+  compress/1,
+  decompress/1,
+  is_small_order/1,
+  f_add/2,
+  f_mul/2,
+  f_sub/2,
+  f_div/2,
+  f_inv/1,
+  s_add/2,
+  s_mul/2,
+  s_sub/2,
+  s_div/2,
+  s_inv/1
+]).
 
 -on_load(init/0).
 
@@ -50,8 +88,8 @@ pt_eq({X1, Y1}, {X2, Y2}) ->
 pt_eq(C1, C2) when is_binary(C1), is_binary(C2) ->
   C1 == C2;
 pt_eq({X1, Y1, Z1, _T1}, {X2, Y2, Z2, _T2}) ->
-  ?SUB(?MUL(X1, Z2), ?MUL(X2, Z1)) == 0
-  andalso ?SUB(?MUL(Y1, Z2), ?MUL(Y2, Z1)) == 0;
+  ?SUB(?MUL(X1, Z2), ?MUL(X2, Z1)) == 0 andalso
+    ?SUB(?MUL(Y1, Z2), ?MUL(Y2, Z1)) == 0;
 pt_eq(P1, P2) ->
   pt_eq(to_ext_hom(P1), to_ext_hom(P2)).
 
@@ -78,8 +116,10 @@ n() -> ?N.
 -define(TWO_POW_255_MINUS_1, 16#7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF).
 
 -spec compress(P :: pt()) -> pt_compressed().
-compress(<<_:32/binary>> = P) -> P;
-compress({_, _, _, _} = P)    -> compress(to_affine(P));
+compress(<<_:32/binary>> = P) ->
+  P;
+compress({_, _, _, _} = P) ->
+  compress(to_affine(P));
 compress({X, Y}) when is_integer(X), is_integer(Y) ->
   V = (Y band ?TWO_POW_255_MINUS_1) bor ((X band 1) bsl 255),
   <<V:256/little>>.
@@ -87,16 +127,18 @@ compress({X, Y}) when is_integer(X), is_integer(Y) ->
 -spec decompress(pt_compressed()) -> pt_hom_ext().
 decompress(<<Y0:256/little-unsigned-integer>>) ->
   X0 = Y0 bsr 255,
-  Y  = Y0 band ?TWO_POW_255_MINUS_1,
+  Y = Y0 band ?TWO_POW_255_MINUS_1,
   case Y < ?P of
-    false -> error(badarg);
+    false ->
+      error(badarg);
     true ->
       X = xrecover(Y),
       case X rem 2 == X0 of
-        true  -> to_ext_hom({X, Y});
+        true ->
+          to_ext_hom({X, Y});
         false ->
           case X == 0 of
-            true  -> error(badarg);
+            true -> error(badarg);
             false -> to_ext_hom({?P - X, Y})
           end
       end
@@ -111,16 +153,25 @@ is_small_order(P) ->
 
 -spec p_neg(pt()) -> pt().
 p_neg({X, Y}) when is_integer(X), is_integer(Y) -> {?P - X, Y};
-p_neg({X, Y, Z, T}) when is_integer(X), is_integer(Y), is_integer(Z), is_integer(T) -> {?P - X, Y, Z, ?P - T};
-p_neg(P)            -> p_neg(to_ext_hom(P)).
+p_neg({X, Y, Z, T}) when is_integer(X), is_integer(Y), is_integer(Z), is_integer(T) ->
+  {?P - X, Y, Z, ?P - T};
+p_neg(P) ->
+  p_neg(to_ext_hom(P)).
 
 -spec p_sub(pt(), pt()) -> pt_hom_ext().
 p_sub(P1, P2) -> p_add(P1, p_neg(P2)).
 
 -spec p_add(X :: pt(), Y :: pt()) -> pt_hom_ext().
-p_add({X1, Y1, Z1, T1}, {X2, Y2, Z2, T2})
-  when is_integer(X1), is_integer(Y1), is_integer(Z1), is_integer(T1),
-       is_integer(X2), is_integer(Y2), is_integer(Z2), is_integer(T2) ->
+p_add({X1, Y1, Z1, T1}, {X2, Y2, Z2, T2}) when
+  is_integer(X1),
+  is_integer(Y1),
+  is_integer(Z1),
+  is_integer(T1),
+  is_integer(X2),
+  is_integer(Y2),
+  is_integer(Z2),
+  is_integer(T2)
+->
   A = ?MUL(?SUB(Y1, X1), ?SUB(Y2, X2)),
   B = ?MUL(?ADD(Y1, X1), ?ADD(Y2, X2)),
   C = ?MUL(?MUL(T1, T2), 2 * ?D),
@@ -191,7 +242,8 @@ multi_scalar_mul(Pairs) ->
       fun({Scalar, Pt}) ->
         K = to_scalar_int(Scalar),
         case K of
-          0 -> false;
+          0 ->
+            false;
           _ ->
             ExtPt = to_ext_hom(Pt),
             Table = precompute_window_table(ExtPt),
@@ -227,14 +279,14 @@ build_slices(StepCount, Points) ->
   [SlicePoints | build_slices(StepCount - 1, NextPoints)].
 
 -spec collect_slice([{[0..15], dynamic()}], [dynamic()], [{[0..15], dynamic()}]) ->
-    {[dynamic()], [{[0..15], dynamic()}]}.
+  {[dynamic()], [{[0..15], dynamic()}]}.
 collect_slice([], SliceAcc, NextAcc) ->
   {SliceAcc, NextAcc};
 collect_slice([{[], _Table} | _], SliceAcc, NextAcc) ->
   {SliceAcc, NextAcc};
-collect_slice([{ [0 | Rest], Table } | More], SliceAcc, NextAcc) ->
+collect_slice([{[0 | Rest], Table} | More], SliceAcc, NextAcc) ->
   collect_slice(More, SliceAcc, [{Rest, Table} | NextAcc]);
-collect_slice([{ [W | Rest], Table } | More], SliceAcc, NextAcc) ->
+collect_slice([{[W | Rest], Table} | More], SliceAcc, NextAcc) ->
   Pt = element(W + 1, Table),
   collect_slice(More, [Pt | SliceAcc], [{Rest, Table} | NextAcc]).
 
@@ -242,26 +294,33 @@ collect_slice([{ [W | Rest], Table } | More], SliceAcc, NextAcc) ->
 multi_scalar_loop([], Acc) ->
   Acc;
 multi_scalar_loop([Slice | RestSlices], Acc) ->
-  D4 = case Acc of
-         {0, 1, 1, 0} -> {0, 1, 1, 0};
-         _            -> dbl4(Acc)
-       end,
-  NewAcc = lists:foldl(fun(Pt, CurAcc) ->
-                         case CurAcc of
-                           {0, 1, 1, 0} -> Pt;
-                           _            -> p_add(CurAcc, Pt)
-                         end
-                       end, D4, Slice),
+  D4 =
+    case Acc of
+      {0, 1, 1, 0} -> {0, 1, 1, 0};
+      _ -> dbl4(Acc)
+    end,
+  NewAcc = lists:foldl(
+    fun(Pt, CurAcc) ->
+      case CurAcc of
+        {0, 1, 1, 0} -> Pt;
+        _ -> p_add(CurAcc, Pt)
+      end
+    end,
+    D4,
+    Slice
+  ),
   multi_scalar_loop(RestSlices, NewAcc).
 
 -spec to_ext_hom(pt()) -> pt_hom_ext().
-to_ext_hom({_, _, _, _} = P)    -> P;
+to_ext_hom({_, _, _, _} = P) -> P;
 to_ext_hom(<<_:32/binary>> = P) -> decompress(P);
-to_ext_hom({X, Y})              -> {X, Y, 1, ?MUL(X, Y)}.
+to_ext_hom({X, Y}) -> {X, Y, 1, ?MUL(X, Y)}.
 
 -spec to_affine(pt()) -> pt_affine().
-to_affine({_, _} = P) -> P;
-to_affine(<<_:32/binary>> = P) -> to_affine(decompress(P));
+to_affine({_, _} = P) ->
+  P;
+to_affine(<<_:32/binary>> = P) ->
+  to_affine(decompress(P));
 to_affine({X, Y, Z, _}) ->
   ZInv = f_inv(Z),
   {?MUL(X, ZInv), ?MUL(Y, ZInv)}.
@@ -303,7 +362,8 @@ s_div(A, B) when is_binary(A), is_binary(B) -> s_mul(A, s_inv(B)).
 -spec s_inv(<<_:256>>) -> <<_:256>>.
 s_inv(<<A:256/little>>) ->
   case A rem ?N of
-    0 -> error(badarg);
+    0 ->
+      error(badarg);
     A_red ->
       case ecu_misc:eea(A_red, ?N) of
         {1, S, _T} -> <<((S + ?N) rem ?N):256/little>>;
@@ -317,8 +377,10 @@ scalar_reduce(<<S:512/little>>) ->
 
 %% --- internal functions
 -spec scalar_mul_(non_neg_integer(), pt_hom_ext()) -> pt_hom_ext().
-scalar_mul_(0, _P) -> {0, 1, 1, 0};
-scalar_mul_(1, P)  -> P;
+scalar_mul_(0, _P) ->
+  {0, 1, 1, 0};
+scalar_mul_(1, P) ->
+  P;
 scalar_mul_(K, P) ->
   case K rem 2 of
     0 -> scalar_mul_(K div 2, p_dbl(P));
@@ -346,12 +408,13 @@ window_loop(<<W:4, Rest/bitstring>>, Table, Acc) ->
   D4 = dbl4(Acc),
   NewAcc =
     case W of
-      0 -> D4;
+      0 ->
+        D4;
       _ ->
         Pt = element(W + 1, Table),
         case D4 of
           {0, 1, 1, 0} -> Pt;
-          _            -> p_add(D4, Pt)
+          _ -> p_add(D4, Pt)
         end
     end,
   window_loop(Rest, Table, NewAcc).
@@ -374,7 +437,8 @@ scalar_mul_base_comb(0) ->
 scalar_mul_base_comb(K) ->
   RedK = K rem ?N,
   case RedK of
-    0 -> {0, 1, 1, 0};
+    0 ->
+      {0, 1, 1, 0};
     _ ->
       Table = get_base_comb(),
       mul_comb(RedK, 1, Table, {0, 1, 1, 0})
@@ -388,12 +452,13 @@ mul_comb(K, I, Table, Acc) ->
   NextK = K bsr 4,
   NextAcc =
     case W of
-      0 -> Acc;
+      0 ->
+        Acc;
       _ ->
         Pt = element(W + 1, element(I, Table)),
         case Acc of
           {0, 1, 1, 0} -> Pt;
-          _            -> p_add(Acc, Pt)
+          _ -> p_add(Acc, Pt)
         end
     end,
   mul_comb(NextK, I + 1, Table, NextAcc).
@@ -443,18 +508,21 @@ clamp(K) ->
 xrecover(Y) ->
   Y2 = ?MUL(Y, Y),
   case ?SUB(Y2, 1) of
-    0 -> 0;
+    0 ->
+      0;
     U ->
-      V     = ?ADD(?MUL(?D, Y2), 1),
+      V = ?ADD(?MUL(?D, Y2), 1),
       UdivV = ?DIV(U, V),
-      X0    = f_pow(UdivV, ?PPLUS3DIV8),
+      X0 = f_pow(UdivV, ?PPLUS3DIV8),
 
       X0_2 = ?MUL(X0, X0),
       case ?SUB(X0_2, UdivV) of
-        0 -> X0;
-        _ -> case ?ADD(X0_2, UdivV) of
-               0 -> ?MUL(X0, ?TWOPOWPMINUS1DIV4);
-               _ -> error(badarg)
-             end
+        0 ->
+          X0;
+        _ ->
+          case ?ADD(X0_2, UdivV) of
+            0 -> ?MUL(X0, ?TWOPOWPMINUS1DIV4);
+            _ -> error(badarg)
+          end
       end
   end.

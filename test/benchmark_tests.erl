@@ -1,7 +1,9 @@
-%%% File        : benchmark_tests.erl
-%%% Author      : Hans Svensson
-%%% Description :
-%%% Created     : 20 Jan 2022 by Hans Svensson
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% EUnit performance benchmarks comparing ec_utils pure-Erlang routines
+%%% against C/Rust reference implementations.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(benchmark_tests).
 
 -compile([export_all, nowarn_export_all]).
@@ -13,18 +15,27 @@ gen_scalar() ->
   1 + X rem (ecu_ed25519:n() - 1).
 
 bench_point_add_test() ->
-  Pts = [ enacl:crypto_ed25519_scalarmult_base(<<(gen_scalar()):256/little>>) || _ <- lists:seq(1, 100) ],
+  Pts = [enacl:crypto_ed25519_scalarmult_base(<<(gen_scalar()):256/little>>) || _ <- lists:seq(1, 100)],
 
-  PtsEnacl0   = lists:zip(Pts, tl(Pts) ++ [hd(Pts)]),
-  PtsEd255190 = [ {ecu_ed25519:to_ext_hom(P1), ecu_ed25519:to_ext_hom(P2)} || {P1, P2} <- lists:zip(Pts, tl(Pts) ++ [hd(Pts)]) ],
-%%   PtsEd255190 = lists:zip(Pts, tl(Pts) ++ [hd(Pts)]),
+  PtsEnacl0 = lists:zip(Pts, tl(Pts) ++ [hd(Pts)]),
+  PtsEd255190 = [
+    {ecu_ed25519:to_ext_hom(P1), ecu_ed25519:to_ext_hom(P2)}
+   || {P1, P2} <- lists:zip(Pts, tl(Pts) ++ [hd(Pts)])
+  ],
+  %%   PtsEd255190 = lists:zip(Pts, tl(Pts) ++ [hd(Pts)]),
 
-  PtsEnacl   = lists:append(lists:duplicate(1000, PtsEnacl0)),
+  PtsEnacl = lists:append(lists:duplicate(1000, PtsEnacl0)),
   PtsEd25519 = lists:append(lists:duplicate(100, PtsEd255190)),
 
-  {TimeEnacl,   _} = timer:tc(fun() -> [enacl:crypto_ed25519_add(P1, P2) || {P1, P2} <- PtsEnacl], ok end),
-  {TimeEd25519, _} = timer:tc(fun() -> [ecu_ed25519:p_add(P1, P2) || {P1, P2} <- PtsEd25519], ok end),
-%%   {TimeEd25519, _} = timer:tc(fun() -> [ecu_ed25519:compress(ecu_ed25519:p_add(P1, P2)) || {P1, P2} <- PtsEd25519], ok end),
+  {TimeEnacl, _} = timer:tc(fun() ->
+    [enacl:crypto_ed25519_add(P1, P2) || {P1, P2} <- PtsEnacl],
+    ok
+  end),
+  {TimeEd25519, _} = timer:tc(fun() ->
+    [ecu_ed25519:p_add(P1, P2) || {P1, P2} <- PtsEd25519],
+    ok
+  end),
+  %%   {TimeEd25519, _} = timer:tc(fun() -> [ecu_ed25519:compress(ecu_ed25519:p_add(P1, P2)) || {P1, P2} <- PtsEd25519], ok end),
 
   ?debugFmt("", []),
   stats("Point add", "enacl/libsodium", length(PtsEnacl), TimeEnacl),
@@ -33,21 +44,23 @@ bench_point_add_test() ->
   ok.
 
 bench_scalar_mul_base_test() ->
-  Scalars0 = [ <<(gen_scalar()):256/little>> || _ <- lists:seq(1, 100) ],
-  ScalarsSecp    = lists:append(lists:duplicate(1, Scalars0)),
+  Scalars0 = [<<(gen_scalar()):256/little>> || _ <- lists:seq(1, 100)],
+  ScalarsSecp = lists:append(lists:duplicate(1, Scalars0)),
   ScalarsSecpRef = lists:append(lists:duplicate(10, Scalars0)),
-  ScalarsEnacl   = lists:append(lists:duplicate(100, Scalars0)),
+  ScalarsEnacl = lists:append(lists:duplicate(100, Scalars0)),
   ScalarsEd25519 = lists:append(lists:duplicate(30, Scalars0)),
-  Scalars448 = [ crypto:strong_rand_bytes(57) || _ <- lists:seq(1, 50) ],
+  Scalars448 = [crypto:strong_rand_bytes(57) || _ <- lists:seq(1, 50)],
   ScalarsEd448 = Scalars448,
   ScalarsEd448Ref = lists:append(lists:duplicate(4, Scalars448)),
 
-  {TimeSecp,    _} = timer:tc(fun() -> [ecu_secp256k1:scalar_mul_base(S)        || S <- ScalarsSecp] end),
-  {TimeSecpRef, _} = timer:tc(fun() -> [crypto:generate_key(ecdh, secp256k1)    || _ <- ScalarsSecpRef] end),
-  {TimeEnacl,   _} = timer:tc(fun() -> [enacl:crypto_ed25519_scalarmult_base(S) || S <- ScalarsEnacl] end),
-  {TimeEd25519, _} = timer:tc(fun() -> [ecu_ed25519:scalar_mul_base(S)          || S <- ScalarsEd25519] end),
-  {TimeEd448,   _} = timer:tc(fun() -> [ecu_ed448:scalar_mul_base(S)            || S <- ScalarsEd448] end),
-  {TimeEd448Ref,_} = timer:tc(fun() -> [crypto:generate_key(eddsa, ed448, S)    || S <- ScalarsEd448Ref] end),
+  {TimeSecp, _} = timer:tc(fun() -> [ecu_secp256k1:scalar_mul_base(S) || S <- ScalarsSecp] end),
+  {TimeSecpRef, _} = timer:tc(fun() -> [crypto:generate_key(ecdh, secp256k1) || _ <- ScalarsSecpRef] end),
+  {TimeEnacl, _} = timer:tc(fun() -> [enacl:crypto_ed25519_scalarmult_base(S) || S <- ScalarsEnacl] end),
+  {TimeEd25519, _} = timer:tc(fun() -> [ecu_ed25519:scalar_mul_base(S) || S <- ScalarsEd25519] end),
+  {TimeEd448, _} = timer:tc(fun() -> [ecu_ed448:scalar_mul_base(S) || S <- ScalarsEd448] end),
+  {TimeEd448Ref, _} = timer:tc(fun() ->
+    [crypto:generate_key(eddsa, ed448, S) || S <- ScalarsEd448Ref]
+  end),
 
   ?debugFmt("", []),
   stats("Scalar mul base", "ecu_secp256k1   ", length(ScalarsSecp), TimeSecp),
@@ -62,21 +75,33 @@ bench_scalar_mul_base_test() ->
   ok.
 
 bench_scalar_mul_test() ->
-  Scalars0 = [ <<(gen_scalar()):256/little>> || _ <- lists:seq(1, 100) ],
-  ScalarsSecp    = lists:append(lists:duplicate(1, Scalars0)),
+  Scalars0 = [<<(gen_scalar()):256/little>> || _ <- lists:seq(1, 100)],
+  ScalarsSecp = lists:append(lists:duplicate(1, Scalars0)),
   ScalarsSecpRef = lists:append(lists:duplicate(10, Scalars0)),
-  ScalarsEnacl   = lists:append(lists:duplicate(100, Scalars0)),
+  ScalarsEnacl = lists:append(lists:duplicate(100, Scalars0)),
   ScalarsEd25519 = lists:append(lists:duplicate(10, Scalars0)),
 
   Test = fun(F, P0, Ss) -> lists:foldl(fun(S, P) -> F(S, P) end, P0, Ss) end,
 
-  {TimeSecp,    _} = timer:tc(fun() -> Test(fun ecu_secp256k1:scalar_mul/2,        ecu_secp256k1:scalar_mul_base(hd(ScalarsSecp)),         tl(ScalarsSecp)) end),
+  {TimeSecp, _} = timer:tc(fun() ->
+    Test(fun ecu_secp256k1:scalar_mul/2, ecu_secp256k1:scalar_mul_base(hd(ScalarsSecp)), tl(ScalarsSecp))
+  end),
   {TimeSecpRef, _} = timer:tc(fun() ->
     BasePub = ecu_ecdsa:private_to_public(secp256k1, hd(ScalarsSecp)),
     [crypto:compute_key(ecdh, BasePub, S, secp256k1) || S <- ScalarsSecpRef]
   end),
-  {TimeEnacl,   _} = timer:tc(fun() -> Test(fun enacl:crypto_ed25519_scalarmult/2, enacl:crypto_ed25519_scalarmult_base(hd(ScalarsEnacl)), tl(ScalarsEnacl)) end),
-  {TimeEd25519, _} = timer:tc(fun() -> Test(fun ecu_ed25519:scalar_mul/2,          ecu_ed25519:scalar_mul_base(hd(ScalarsEd25519)),        tl(ScalarsEd25519)) end),
+  {TimeEnacl, _} = timer:tc(fun() ->
+    Test(
+      fun enacl:crypto_ed25519_scalarmult/2,
+      enacl:crypto_ed25519_scalarmult_base(hd(ScalarsEnacl)),
+      tl(ScalarsEnacl)
+    )
+  end),
+  {TimeEd25519, _} = timer:tc(fun() ->
+    Test(
+      fun ecu_ed25519:scalar_mul/2, ecu_ed25519:scalar_mul_base(hd(ScalarsEd25519)), tl(ScalarsEd25519)
+    )
+  end),
 
   ?debugFmt("", []),
   stats("Scalar mul", "ecu_secp256k1   ", length(ScalarsSecp), TimeSecp),
@@ -88,17 +113,22 @@ bench_scalar_mul_test() ->
   ok.
 
 bench_sign_test() ->
-  KeyPairs = [ enacl:sign_keypair() || _ <- lists:seq(1, 10) ],
-  Messages = [ crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49) ],
+  KeyPairs = [enacl:sign_keypair() || _ <- lists:seq(1, 10)],
+  Messages = [crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
 
-  Data = [ {K, Msg} || {Msg, K} <- lists:zip(Messages, lists:append(lists:duplicate(3, KeyPairs))) ],
+  Data = [{K, Msg} || {Msg, K} <- lists:zip(Messages, lists:append(lists:duplicate(3, KeyPairs)))],
 
-  DataEnacl   = lists:append(lists:duplicate(1000, Data)),
+  DataEnacl = lists:append(lists:duplicate(1000, Data)),
   DataEd25519 = lists:append(lists:duplicate(20, Data)),
 
-  {TimeEnacl,   _} = timer:tc(fun() -> [enacl:sign_detached(Msg, maps:get(secret, K))     || {K, Msg} <- DataEnacl], ok end),
-  {TimeEd25519, _} = timer:tc(fun() -> [ecu_eddsa:sign_detached(Msg, maps:get(secret, K)) || {K, Msg} <- DataEd25519], ok end),
-
+  {TimeEnacl, _} = timer:tc(fun() ->
+    [enacl:sign_detached(Msg, maps:get(secret, K)) || {K, Msg} <- DataEnacl],
+    ok
+  end),
+  {TimeEd25519, _} = timer:tc(fun() ->
+    [ecu_eddsa:sign_detached(Msg, maps:get(secret, K)) || {K, Msg} <- DataEd25519],
+    ok
+  end),
 
   ?debugFmt("", []),
   stats("Message sign", "enacl/libsodium", length(DataEnacl), TimeEnacl),
@@ -107,18 +137,25 @@ bench_sign_test() ->
   ok.
 
 bench_verify_test() ->
-  KeyPairs = [ enacl:sign_keypair() || _ <- lists:seq(1, 10) ],
-  Messages = [ crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49) ],
+  KeyPairs = [enacl:sign_keypair() || _ <- lists:seq(1, 10)],
+  Messages = [crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
 
-  Data = [ {K, Msg, enacl:sign_detached(Msg, maps:get(secret, K))}
-           || {Msg, K} <- lists:zip(Messages, lists:append(lists:duplicate(3, KeyPairs))) ],
+  Data = [
+    {K, Msg, enacl:sign_detached(Msg, maps:get(secret, K))}
+   || {Msg, K} <- lists:zip(Messages, lists:append(lists:duplicate(3, KeyPairs)))
+  ],
 
-  DataEnacl   = lists:append(lists:duplicate(1000, Data)),
+  DataEnacl = lists:append(lists:duplicate(1000, Data)),
   DataEd25519 = lists:append(lists:duplicate(20, Data)),
 
-  {TimeEnacl,   _} = timer:tc(fun() -> [enacl:sign_verify_detached(Sig, Msg, maps:get(public, K))     || {K, Msg, Sig} <- DataEnacl], ok end),
-  {TimeEd25519, _} = timer:tc(fun() -> [ecu_eddsa:sign_verify_detached(Sig, Msg, maps:get(public, K)) || {K, Msg, Sig} <- DataEd25519], ok end),
-
+  {TimeEnacl, _} = timer:tc(fun() ->
+    [enacl:sign_verify_detached(Sig, Msg, maps:get(public, K)) || {K, Msg, Sig} <- DataEnacl],
+    ok
+  end),
+  {TimeEd25519, _} = timer:tc(fun() ->
+    [ecu_eddsa:sign_verify_detached(Sig, Msg, maps:get(public, K)) || {K, Msg, Sig} <- DataEd25519],
+    ok
+  end),
 
   ?debugFmt("", []),
   stats("Message verify", "enacl/libsodium", length(DataEnacl), TimeEnacl),
@@ -128,19 +165,24 @@ bench_verify_test() ->
 
 bench_batch_verify_test() ->
   N = 32,
-  Batch = [ begin
-              K = ecu_eddsa:sign_keypair(),
-              Msg = crypto:strong_rand_bytes(32),
-              Sig = ecu_eddsa:sign_detached(Msg, maps:get(secret, K)),
-              {Sig, Msg, maps:get(public, K)}
-            end || _ <- lists:seq(1, N) ],
+  Batch = [
+    begin
+      K = ecu_eddsa:sign_keypair(),
+      Msg = crypto:strong_rand_bytes(32),
+      Sig = ecu_eddsa:sign_detached(Msg, maps:get(secret, K)),
+      {Sig, Msg, maps:get(public, K)}
+    end
+   || _ <- lists:seq(1, N)
+  ],
   Iters = 5,
   {TimeIndiv, _} = timer:tc(fun() ->
-    [ [ ecu_eddsa:sign_verify_detached(Sig, Msg, PK) || {Sig, Msg, PK} <- Batch ]
-      || _ <- lists:seq(1, Iters) ]
+    [
+      [ecu_eddsa:sign_verify_detached(Sig, Msg, PK) || {Sig, Msg, PK} <- Batch]
+     || _ <- lists:seq(1, Iters)
+    ]
   end),
   {TimeBatch, _} = timer:tc(fun() ->
-    [ ecu_eddsa:sign_verify_batch(Batch) || _ <- lists:seq(1, Iters) ]
+    [ecu_eddsa:sign_verify_batch(Batch) || _ <- lists:seq(1, Iters)]
   end),
   ?debugFmt("", []),
   stats("Ed25519 verify x32", "individual  ", N * Iters, TimeIndiv),
@@ -154,17 +196,26 @@ gen_ecdsa_secp256k1_privkey() ->
   <<P:256>>.
 
 bench_ecverify_test() ->
-  Data0 = [ {gen_ecdsa_secp256k1_privkey(), crypto:strong_rand_bytes(32)} || _ <- lists:seq(1, 10) ],
-  Data1  = [ {Pr, Msg, ecu_crypto:private_to_short(ethereum, Pr), ecu_crypto:eth_sign(Msg, Pr)} || {Pr, Msg} <- Data0 ],
+  Data0 = [{gen_ecdsa_secp256k1_privkey(), crypto:strong_rand_bytes(32)} || _ <- lists:seq(1, 10)],
+  Data1 = [
+    {Pr, Msg, ecu_crypto:private_to_short(ethereum, Pr), ecu_crypto:eth_sign(Msg, Pr)}
+   || {Pr, Msg} <- Data0
+  ],
 
   RustData = lists:append(lists:duplicate(100, Data1)),
-  ECUData  = lists:append(lists:duplicate(5, Data1)),
+  ECUData = lists:append(lists:duplicate(5, Data1)),
 
   %% ensure loading
   ecrecover:recover(<<0:256>>, <<123:520>>),
 
-  {TimeRust, _} = timer:tc(fun() -> [ ecrecover:recover(Msg, Sig) || {_, Msg, _, Sig} <- RustData ], ok end),
-  {TimeECU,  _} = timer:tc(fun() -> [ ecu_crypto:eth_recover(Msg, Sig) || {_, Msg, _, Sig} <- ECUData ], ok end),
+  {TimeRust, _} = timer:tc(fun() ->
+    [ecrecover:recover(Msg, Sig) || {_, Msg, _, Sig} <- RustData],
+    ok
+  end),
+  {TimeECU, _} = timer:tc(fun() ->
+    [ecu_crypto:eth_recover(Msg, Sig) || {_, Msg, _, Sig} <- ECUData],
+    ok
+  end),
 
   ?debugFmt("", []),
   stats("Message verify", "ecrecover (Rust)", length(RustData), TimeRust),
@@ -173,22 +224,26 @@ bench_ecverify_test() ->
   ok.
 
 bench_ed448_sign_verify_test() ->
-  Seeds = [ crypto:strong_rand_bytes(57) || _ <- lists:seq(1, 10) ],
-  KeyPairs = [ ecu_eddsa448:sign_seed_keypair(S) || S <- Seeds ],
-  Messages = [ crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49) ],
-  Data = [ {maps:get(secret, K), maps:get(public, K), Seed, Msg}
-           || {{K, Seed}, Msg} <- lists:zip(lists:append(lists:duplicate(3, lists:zip(KeyPairs, Seeds))),
-                                            Messages) ],
+  Seeds = [crypto:strong_rand_bytes(57) || _ <- lists:seq(1, 10)],
+  KeyPairs = [ecu_eddsa448:sign_seed_keypair(S) || S <- Seeds],
+  Messages = [crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
+  Data = [
+    {maps:get(secret, K), maps:get(public, K), Seed, Msg}
+   || {{K, Seed}, Msg} <- lists:zip(
+      lists:append(lists:duplicate(3, lists:zip(KeyPairs, Seeds))),
+      Messages
+    )
+  ],
 
   CryptoData = lists:append(lists:duplicate(10, Data)),
   ECUData = lists:append(lists:duplicate(1, Data)),
 
   %% Sign
   {TimeSignCrypto, _} = timer:tc(fun() ->
-    [ crypto:sign(eddsa, none, Msg, [Seed, ed448]) || {_, _, Seed, Msg} <- CryptoData ]
+    [crypto:sign(eddsa, none, Msg, [Seed, ed448]) || {_, _, Seed, Msg} <- CryptoData]
   end),
   {TimeSignECU, _} = timer:tc(fun() ->
-    [ ecu_eddsa448:sign_detached(Msg, Sec) || {Sec, _, _, Msg} <- ECUData ]
+    [ecu_eddsa448:sign_detached(Msg, Sec) || {Sec, _, _, Msg} <- ECUData]
   end),
 
   ?debugFmt("", []),
@@ -197,15 +252,15 @@ bench_ed448_sign_verify_test() ->
   diff(TimeSignCrypto / length(CryptoData), TimeSignECU / length(ECUData)),
 
   %% Verify
-  Sigs = [ {Sec, Pub, Msg, ecu_eddsa448:sign_detached(Msg, Sec)} || {Sec, Pub, _, Msg} <- Data ],
+  Sigs = [{Sec, Pub, Msg, ecu_eddsa448:sign_detached(Msg, Sec)} || {Sec, Pub, _, Msg} <- Data],
   CryptoVerifyData = lists:append(lists:duplicate(10, Sigs)),
   ECUVerifyData = lists:append(lists:duplicate(1, Sigs)),
 
   {TimeVerifyCrypto, _} = timer:tc(fun() ->
-    [ crypto:verify(eddsa, none, Msg, Sig, [Pub, ed448]) || {_, Pub, Msg, Sig} <- CryptoVerifyData ]
+    [crypto:verify(eddsa, none, Msg, Sig, [Pub, ed448]) || {_, Pub, Msg, Sig} <- CryptoVerifyData]
   end),
   {TimeVerifyECU, _} = timer:tc(fun() ->
-    [ ecu_eddsa448:sign_verify_detached(Sig, Msg, Pub) || {_, Pub, Msg, Sig} <- ECUVerifyData ]
+    [ecu_eddsa448:sign_verify_detached(Sig, Msg, Pub) || {_, Pub, Msg, Sig} <- ECUVerifyData]
   end),
 
   ?debugFmt("", []),
@@ -222,13 +277,13 @@ bench_ecdh_test() ->
   N25519Ref = 500,
 
   {TimeX25519Enacl, _} = timer:tc(fun() ->
-    [ enacl:curve25519_scalarmult(PrivA25519, PubB25519) || _ <- lists:seq(1, N25519Ref) ]
+    [enacl:curve25519_scalarmult(PrivA25519, PubB25519) || _ <- lists:seq(1, N25519Ref)]
   end),
   {TimeX25519Crypto, _} = timer:tc(fun() ->
-    [ crypto:compute_key(ecdh, PubB25519, PrivA25519, x25519) || _ <- lists:seq(1, N25519Ref) ]
+    [crypto:compute_key(ecdh, PubB25519, PrivA25519, x25519) || _ <- lists:seq(1, N25519Ref)]
   end),
   {TimeX25519ECU, _} = timer:tc(fun() ->
-    [ ecu_ecdh:compute_key(x25519, PubB25519, PrivA25519) || _ <- lists:seq(1, N25519) ]
+    [ecu_ecdh:compute_key(x25519, PubB25519, PrivA25519) || _ <- lists:seq(1, N25519)]
   end),
 
   ?debugFmt("", []),
@@ -244,10 +299,10 @@ bench_ecdh_test() ->
   N448Ref = 200,
 
   {TimeX448Crypto, _} = timer:tc(fun() ->
-    [ crypto:compute_key(ecdh, PubB448, PrivA448, x448) || _ <- lists:seq(1, N448Ref) ]
+    [crypto:compute_key(ecdh, PubB448, PrivA448, x448) || _ <- lists:seq(1, N448Ref)]
   end),
   {TimeX448ECU, _} = timer:tc(fun() ->
-    [ ecu_ecdh:compute_key(x448, PubB448, PrivA448) || _ <- lists:seq(1, N448) ]
+    [ecu_ecdh:compute_key(x448, PubB448, PrivA448) || _ <- lists:seq(1, N448)]
   end),
 
   ?debugFmt("", []),
@@ -262,10 +317,10 @@ bench_ecdh_test() ->
   N256Ref = 300,
 
   {TimeSecpCrypto, _} = timer:tc(fun() ->
-    [ crypto:compute_key(ecdh, PubB256, PrivA256, secp256k1) || _ <- lists:seq(1, N256Ref) ]
+    [crypto:compute_key(ecdh, PubB256, PrivA256, secp256k1) || _ <- lists:seq(1, N256Ref)]
   end),
   {TimeSecpECU, _} = timer:tc(fun() ->
-    [ ecu_ecdh:compute_key(secp256k1, PubB256, PrivA256) || _ <- lists:seq(1, N256) ]
+    [ecu_ecdh:compute_key(secp256k1, PubB256, PrivA256) || _ <- lists:seq(1, N256)]
   end),
 
   ?debugFmt("", []),
@@ -285,11 +340,19 @@ bench_bip340_test() ->
     true ->
       NRef = 1000,
       NECU = 50,
-      {TimeNifSign, _} = timer:tc(fun() -> [ecu_schnorr_nif:sign(Priv, Msg, Aux) || _ <- lists:seq(1, NRef)] end),
-      {TimeEcuSign, _} = timer:tc(fun() -> [ecu_schnorr:sign(Msg, Priv, Aux) || _ <- lists:seq(1, NECU)] end),
+      {TimeNifSign, _} = timer:tc(fun() ->
+        [ecu_schnorr_nif:sign(Priv, Msg, Aux) || _ <- lists:seq(1, NRef)]
+      end),
+      {TimeEcuSign, _} = timer:tc(fun() ->
+        [ecu_schnorr:sign(Msg, Priv, Aux) || _ <- lists:seq(1, NECU)]
+      end),
 
-      {TimeNifVerify, _} = timer:tc(fun() -> [ecu_schnorr_nif:verify(Sig, Msg, Pub) || _ <- lists:seq(1, NRef)] end),
-      {TimeEcuVerify, _} = timer:tc(fun() -> [ecu_schnorr:verify(Sig, Msg, Pub) || _ <- lists:seq(1, NECU)] end),
+      {TimeNifVerify, _} = timer:tc(fun() ->
+        [ecu_schnorr_nif:verify(Sig, Msg, Pub) || _ <- lists:seq(1, NRef)]
+      end),
+      {TimeEcuVerify, _} = timer:tc(fun() ->
+        [ecu_schnorr:verify(Sig, Msg, Pub) || _ <- lists:seq(1, NECU)]
+      end),
 
       ?debugFmt("", []),
       stats("BIP-340 sign", "k256 (Rust NIF) ", NRef, TimeNifSign),
@@ -307,40 +370,45 @@ bench_bip340_test() ->
 bench_frost_test() ->
   case ecu_frost_nif:is_available() of
     true ->
-      lists:foreach(fun(Suite) ->
-        {Shares, GroupPubKey, _} = ecu_frost:trusted_dealer_keygen(Suite, 3, 5),
-        Selected = lists:sublist(Shares, 3),
-        Msg = <<"Benchmark FROST message">>,
-        {CommitTime, Nonces} = timer:tc(fun() ->
-          [ {Id, S, ecu_frost:commit(Suite, S)} || {Id, S} <- Selected ]
-        end),
-        CommitmentList = [ {Id, HC, BC} || {Id, _, {_, {HC, BC}}} <- Nonces ],
-        {SignTime, SigShares} = timer:tc(fun() ->
-          [ ecu_frost:sign(Suite, Id, S, GroupPubKey, NoncePair, Msg, CommitmentList)
-            || {Id, S, {NoncePair, _}} <- Nonces ]
-        end),
-        {AggTime, Signature} = timer:tc(fun() ->
-          ecu_frost:aggregate(Suite, CommitmentList, Msg, GroupPubKey, SigShares)
-        end),
-        {VerifyTime, _} = timer:tc(fun() ->
-          ecu_frost:verify(Suite, Signature, Msg, GroupPubKey)
-        end),
-        {RefCommit, RefSign, RefAgg, RefVerify} = ecu_frost_nif:bench_round(Suite, 3, 5),
-        SuiteStr = atom_to_list(Suite),
-        ?debugFmt("", []),
-        stats("FROST " ++ SuiteStr ++ " commit", "ecu_frost       ", 3, CommitTime),
-        stats("FROST " ++ SuiteStr ++ " commit", "frost (Rust NIF)", 1, RefCommit),
-        diff(RefCommit, CommitTime / 3),
-        stats("FROST " ++ SuiteStr ++ " part sign", "ecu_frost       ", 3, SignTime),
-        stats("FROST " ++ SuiteStr ++ " part sign", "frost (Rust NIF)", 1, RefSign),
-        diff(RefSign, SignTime / 3),
-        stats("FROST " ++ SuiteStr ++ " aggregate", "ecu_frost       ", 1, AggTime),
-        stats("FROST " ++ SuiteStr ++ " aggregate", "frost (Rust NIF)", 1, RefAgg),
-        diff(RefAgg, AggTime),
-        stats("FROST " ++ SuiteStr ++ " verify", "ecu_frost       ", 1, VerifyTime),
-        stats("FROST " ++ SuiteStr ++ " verify", "frost (Rust NIF)", 1, RefVerify),
-        diff(RefVerify, VerifyTime)
-      end, [ed25519, secp256k1, bip340, ed448]);
+      lists:foreach(
+        fun(Suite) ->
+          {Shares, GroupPubKey, _} = ecu_frost:trusted_dealer_keygen(Suite, 3, 5),
+          Selected = lists:sublist(Shares, 3),
+          Msg = <<"Benchmark FROST message">>,
+          {CommitTime, Nonces} = timer:tc(fun() ->
+            [{Id, S, ecu_frost:commit(Suite, S)} || {Id, S} <- Selected]
+          end),
+          CommitmentList = [{Id, HC, BC} || {Id, _, {_, {HC, BC}}} <- Nonces],
+          {SignTime, SigShares} = timer:tc(fun() ->
+            [
+              ecu_frost:sign(Suite, Id, S, GroupPubKey, NoncePair, Msg, CommitmentList)
+             || {Id, S, {NoncePair, _}} <- Nonces
+            ]
+          end),
+          {AggTime, Signature} = timer:tc(fun() ->
+            ecu_frost:aggregate(Suite, CommitmentList, Msg, GroupPubKey, SigShares)
+          end),
+          {VerifyTime, _} = timer:tc(fun() ->
+            ecu_frost:verify(Suite, Signature, Msg, GroupPubKey)
+          end),
+          {RefCommit, RefSign, RefAgg, RefVerify} = ecu_frost_nif:bench_round(Suite, 3, 5),
+          SuiteStr = atom_to_list(Suite),
+          ?debugFmt("", []),
+          stats("FROST " ++ SuiteStr ++ " commit", "ecu_frost       ", 3, CommitTime),
+          stats("FROST " ++ SuiteStr ++ " commit", "frost (Rust NIF)", 1, RefCommit),
+          diff(RefCommit, CommitTime / 3),
+          stats("FROST " ++ SuiteStr ++ " part sign", "ecu_frost       ", 3, SignTime),
+          stats("FROST " ++ SuiteStr ++ " part sign", "frost (Rust NIF)", 1, RefSign),
+          diff(RefSign, SignTime / 3),
+          stats("FROST " ++ SuiteStr ++ " aggregate", "ecu_frost       ", 1, AggTime),
+          stats("FROST " ++ SuiteStr ++ " aggregate", "frost (Rust NIF)", 1, RefAgg),
+          diff(RefAgg, AggTime),
+          stats("FROST " ++ SuiteStr ++ " verify", "ecu_frost       ", 1, VerifyTime),
+          stats("FROST " ++ SuiteStr ++ " verify", "frost (Rust NIF)", 1, RefVerify),
+          diff(RefVerify, VerifyTime)
+        end,
+        [ed25519, secp256k1, bip340, ed448]
+      );
     false ->
       ?debugFmt("FROST: reference NIF not built (run 'make frost_reference' to enable)", [])
   end,
@@ -383,24 +451,46 @@ bench_musig2_test() ->
   {TimeNonceGen, _} = timer:tc(fun() -> [ecu_musig2:nonce_gen(hd(SKs)) || _ <- lists:seq(1, Iters)] end),
 
   %% 3. Nonce Agg
-  NoncesList = [[begin {SN, <<_:33/binary, _:33/binary>> = PN} = ecu_musig2:nonce_gen(SK), {SN, PN} end || SK <- SKs] || _ <- lists:seq(1, Iters)],
-  {TimeNonceAgg, _} = timer:tc(fun() -> [ecu_musig2:nonce_agg([PN || {_, PN} <- Ns]) || Ns <- NoncesList] end),
+  NoncesList = [
+    [
+      begin
+        {SN, <<_:33/binary, _:33/binary>> = PN} = ecu_musig2:nonce_gen(SK),
+        {SN, PN}
+      end
+     || SK <- SKs
+    ]
+   || _ <- lists:seq(1, Iters)
+  ],
+  {TimeNonceAgg, _} = timer:tc(fun() ->
+    [ecu_musig2:nonce_agg([PN || {_, PN} <- Ns]) || Ns <- NoncesList]
+  end),
 
   {<<_:64/binary>> = SN1, <<_:33/binary, _:33/binary>> = PN1} = hd(hd(NoncesList)),
   {ok, <<_:33/binary, _:33/binary>> = AggN} = ecu_musig2:nonce_agg([PN || {_, PN} <- hd(NoncesList)]),
 
   %% 4. Sign Partial
-  {TimeSignPart, _} = timer:tc(fun() -> [ecu_musig2:sign_partial(Ctx, hd(SKs), SN1, AggN, Msg) || _ <- lists:seq(1, Iters)] end),
+  {TimeSignPart, _} = timer:tc(fun() ->
+    [ecu_musig2:sign_partial(Ctx, hd(SKs), SN1, AggN, Msg) || _ <- lists:seq(1, Iters)]
+  end),
   {ok, Psig1} = ecu_musig2:sign_partial(Ctx, hd(SKs), SN1, AggN, Msg),
 
   %% 5. Verify Partial
-  {TimeVerifyPart, _} = timer:tc(fun() -> [ecu_musig2:verify_partial(Ctx, Psig1, PN1, hd(PKs), AggN, Msg) || _ <- lists:seq(1, Iters)] end),
+  {TimeVerifyPart, _} = timer:tc(fun() ->
+    [ecu_musig2:verify_partial(Ctx, Psig1, PN1, hd(PKs), AggN, Msg) || _ <- lists:seq(1, Iters)]
+  end),
 
-  Psigs = [begin {ok, P} = ecu_musig2:sign_partial(Ctx, SK, SN, AggN, Msg), P end
-           || {SK, {SN, _}} <- lists:zip(SKs, hd(NoncesList))],
+  Psigs = [
+    begin
+      {ok, P} = ecu_musig2:sign_partial(Ctx, SK, SN, AggN, Msg),
+      P
+    end
+   || {SK, {SN, _}} <- lists:zip(SKs, hd(NoncesList))
+  ],
 
   %% 6. Aggregate
-  {TimeAggPart, _} = timer:tc(fun() -> [ecu_musig2:aggregate_partial(Ctx, AggN, Msg, Psigs) || _ <- lists:seq(1, Iters)] end),
+  {TimeAggPart, _} = timer:tc(fun() ->
+    [ecu_musig2:aggregate_partial(Ctx, AggN, Msg, Psigs) || _ <- lists:seq(1, Iters)]
+  end),
 
   ?debugFmt("", []),
   stats("MuSig2 BIP-327 key_agg", "ecu_musig2      ", Iters, TimeKeyAgg),
@@ -412,14 +502,25 @@ bench_musig2_test() ->
 
   case ecu_musig2_nif:is_available() of
     true ->
-      {TimeNifKeyAgg, _} = timer:tc(fun() -> [ecu_musig2_nif:key_agg(PKs) || _ <- lists:seq(1, Iters)] end),
+      {TimeNifKeyAgg, _} = timer:tc(fun() ->
+        [ecu_musig2_nif:key_agg(PKs) || _ <- lists:seq(1, Iters)]
+      end),
       {ok, {_, NifCtx}} = ecu_musig2_nif:key_agg(PKs),
-      {TimeNifNonceGen, _} = timer:tc(fun() -> [ecu_musig2_nif:nonce_gen(hd(SKs)) || _ <- lists:seq(1, Iters)] end),
-      {TimeNifNonceAgg, _} = timer:tc(fun() -> [ecu_musig2_nif:nonce_agg([PN || {_, PN} <- Ns]) || Ns <- NoncesList] end),
-      {TimeNifSignPart, _} = timer:tc(fun() -> [ecu_musig2_nif:sign(NifCtx, hd(SKs), SN1, AggN, Msg) || _ <- lists:seq(1, Iters)] end),
-      {TimeNifVerifyPart, _} = timer:tc(fun() -> [ecu_musig2_nif:verify(NifCtx, Psig1, PN1, hd(PKs), AggN, Msg) || _ <- lists:seq(1, Iters)] end),
-      {TimeNifAggPart, _} = timer:tc(fun() -> [ecu_musig2_nif:aggregate(NifCtx, AggN, Msg, Psigs) || _ <- lists:seq(1, Iters)] end),
-
+      {TimeNifNonceGen, _} = timer:tc(fun() ->
+        [ecu_musig2_nif:nonce_gen(hd(SKs)) || _ <- lists:seq(1, Iters)]
+      end),
+      {TimeNifNonceAgg, _} = timer:tc(fun() ->
+        [ecu_musig2_nif:nonce_agg([PN || {_, PN} <- Ns]) || Ns <- NoncesList]
+      end),
+      {TimeNifSignPart, _} = timer:tc(fun() ->
+        [ecu_musig2_nif:sign(NifCtx, hd(SKs), SN1, AggN, Msg) || _ <- lists:seq(1, Iters)]
+      end),
+      {TimeNifVerifyPart, _} = timer:tc(fun() ->
+        [ecu_musig2_nif:verify(NifCtx, Psig1, PN1, hd(PKs), AggN, Msg) || _ <- lists:seq(1, Iters)]
+      end),
+      {TimeNifAggPart, _} = timer:tc(fun() ->
+        [ecu_musig2_nif:aggregate(NifCtx, AggN, Msg, Psigs) || _ <- lists:seq(1, Iters)]
+      end),
 
       stats("MuSig2 BIP-327 key_agg", "musig2 (Rust NIF)", Iters, TimeNifKeyAgg),
       diff(TimeNifKeyAgg / Iters, TimeKeyAgg / Iters),
@@ -437,7 +538,6 @@ bench_musig2_test() ->
       ok
   end,
   ok.
-
 
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).

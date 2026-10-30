@@ -1,7 +1,11 @@
-%%% File        : ecu_eddsa.erl
-%%% Author      : Hans Svensson
-%%% Description : eddsa functionality - when possible compatible with enacl.
-%%% Created     : 19 Jan 2022 by Hans Svensson
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% EdDSA signatures over Curve25519 (Ed25519, RFC 8032). Compatible with enacl.
+%%%
+%%% Reference:
+%%%   RFC 8032: https://datatracker.ietf.org/doc/html/rfc8032
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_eddsa).
 
 -typing([eqwalizer]).
@@ -10,18 +14,20 @@
 
 -type public_key() :: <<_:256>>.
 -type secret_key() :: <<_:256>> | <<_:512>>.
--type keypair() :: #{ public := public_key(), secret := <<_:512>> }.
+-type keypair() :: #{public := public_key(), secret := <<_:512>>}.
 -type signature() :: <<_:512>>.
 
 -export_type([public_key/0, secret_key/0, keypair/0, signature/0]).
 
--export([sign_keypair/0,
-         sign_seed_keypair/1,
-         sign/2,
-         sign_open/2,
-         sign_detached/2,
-         sign_verify_detached/3,
-         sign_verify_batch/1]).
+-export([
+  sign_keypair/0,
+  sign_seed_keypair/1,
+  sign/2,
+  sign_open/2,
+  sign_detached/2,
+  sign_verify_detached/3,
+  sign_verify_batch/1
+]).
 
 %% @doc sign_keypair/0 creates a keypair for signing
 %%
@@ -61,10 +67,10 @@ sign(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
 %% signature.
 %% @end
 -spec sign_open(SMsg :: binary(), PK :: public_key()) ->
-    {ok, Msg :: binary()} | {error, failed_verification}.
+  {ok, Msg :: binary()} | {error, failed_verification}.
 sign_open(<<Sig:64/binary, BinMsg/binary>>, <<PK:32/binary>>) ->
   case sign_verify_detached(Sig, BinMsg, PK) of
-    true  -> {ok, BinMsg};
+    true -> {ok, BinMsg};
     false -> {error, failed_verification}
   end;
 sign_open(_, _) ->
@@ -86,15 +92,16 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   Seed = clamp(Seed0),
 
   DerivedPub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed0)),
-  Pub = case SK of
-          <<_:32/binary, Pub0:32/binary>> ->
-            case Pub0 == DerivedPub of
-              true  -> DerivedPub;
-              false -> error(badarg)
-            end;
-          _ ->
-            DerivedPub
-        end,
+  Pub =
+    case SK of
+      <<_:32/binary, Pub0:32/binary>> ->
+        case Pub0 == DerivedPub of
+          true -> DerivedPub;
+          false -> error(badarg)
+        end;
+      _ ->
+        DerivedPub
+    end,
 
   %% Compute r = H(prefix || msg)
   Rs0 = crypto:hash(sha512, <<Prefix/bytes, BinMsg/bytes>>),
@@ -114,7 +121,6 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   %% Form the signature {R, s}
   <<R/bytes, Ss/bytes>>.
 
-
 %% @doc sign_verify_detached/3 verifies the given signature against the given
 %% message for the given public key.
 %%
@@ -122,24 +128,28 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
 %% function computes true iff the `Sig' is valid for `Msg' and `PK'; and,
 %% false otherwise.
 %% @end
--spec sign_verify_detached(Sig :: signature() | binary(), Msg :: iodata(), PK :: public_key() | binary()) -> boolean().
+-spec sign_verify_detached(
+  Sig :: signature() | binary(), Msg :: iodata(), PK :: public_key() | binary()
+) -> boolean().
 sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
   <<R:32/binary, Ss:32/binary>> = Sig,
   <<S:256/little-unsigned-integer>> = Ss,
   case S < ?N of
-    false -> false;
+    false ->
+      false;
     true ->
       try
         A = ecu_ed25519:decompress(PK),
         case ecu_ed25519:is_small_order(A) of
-          true -> false;
+          true ->
+            false;
           false ->
             BinMsg = iolist_to_binary(Msg),
             Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
             <<K:256/little-unsigned-integer>> = ecu_ed25519:scalar_reduce(Ks0),
             R_prime = ecu_ed25519:scalar_mul_dual_base(S, K, ecu_ed25519:p_neg(A)),
             case ecu_ed25519:is_small_order(R_prime) of
-              true  -> false;
+              true -> false;
               false -> ecu_ed25519:compress(R_prime) == R
             end
         end
@@ -157,7 +167,7 @@ sign_verify_detached(_, _, _) ->
 %% Returns true iff ALL signatures in the batch are valid; false otherwise.
 %% @end
 -spec sign_verify_batch(
-    [{signature() | binary(), iodata(), public_key() | binary()}]
+  [{signature() | binary(), iodata(), public_key() | binary()}]
 ) -> boolean().
 sign_verify_batch([]) ->
   true;
@@ -180,30 +190,39 @@ verify_batch_impl(Items) ->
   P_total = ecu_ed25519:p_sub(P_others, P_base),
   ecu_ed25519:pt_eq(P_total, {0, 1, 1, 0}).
 
--spec parse_batch([{signature() | binary(), iodata(), public_key() | binary()}],
-                  [{non_neg_integer(), ecu_ed25519:pt_hom_ext()}],
-                  non_neg_integer()) ->
-    {[{non_neg_integer(), ecu_ed25519:pt_hom_ext()}], non_neg_integer()}.
+-spec parse_batch(
+  [{signature() | binary(), iodata(), public_key() | binary()}],
+  [{non_neg_integer(), ecu_ed25519:pt_hom_ext()}],
+  non_neg_integer()
+) ->
+  {[{non_neg_integer(), ecu_ed25519:pt_hom_ext()}], non_neg_integer()}.
 parse_batch([], PointsAcc, SAcc) ->
   {PointsAcc, SAcc};
 parse_batch([{<<R_bin:32/binary, Ss:32/binary>>, Msg, <<PK:32/binary>>} | Rest], PointsAcc, SAcc) ->
   <<S:256/little-unsigned-integer>> = Ss,
   case S < ?N of
-    false -> error(badarg);
+    false ->
+      error(badarg);
     true ->
       A = ecu_ed25519:decompress(PK),
       case ecu_ed25519:is_small_order(A) of
-        true  -> error(badarg);
+        true ->
+          error(badarg);
         false ->
           R = ecu_ed25519:decompress(R_bin),
           case ecu_ed25519:is_small_order(R) of
-            true  -> error(badarg);
+            true ->
+              error(badarg);
             false ->
               BinMsg = iolist_to_binary(Msg),
               Ks0 = crypto:hash(sha512, <<R_bin/binary, PK/binary, BinMsg/binary>>),
               <<K:256/little-unsigned-integer>> = ecu_ed25519:scalar_reduce(Ks0),
               <<Z0:128/little-unsigned-integer>> = crypto:strong_rand_bytes(16),
-              Z = case Z0 of 0 -> 1; _ -> Z0 end,
+              Z =
+                case Z0 of
+                  0 -> 1;
+                  _ -> Z0
+                end,
               C = (Z * K) rem ?N,
               NewSAcc = (SAcc + Z * S) rem ?N,
               NewPoints = [{Z, R}, {C, A} | PointsAcc],

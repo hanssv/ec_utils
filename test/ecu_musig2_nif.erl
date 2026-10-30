@@ -1,16 +1,21 @@
-%%% File        : ecu_musig2_nif.erl
-%%% Description : Optional reference NIF wrapping the official Rust `musig2` crate (BIP-327)
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Optional reference NIF wrapping the official Rust `musig2` crate (BIP-327).
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_musig2_nif).
 
--export([is_available/0,
-         is_loaded/0,
-         key_agg/1,
-         nonce_gen/1,
-         nonce_gen/2,
-         nonce_agg/1,
-         sign/5,
-         verify/6,
-         aggregate/4]).
+-export([
+  is_available/0,
+  is_loaded/0,
+  key_agg/1,
+  nonce_gen/1,
+  nonce_gen/2,
+  nonce_agg/1,
+  sign/5,
+  verify/6,
+  aggregate/4
+]).
 -export([init/0]).
 
 -on_load(init/0).
@@ -19,17 +24,18 @@
 -define(LIBNAME, ecu_musig2_nif).
 
 init() ->
-  PrivDir = case code:priv_dir(?APPNAME) of
-              {error, bad_name} ->
-                case code:which(?MODULE) of
-                  Filename when is_list(Filename) ->
-                    filename:join([filename:dirname(Filename), "..", "priv"]);
-                  _ ->
-                    "priv"
-                end;
-              Dir ->
-                Dir
-            end,
+  PrivDir =
+    case code:priv_dir(?APPNAME) of
+      {error, bad_name} ->
+        case code:which(?MODULE) of
+          Filename when is_list(Filename) ->
+            filename:join([filename:dirname(Filename), "..", "priv"]);
+          _ ->
+            "priv"
+        end;
+      Dir ->
+        Dir
+    end,
   SoPath = filename:join(PrivDir, ?LIBNAME),
   case filelib:is_file(SoPath ++ ".so") orelse filelib:is_file(SoPath ++ ".dylib") of
     true ->
@@ -88,11 +94,13 @@ nonce_agg(PubNonces) ->
   end.
 
 %% @doc Generate a partial signature.
--spec sign(Ctx :: binary(),
-           SecKey :: binary(),
-           SecNonce :: binary(),
-           AggNonce :: binary(),
-           Msg :: binary()) -> {ok, binary()} | {error, term()}.
+-spec sign(
+  Ctx :: binary(),
+  SecKey :: binary(),
+  SecNonce :: binary(),
+  AggNonce :: binary(),
+  Msg :: binary()
+) -> {ok, binary()} | {error, term()}.
 sign(Ctx, SecKey, SecNonce, AggNonce, Msg) ->
   try sign_nif(Ctx, SecKey, SecNonce, AggNonce, Msg) of
     PartialSig -> {ok, PartialSig}
@@ -102,12 +110,14 @@ sign(Ctx, SecKey, SecNonce, AggNonce, Msg) ->
   end.
 
 %% @doc Verify a partial signature.
--spec verify(Ctx :: binary(),
-             PartialSig :: binary(),
-             PubNonce :: binary(),
-             SignerPk :: binary(),
-             AggNonce :: binary(),
-             Msg :: binary()) -> boolean().
+-spec verify(
+  Ctx :: binary(),
+  PartialSig :: binary(),
+  PubNonce :: binary(),
+  SignerPk :: binary(),
+  AggNonce :: binary(),
+  Msg :: binary()
+) -> boolean().
 verify(Ctx, PartialSig, PubNonce, SignerPk, AggNonce, Msg) ->
   try
     verify_nif(Ctx, PartialSig, PubNonce, SignerPk, AggNonce, Msg)
@@ -116,10 +126,12 @@ verify(Ctx, PartialSig, PubNonce, SignerPk, AggNonce, Msg) ->
   end.
 
 %% @doc Aggregate partial signatures into a final 64-byte BIP-340 Schnorr signature.
--spec aggregate(Ctx :: binary(),
-                AggNonce :: binary(),
-                Msg :: binary(),
-                PartialSigs :: [binary()]) -> {ok, binary()} | {error, term()}.
+-spec aggregate(
+  Ctx :: binary(),
+  AggNonce :: binary(),
+  Msg :: binary(),
+  PartialSigs :: [binary()]
+) -> {ok, binary()} | {error, term()}.
 aggregate(Ctx, AggNonce, Msg, PartialSigs) ->
   try aggregate_nif(Ctx, AggNonce, Msg, PartialSigs) of
     Sig -> {ok, Sig}

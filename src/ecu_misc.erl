@@ -1,20 +1,26 @@
-%%% File        : ecu_misc.erl
-%%% Author      : Hans Svensson
-%%% Description : Misc. functionality
-%%% Created     : 13 Jan 2022 by Hans Svensson
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Miscellaneous arithmetic and binary encoding helpers (EEA, modular
+%%% exponentiation, hexadecimal conversion).
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_misc).
 
 -typing([eqwalizer]).
 
--export([eea/2, exp_mod/3,
-         hex_to_bin/1, bin_to_hex/1]).
+-export([
+  eea/2,
+  exp_mod/3,
+  hex_to_bin/1,
+  bin_to_hex/1
+]).
 
 %% A^B mod P
 -spec exp_mod(integer(), non_neg_integer(), pos_integer()) -> non_neg_integer().
 exp_mod(_A, 0, P) when is_integer(P), P > 0 -> 1;
 exp_mod(A, B, P) when is_integer(P), P > 0, is_integer(B), B >= 0, A rem P == 0 ->
   case B > 0 of
-    true  -> 0;
+    true -> 0;
     false -> 1
   end;
 exp_mod(A, B, P) when is_integer(P), P > 0, is_integer(B), B >= 0, A > 0 ->
@@ -25,7 +31,7 @@ exp_mod(A, B, P) when is_integer(P), P > 0, is_integer(B), B >= 0, A > 0 ->
 exp_mod(A, B, P) when is_integer(P), P > 0, is_integer(B), B >= 0 ->
   X = exp_mod(-A, B, P),
   case B rem 2 == 0 orelse X == 0 of
-    true  -> X;
+    true -> X;
     false -> P - X
   end.
 
@@ -37,7 +43,7 @@ eea(A, B) when is_integer(A), is_integer(B) ->
   eea(A, 1, 0, B, 0, 1).
 
 -spec eea(integer(), integer(), integer(), integer(), integer(), integer()) ->
-    {integer(), integer(), integer()}.
+  {integer(), integer(), integer()}.
 eea(G, S, T, 0, _, _) ->
   {G, S, T};
 eea(G0, S0, T0, G1, S1, T1) ->
@@ -47,8 +53,10 @@ eea(G0, S0, T0, G1, S1, T1) ->
 %% Hex encode/decode
 -spec hex_to_bin(Input :: string()) -> binary().
 hex_to_bin(S) when is_list(S), length(S) rem 2 == 0 ->
-  try hex_to_bin_acc(S, <<>>)
-  catch _:_ -> error(badarg)
+  try
+    hex_to_bin_acc(S, <<>>)
+  catch
+    _:_ -> error(badarg)
   end;
 hex_to_bin(_) ->
   error(badarg).
@@ -56,11 +64,12 @@ hex_to_bin(_) ->
 -spec hex_to_bin_acc(string(), binary()) -> binary().
 hex_to_bin_acc([], Acc) ->
   Acc;
-hex_to_bin_acc([X,Y|T], Acc) ->
-  case io_lib:fread("~16u", [X,Y]) of
+hex_to_bin_acc([X, Y | T], Acc) ->
+  case io_lib:fread("~16u", [X, Y]) of
     {ok, [V], []} when is_integer(V), V >= 0, V =< 255 ->
       hex_to_bin_acc(T, <<Acc/binary, V:8>>);
-    _ -> error(badarg)
+    _ ->
+      error(badarg)
   end.
 
 -spec bin_to_hex(Input :: binary()) -> string().

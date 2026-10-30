@@ -1,8 +1,6 @@
-%%% -*- erlang -*-
-%%% % @format
-%%%
 %%%-------------------------------------------------------------------
-%%% @doc Pure Erlang Keccak-f[1600] Permutation and SHA-3 Family (FIPS 202)
+%%% @doc
+%%% Pure Erlang Keccak-f[1600] Permutation and SHA-3 Family (FIPS 202).
 %%%
 %%% Implements the Keccak sponge function family with zero external C/NIF
 %%% dependencies, including:
@@ -34,22 +32,24 @@
 
 -typing([eqwalizer]).
 
--export([keccak256/1,
-         sha3_224/1,
-         sha3_256/1,
-         sha3_384/1,
-         sha3_512/1,
-         shake128/2,
-         shake256/2,
-         keccak/4]).
+-export([
+  keccak256/1,
+  sha3_224/1,
+  sha3_256/1,
+  sha3_384/1,
+  sha3_512/1,
+  shake128/2,
+  shake256/2,
+  keccak/4
+]).
 
 -define(NIST_SHA3_DELIMITER, <<2#01:2>>).
 -define(KECCAK_DELIMITER, <<>>).
 -define(SHAKE_DELIMITER, <<2#1111:4>>).
 
 -define(SUFFIX_KECCAK, 16#01).
--define(SUFFIX_SHA3,   16#06).
--define(SUFFIX_SHAKE,  16#1F).
+-define(SUFFIX_SHA3, 16#06).
+-define(SUFFIX_SHAKE, 16#1F).
 
 -define(INT64, 16#FFFFFFFFFFFFFFFF).
 -define(BSL64(X, N), ((X bsl N) band ?INT64)).
@@ -58,11 +58,31 @@
 -define(CAN64(A, B), ((A bxor B) band A)).
 
 -type state_words() :: {
-  non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
-  non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
-  non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
-  non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
-  non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer()
 }.
 
 %% ===================================================================
@@ -112,27 +132,32 @@ shake256(Message, OutputBitLength) ->
   hash_fast(MsgBin, ?SUFFIX_SHAKE, 136, 17, OutputBitLength).
 
 %% @doc Generic Keccak sponge function for arbitrary bitstrings and delimiters.
--spec keccak(Capacity :: pos_integer(),
-             Message :: bitstring(),
-             Delimiter :: bitstring(),
-             OutputBitLength :: pos_integer()) -> bitstring().
-keccak(Capacity, Message, Delimiter, OutputBitLength)
-  when is_binary(Message) andalso is_binary(Delimiter) andalso byte_size(Delimiter) == 0 ->
+-spec keccak(
+  Capacity :: pos_integer(),
+  Message :: bitstring(),
+  Delimiter :: bitstring(),
+  OutputBitLength :: pos_integer()
+) -> bitstring().
+keccak(Capacity, Message, Delimiter, OutputBitLength) when
+  is_binary(Message) andalso is_binary(Delimiter) andalso byte_size(Delimiter) == 0
+->
   BitRate = 1600 - Capacity,
   hash_fast(Message, ?SUFFIX_KECCAK, BitRate div 8, BitRate div 64, OutputBitLength);
-keccak(Capacity, Message, Delimiter, OutputBitLength)
-  when is_binary(Message) andalso Delimiter =:= ?NIST_SHA3_DELIMITER ->
+keccak(Capacity, Message, Delimiter, OutputBitLength) when
+  is_binary(Message) andalso Delimiter =:= ?NIST_SHA3_DELIMITER
+->
   BitRate = 1600 - Capacity,
   hash_fast(Message, ?SUFFIX_SHA3, BitRate div 8, BitRate div 64, OutputBitLength);
-keccak(Capacity, Message, Delimiter, OutputBitLength)
-  when is_binary(Message) andalso Delimiter =:= ?SHAKE_DELIMITER ->
+keccak(Capacity, Message, Delimiter, OutputBitLength) when
+  is_binary(Message) andalso Delimiter =:= ?SHAKE_DELIMITER
+->
   BitRate = 1600 - Capacity,
   hash_fast(Message, ?SUFFIX_SHAKE, BitRate div 8, BitRate div 64, OutputBitLength);
 keccak(Capacity, Message, Delimiter, OutputBitLength) ->
   %% Generic bitstring fallback for arbitrary non-byte-aligned inputs
   BitRate = 1600 - Capacity,
   PaddedMessage = pad_generic(Message, Delimiter, BitRate),
-  InitialSponge = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+  InitialSponge = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
   FinalState = absorb_generic(PaddedMessage, BitRate, InitialSponge),
   squeeze(FinalState, OutputBitLength, BitRate div 64).
 
@@ -143,13 +168,14 @@ keccak(Capacity, Message, Delimiter, OutputBitLength) ->
 -spec hash_fast(binary(), byte(), pos_integer(), pos_integer(), pos_integer()) -> bitstring().
 hash_fast(Msg, SuffixByte, RateBytes, RateWords, OutputBitLength) ->
   PadBytes = RateBytes - (byte_size(Msg) rem RateBytes),
-  Pad = case PadBytes of
-    1 -> <<(SuffixByte bor 16#80)>>;
-    2 -> <<SuffixByte, 16#80>>;
-    N -> <<SuffixByte, 0:(N - 2)/unit:8, 16#80>>
-  end,
+  Pad =
+    case PadBytes of
+      1 -> <<(SuffixByte bor 16#80)>>;
+      2 -> <<SuffixByte, 16#80>>;
+      N -> <<SuffixByte, 0:(N - 2)/unit:8, 16#80>>
+    end,
   Padded = <<Msg/binary, Pad/binary>>,
-  Initial = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+  Initial = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
   FinalState = absorb_blocks(Padded, RateBytes, RateWords, Initial),
   squeeze(FinalState, OutputBitLength, RateWords).
 
@@ -172,101 +198,381 @@ absorb_blocks(<<Block:168/binary, Rest/binary>>, 168, 21, State) ->
   absorb_blocks(Rest, 168, 21, absorb_block21(Block, State)).
 
 -spec absorb_block17(<<_:1088>>, state_words()) -> state_words().
-absorb_block17(<<
-  W0:64/little, W1:64/little, W2:64/little, W3:64/little,
-  W4:64/little, W5:64/little, W6:64/little, W7:64/little,
-  W8:64/little, W9:64/little, W10:64/little, W11:64/little,
-  W12:64/little, W13:64/little, W14:64/little, W15:64/little,
-  W16:64/little
->>, {
-  A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16,
-  A17, A18, A19, A20, A21, A22, A23, A24
-}) ->
+absorb_block17(
+  <<
+    W0:64/little,
+    W1:64/little,
+    W2:64/little,
+    W3:64/little,
+    W4:64/little,
+    W5:64/little,
+    W6:64/little,
+    W7:64/little,
+    W8:64/little,
+    W9:64/little,
+    W10:64/little,
+    W11:64/little,
+    W12:64/little,
+    W13:64/little,
+    W14:64/little,
+    W15:64/little,
+    W16:64/little
+  >>,
+  {
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
+    A8,
+    A9,
+    A10,
+    A11,
+    A12,
+    A13,
+    A14,
+    A15,
+    A16,
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
+  }
+) ->
   inner_keccak_fast({
-    A0 bxor W0, A1 bxor W1, A2 bxor W2, A3 bxor W3,
-    A4 bxor W4, A5 bxor W5, A6 bxor W6, A7 bxor W7,
-    A8 bxor W8, A9 bxor W9, A10 bxor W10, A11 bxor W11,
-    A12 bxor W12, A13 bxor W13, A14 bxor W14, A15 bxor W15,
+    A0 bxor W0,
+    A1 bxor W1,
+    A2 bxor W2,
+    A3 bxor W3,
+    A4 bxor W4,
+    A5 bxor W5,
+    A6 bxor W6,
+    A7 bxor W7,
+    A8 bxor W8,
+    A9 bxor W9,
+    A10 bxor W10,
+    A11 bxor W11,
+    A12 bxor W12,
+    A13 bxor W13,
+    A14 bxor W14,
+    A15 bxor W15,
     A16 bxor W16,
-    A17, A18, A19, A20, A21, A22, A23, A24
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
   }).
 
 -spec absorb_block9(<<_:576>>, state_words()) -> state_words().
-absorb_block9(<<
-  W0:64/little, W1:64/little, W2:64/little, W3:64/little,
-  W4:64/little, W5:64/little, W6:64/little, W7:64/little,
-  W8:64/little
->>, {
-  A0, A1, A2, A3, A4, A5, A6, A7, A8,
-  A9, A10, A11, A12, A13, A14, A15, A16,
-  A17, A18, A19, A20, A21, A22, A23, A24
-}) ->
+absorb_block9(
+  <<
+    W0:64/little,
+    W1:64/little,
+    W2:64/little,
+    W3:64/little,
+    W4:64/little,
+    W5:64/little,
+    W6:64/little,
+    W7:64/little,
+    W8:64/little
+  >>,
+  {
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
+    A8,
+    A9,
+    A10,
+    A11,
+    A12,
+    A13,
+    A14,
+    A15,
+    A16,
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
+  }
+) ->
   inner_keccak_fast({
-    A0 bxor W0, A1 bxor W1, A2 bxor W2, A3 bxor W3,
-    A4 bxor W4, A5 bxor W5, A6 bxor W6, A7 bxor W7,
+    A0 bxor W0,
+    A1 bxor W1,
+    A2 bxor W2,
+    A3 bxor W3,
+    A4 bxor W4,
+    A5 bxor W5,
+    A6 bxor W6,
+    A7 bxor W7,
     A8 bxor W8,
-    A9, A10, A11, A12, A13, A14, A15, A16,
-    A17, A18, A19, A20, A21, A22, A23, A24
+    A9,
+    A10,
+    A11,
+    A12,
+    A13,
+    A14,
+    A15,
+    A16,
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
   }).
 
 -spec absorb_block13(<<_:832>>, state_words()) -> state_words().
-absorb_block13(<<
-  W0:64/little, W1:64/little, W2:64/little, W3:64/little,
-  W4:64/little, W5:64/little, W6:64/little, W7:64/little,
-  W8:64/little, W9:64/little, W10:64/little, W11:64/little,
-  W12:64/little
->>, {
-  A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12,
-  A13, A14, A15, A16, A17, A18, A19, A20, A21, A22, A23, A24
-}) ->
+absorb_block13(
+  <<
+    W0:64/little,
+    W1:64/little,
+    W2:64/little,
+    W3:64/little,
+    W4:64/little,
+    W5:64/little,
+    W6:64/little,
+    W7:64/little,
+    W8:64/little,
+    W9:64/little,
+    W10:64/little,
+    W11:64/little,
+    W12:64/little
+  >>,
+  {
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
+    A8,
+    A9,
+    A10,
+    A11,
+    A12,
+    A13,
+    A14,
+    A15,
+    A16,
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
+  }
+) ->
   inner_keccak_fast({
-    A0 bxor W0, A1 bxor W1, A2 bxor W2, A3 bxor W3,
-    A4 bxor W4, A5 bxor W5, A6 bxor W6, A7 bxor W7,
-    A8 bxor W8, A9 bxor W9, A10 bxor W10, A11 bxor W11,
+    A0 bxor W0,
+    A1 bxor W1,
+    A2 bxor W2,
+    A3 bxor W3,
+    A4 bxor W4,
+    A5 bxor W5,
+    A6 bxor W6,
+    A7 bxor W7,
+    A8 bxor W8,
+    A9 bxor W9,
+    A10 bxor W10,
+    A11 bxor W11,
     A12 bxor W12,
-    A13, A14, A15, A16, A17, A18, A19, A20, A21, A22, A23, A24
+    A13,
+    A14,
+    A15,
+    A16,
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
   }).
 
 -spec absorb_block18(<<_:1152>>, state_words()) -> state_words().
-absorb_block18(<<
-  W0:64/little, W1:64/little, W2:64/little, W3:64/little,
-  W4:64/little, W5:64/little, W6:64/little, W7:64/little,
-  W8:64/little, W9:64/little, W10:64/little, W11:64/little,
-  W12:64/little, W13:64/little, W14:64/little, W15:64/little,
-  W16:64/little, W17:64/little
->>, {
-  A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16, A17,
-  A18, A19, A20, A21, A22, A23, A24
-}) ->
+absorb_block18(
+  <<
+    W0:64/little,
+    W1:64/little,
+    W2:64/little,
+    W3:64/little,
+    W4:64/little,
+    W5:64/little,
+    W6:64/little,
+    W7:64/little,
+    W8:64/little,
+    W9:64/little,
+    W10:64/little,
+    W11:64/little,
+    W12:64/little,
+    W13:64/little,
+    W14:64/little,
+    W15:64/little,
+    W16:64/little,
+    W17:64/little
+  >>,
+  {
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
+    A8,
+    A9,
+    A10,
+    A11,
+    A12,
+    A13,
+    A14,
+    A15,
+    A16,
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
+  }
+) ->
   inner_keccak_fast({
-    A0 bxor W0, A1 bxor W1, A2 bxor W2, A3 bxor W3,
-    A4 bxor W4, A5 bxor W5, A6 bxor W6, A7 bxor W7,
-    A8 bxor W8, A9 bxor W9, A10 bxor W10, A11 bxor W11,
-    A12 bxor W12, A13 bxor W13, A14 bxor W14, A15 bxor W15,
-    A16 bxor W16, A17 bxor W17,
-    A18, A19, A20, A21, A22, A23, A24
+    A0 bxor W0,
+    A1 bxor W1,
+    A2 bxor W2,
+    A3 bxor W3,
+    A4 bxor W4,
+    A5 bxor W5,
+    A6 bxor W6,
+    A7 bxor W7,
+    A8 bxor W8,
+    A9 bxor W9,
+    A10 bxor W10,
+    A11 bxor W11,
+    A12 bxor W12,
+    A13 bxor W13,
+    A14 bxor W14,
+    A15 bxor W15,
+    A16 bxor W16,
+    A17 bxor W17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
   }).
 
 -spec absorb_block21(<<_:1344>>, state_words()) -> state_words().
-absorb_block21(<<
-  W0:64/little, W1:64/little, W2:64/little, W3:64/little,
-  W4:64/little, W5:64/little, W6:64/little, W7:64/little,
-  W8:64/little, W9:64/little, W10:64/little, W11:64/little,
-  W12:64/little, W13:64/little, W14:64/little, W15:64/little,
-  W16:64/little, W17:64/little, W18:64/little, W19:64/little,
-  W20:64/little
->>, {
-  A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16, A17,
-  A18, A19, A20, A21, A22, A23, A24
-}) ->
+absorb_block21(
+  <<
+    W0:64/little,
+    W1:64/little,
+    W2:64/little,
+    W3:64/little,
+    W4:64/little,
+    W5:64/little,
+    W6:64/little,
+    W7:64/little,
+    W8:64/little,
+    W9:64/little,
+    W10:64/little,
+    W11:64/little,
+    W12:64/little,
+    W13:64/little,
+    W14:64/little,
+    W15:64/little,
+    W16:64/little,
+    W17:64/little,
+    W18:64/little,
+    W19:64/little,
+    W20:64/little
+  >>,
+  {
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
+    A8,
+    A9,
+    A10,
+    A11,
+    A12,
+    A13,
+    A14,
+    A15,
+    A16,
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
+  }
+) ->
   inner_keccak_fast({
-    A0 bxor W0, A1 bxor W1, A2 bxor W2, A3 bxor W3,
-    A4 bxor W4, A5 bxor W5, A6 bxor W6, A7 bxor W7,
-    A8 bxor W8, A9 bxor W9, A10 bxor W10, A11 bxor W11,
-    A12 bxor W12, A13 bxor W13, A14 bxor W14, A15 bxor W15,
-    A16 bxor W16, A17 bxor W17, A18 bxor W18, A19 bxor W19,
+    A0 bxor W0,
+    A1 bxor W1,
+    A2 bxor W2,
+    A3 bxor W3,
+    A4 bxor W4,
+    A5 bxor W5,
+    A6 bxor W6,
+    A7 bxor W7,
+    A8 bxor W8,
+    A9 bxor W9,
+    A10 bxor W10,
+    A11 bxor W11,
+    A12 bxor W12,
+    A13 bxor W13,
+    A14 bxor W14,
+    A15 bxor W15,
+    A16 bxor W16,
+    A17 bxor W17,
+    A18 bxor W18,
+    A19 bxor W19,
     A20 bxor W20,
-    A21, A22, A23, A24
+    A21,
+    A22,
+    A23,
+    A24
   }).
 
 %% ===================================================================
@@ -274,21 +580,42 @@ absorb_block21(<<
 %% ===================================================================
 
 -spec squeeze(state_words(), pos_integer(), pos_integer()) -> bitstring().
-squeeze({A0, A1, A2, A3, _A4, _A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18, _A19, _A20, _A21, _A22, _A23, _A24}, 256, _RateWords) ->
+squeeze(
+  {A0, A1, A2, A3, _A4, _A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18,
+    _A19, _A20, _A21, _A22, _A23, _A24},
+  256,
+  _RateWords
+) ->
   <<A0:64/little, A1:64/little, A2:64/little, A3:64/little>>;
-squeeze({A0, A1, A2, A3, _A4, _A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18, _A19, _A20, _A21, _A22, _A23, _A24}, 224, _RateWords) ->
+squeeze(
+  {A0, A1, A2, A3, _A4, _A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18,
+    _A19, _A20, _A21, _A22, _A23, _A24},
+  224,
+  _RateWords
+) ->
   <<A0:64/little, A1:64/little, A2:64/little, A3:32/little>>;
-squeeze({A0, A1, A2, A3, A4, A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18, _A19, _A20, _A21, _A22, _A23, _A24}, 384, _RateWords) ->
+squeeze(
+  {A0, A1, A2, A3, A4, A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18,
+    _A19, _A20, _A21, _A22, _A23, _A24},
+  384,
+  _RateWords
+) ->
   <<A0:64/little, A1:64/little, A2:64/little, A3:64/little, A4:64/little, A5:64/little>>;
-squeeze({A0, A1, A2, A3, A4, A5, A6, A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18, _A19, _A20, _A21, _A22, _A23, _A24}, 512, _RateWords) ->
-  <<A0:64/little, A1:64/little, A2:64/little, A3:64/little,
-    A4:64/little, A5:64/little, A6:64/little, A7:64/little>>;
+squeeze(
+  {A0, A1, A2, A3, A4, A5, A6, A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18, _A19,
+    _A20, _A21, _A22, _A23, _A24},
+  512,
+  _RateWords
+) ->
+  <<A0:64/little, A1:64/little, A2:64/little, A3:64/little, A4:64/little, A5:64/little, A6:64/little,
+    A7:64/little>>;
 squeeze(State, OutputBitLength, RateWords) ->
   squeeze_loop(State, OutputBitLength, RateWords, <<>>).
 
 -spec squeeze_loop(state_words(), pos_integer(), pos_integer(), bitstring()) -> bitstring().
-squeeze_loop(_State, OutputBitLength, _RateWords, Acc)
-  when OutputBitLength =< bit_size(Acc) ->
+squeeze_loop(_State, OutputBitLength, _RateWords, Acc) when
+  OutputBitLength =< bit_size(Acc)
+->
   <<ResultBits:OutputBitLength, _/bitstring>> = Acc,
   <<ResultBits:OutputBitLength>>;
 squeeze_loop(State, OutputBitLength, RateWords, Acc) ->
@@ -298,15 +625,41 @@ squeeze_loop(State, OutputBitLength, RateWords, Acc) ->
   squeeze_loop(NewState, OutputBitLength, RateWords, NewAcc).
 
 -spec extract_rate_bin(state_words(), pos_integer()) -> binary().
-extract_rate_bin({
-  A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16, A17, A18, A19, A20, A21, A22, A23, A24
-}, RateWords) ->
-  Full = <<A0:64/little, A1:64/little, A2:64/little, A3:64/little,
-           A4:64/little, A5:64/little, A6:64/little, A7:64/little,
-           A8:64/little, A9:64/little, A10:64/little, A11:64/little,
-           A12:64/little, A13:64/little, A14:64/little, A15:64/little,
-           A16:64/little, A17:64/little, A18:64/little, A19:64/little,
-           A20:64/little, A21:64/little, A22:64/little, A23:64/little, A24:64/little>>,
+extract_rate_bin(
+  {
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
+    A8,
+    A9,
+    A10,
+    A11,
+    A12,
+    A13,
+    A14,
+    A15,
+    A16,
+    A17,
+    A18,
+    A19,
+    A20,
+    A21,
+    A22,
+    A23,
+    A24
+  },
+  RateWords
+) ->
+  Full =
+    <<A0:64/little, A1:64/little, A2:64/little, A3:64/little, A4:64/little, A5:64/little, A6:64/little,
+      A7:64/little, A8:64/little, A9:64/little, A10:64/little, A11:64/little, A12:64/little,
+      A13:64/little, A14:64/little, A15:64/little, A16:64/little, A17:64/little, A18:64/little,
+      A19:64/little, A20:64/little, A21:64/little, A22:64/little, A23:64/little, A24:64/little>>,
   RateBytes = RateWords * 8,
   <<Out:RateBytes/binary, _/binary>> = Full,
   Out.
@@ -332,12 +685,11 @@ pad_generic(Msg, Delimiter, BitRate) ->
 -spec rev_pad(bitstring(), bitstring(), non_neg_integer()) -> bitstring().
 rev_pad(Msg, Delimiter, PadZeros) ->
   Pad = <<Msg/bitstring, Delimiter/bitstring, 1:1, 0:PadZeros, 1:1>>,
-  << (flip_bits(X)) || <<X:8>> <= Pad >>.
+  <<(flip_bits(X)) || <<X:8>> <= Pad>>.
 
 -spec flip_bits(byte() | binary()) -> binary().
 flip_bits(0) -> <<0:8>>;
-flip_bits(<<A:1, B:1, C:1, D:1, E:1, F:1, G:1, H:1>>) ->
-  <<H:1, G:1, F:1, E:1, D:1, C:1, B:1, A:1>>;
+flip_bits(<<A:1, B:1, C:1, D:1, E:1, F:1, G:1, H:1>>) -> <<H:1, G:1, F:1, E:1, D:1, C:1, B:1, A:1>>;
 flip_bits(N) when is_integer(N) -> flip_bits(<<N:8>>).
 
 -spec absorb_generic(bitstring(), pos_integer(), state_words()) -> state_words().
@@ -352,7 +704,7 @@ absorb_generic(<<>>, _BitRate, State) ->
 
 -spec absorb_rate_bits(bitstring(), pos_integer(), state_words()) -> state_words().
 absorb_rate_bits(Bits, 17, State) -> absorb_block17(Bits, State);
-absorb_rate_bits(Bits, 9, State)  -> absorb_block9(Bits, State);
+absorb_rate_bits(Bits, 9, State) -> absorb_block9(Bits, State);
 absorb_rate_bits(Bits, 13, State) -> absorb_block13(Bits, State);
 absorb_rate_bits(Bits, 18, State) -> absorb_block18(Bits, State);
 absorb_rate_bits(Bits, 21, State) -> absorb_block21(Bits, State).
@@ -363,16 +715,33 @@ absorb_rate_bits(Bits, 21, State) -> absorb_block21(Bits, State).
 
 -spec inner_keccak_fast(state_words()) -> state_words().
 inner_keccak_fast(IntState0) ->
-  IntState1 = fast_round(IntState0, {16#0000000000000001, 16#0000000000008082, 16#800000000000808A, 16#8000000080008000}),
-  IntState2 = fast_round(IntState1, {16#000000000000808B, 16#0000000080000001, 16#8000000080008081, 16#8000000000008009}),
-  IntState3 = fast_round(IntState2, {16#000000000000008A, 16#0000000000000088, 16#0000000080008009, 16#000000008000000A}),
-  IntState4 = fast_round(IntState3, {16#000000008000808B, 16#800000000000008B, 16#8000000000008089, 16#8000000000008003}),
-  IntState5 = fast_round(IntState4, {16#8000000000008002, 16#8000000000000080, 16#000000000000800A, 16#800000008000000A}),
-  fast_round(IntState5, {16#8000000080008081, 16#8000000000008080, 16#0000000080000001, 16#8000000080008008}).
+  IntState1 = fast_round(
+    IntState0, {16#0000000000000001, 16#0000000000008082, 16#800000000000808A, 16#8000000080008000}
+  ),
+  IntState2 = fast_round(
+    IntState1, {16#000000000000808B, 16#0000000080000001, 16#8000000080008081, 16#8000000000008009}
+  ),
+  IntState3 = fast_round(
+    IntState2, {16#000000000000008A, 16#0000000000000088, 16#0000000080008009, 16#000000008000000A}
+  ),
+  IntState4 = fast_round(
+    IntState3, {16#000000008000808B, 16#800000000000008B, 16#8000000000008089, 16#8000000000008003}
+  ),
+  IntState5 = fast_round(
+    IntState4, {16#8000000000008002, 16#8000000000000080, 16#000000000000800A, 16#800000008000000A}
+  ),
+  fast_round(
+    IntState5, {16#8000000080008081, 16#8000000000008080, 16#0000000080000001, 16#8000000080008008}
+  ).
 
--spec fast_round(state_words(), {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}) -> state_words().
-fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16, A17, A18, A19, A20, A21, A22, A23, A24},
-           {RC0, RC1, RC2, RC3}) ->
+-spec fast_round(state_words(), {
+  non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()
+}) -> state_words().
+fast_round(
+  {A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16, A17, A18, A19, A20, A21,
+    A22, A23, A24},
+  {RC0, RC1, RC2, RC3}
+) ->
   %% Round 1
 
   BC0_0 = A0 bxor A5 bxor A10 bxor A15 bxor A20,
@@ -391,8 +760,8 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC2_1 = ?ROTL64(A12 bxor D2, 43),
   BC3_1 = ?ROTL64(A18 bxor D3, 21),
   BC4_1 = ?ROTL64(A24 bxor D4, 14),
-  A0_1  = BC0_1 bxor ?CAN64(BC2_1, BC1_1) bxor RC0,
-  A6_1  = BC1_1 bxor ?CAN64(BC3_1, BC2_1),
+  A0_1 = BC0_1 bxor ?CAN64(BC2_1, BC1_1) bxor RC0,
+  A6_1 = BC1_1 bxor ?CAN64(BC3_1, BC2_1),
   A12_1 = BC2_1 bxor ?CAN64(BC4_1, BC3_1),
   A18_1 = BC3_1 bxor ?CAN64(BC0_1, BC4_1),
   A24_1 = BC4_1 bxor ?CAN64(BC1_1, BC0_1),
@@ -405,8 +774,8 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   A10_1 = BC0_2 bxor ?CAN64(BC2_2, BC1_2),
   A16_1 = BC1_2 bxor ?CAN64(BC3_2, BC2_2),
   A22_1 = BC2_2 bxor ?CAN64(BC4_2, BC3_2),
-  A3_1  = BC3_2 bxor ?CAN64(BC0_2, BC4_2),
-  A9_1  = BC4_2 bxor ?CAN64(BC1_2, BC0_2),
+  A3_1 = BC3_2 bxor ?CAN64(BC0_2, BC4_2),
+  A9_1 = BC4_2 bxor ?CAN64(BC1_2, BC0_2),
 
   BC4_3 = ?ROTL64(A20 bxor D0, 18),
   BC0_3 = ?ROTL64(A1 bxor D1, 1),
@@ -414,8 +783,8 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC2_3 = ?ROTL64(A13 bxor D3, 25),
   BC3_3 = ?ROTL64(A19 bxor D4, 8),
   A20_1 = BC0_3 bxor ?CAN64(BC2_3, BC1_3),
-  A1_1  = BC1_3 bxor ?CAN64(BC3_3, BC2_3),
-  A7_1  = BC2_3 bxor ?CAN64(BC4_3, BC3_3),
+  A1_1 = BC1_3 bxor ?CAN64(BC3_3, BC2_3),
+  A7_1 = BC2_3 bxor ?CAN64(BC4_3, BC3_3),
   A13_1 = BC3_3 bxor ?CAN64(BC0_3, BC4_3),
   A19_1 = BC4_3 bxor ?CAN64(BC1_3, BC0_3),
 
@@ -424,11 +793,11 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC3_4 = ?ROTL64(A17 bxor D2, 15),
   BC4_4 = ?ROTL64(A23 bxor D3, 56),
   BC0_4 = ?ROTL64(A4 bxor D4, 27),
-  A5_1  = BC0_4 bxor ?CAN64(BC2_4, BC1_4),
+  A5_1 = BC0_4 bxor ?CAN64(BC2_4, BC1_4),
   A11_1 = BC1_4 bxor ?CAN64(BC3_4, BC2_4),
   A17_1 = BC2_4 bxor ?CAN64(BC4_4, BC3_4),
   A23_1 = BC3_4 bxor ?CAN64(BC0_4, BC4_4),
-  A4_1  = BC4_4 bxor ?CAN64(BC1_4, BC0_4),
+  A4_1 = BC4_4 bxor ?CAN64(BC1_4, BC0_4),
 
   BC3_5 = ?ROTL64(A15 bxor D0, 41),
   BC4_5 = ?ROTL64(A21 bxor D1, 2),
@@ -437,8 +806,8 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC2_5 = ?ROTL64(A14 bxor D4, 39),
   A15_1 = BC0_5 bxor ?CAN64(BC2_5, BC1_5),
   A21_1 = BC1_5 bxor ?CAN64(BC3_5, BC2_5),
-  A2_1  = BC2_5 bxor ?CAN64(BC4_5, BC3_5),
-  A8_1  = BC3_5 bxor ?CAN64(BC0_5, BC4_5),
+  A2_1 = BC2_5 bxor ?CAN64(BC4_5, BC3_5),
+  A8_1 = BC3_5 bxor ?CAN64(BC0_5, BC4_5),
   A14_1 = BC4_5 bxor ?CAN64(BC1_5, BC0_5),
 
   %% Round 2
@@ -459,9 +828,9 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC2_1_r2 = ?ROTL64(A7_1 bxor D2_r2, 43),
   BC3_1_r2 = ?ROTL64(A23_1 bxor D3_r2, 21),
   BC4_1_r2 = ?ROTL64(A14_1 bxor D4_r2, 14),
-  A0_2  = BC0_1_r2 bxor ?CAN64(BC2_1_r2, BC1_1_r2) bxor RC1,
+  A0_2 = BC0_1_r2 bxor ?CAN64(BC2_1_r2, BC1_1_r2) bxor RC1,
   A16_2 = BC1_1_r2 bxor ?CAN64(BC3_1_r2, BC2_1_r2),
-  A7_2  = BC2_1_r2 bxor ?CAN64(BC4_1_r2, BC3_1_r2),
+  A7_2 = BC2_1_r2 bxor ?CAN64(BC4_1_r2, BC3_1_r2),
   A23_2 = BC3_1_r2 bxor ?CAN64(BC0_1_r2, BC4_1_r2),
   A14_2 = BC4_1_r2 bxor ?CAN64(BC1_1_r2, BC0_1_r2),
 
@@ -472,9 +841,9 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC1_2_r2 = ?ROTL64(A9_1 bxor D4_r2, 20),
   A20_2 = BC0_2_r2 bxor ?CAN64(BC2_2_r2, BC1_2_r2),
   A11_2 = BC1_2_r2 bxor ?CAN64(BC3_2_r2, BC2_2_r2),
-  A2_2  = BC2_2_r2 bxor ?CAN64(BC4_2_r2, BC3_2_r2),
+  A2_2 = BC2_2_r2 bxor ?CAN64(BC4_2_r2, BC3_2_r2),
   A18_2 = BC3_2_r2 bxor ?CAN64(BC0_2_r2, BC4_2_r2),
-  A9_2  = BC4_2_r2 bxor ?CAN64(BC1_2_r2, BC0_2_r2),
+  A9_2 = BC4_2_r2 bxor ?CAN64(BC1_2_r2, BC0_2_r2),
 
   BC4_3_r2 = ?ROTL64(A15_1 bxor D0_r2, 18),
   BC0_3_r2 = ?ROTL64(A6_1 bxor D1_r2, 1),
@@ -482,10 +851,10 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC2_3_r2 = ?ROTL64(A13_1 bxor D3_r2, 25),
   BC3_3_r2 = ?ROTL64(A4_1 bxor D4_r2, 8),
   A15_2 = BC0_3_r2 bxor ?CAN64(BC2_3_r2, BC1_3_r2),
-  A6_2  = BC1_3_r2 bxor ?CAN64(BC3_3_r2, BC2_3_r2),
+  A6_2 = BC1_3_r2 bxor ?CAN64(BC3_3_r2, BC2_3_r2),
   A22_2 = BC2_3_r2 bxor ?CAN64(BC4_3_r2, BC3_3_r2),
   A13_2 = BC3_3_r2 bxor ?CAN64(BC0_3_r2, BC4_3_r2),
-  A4_2  = BC4_3_r2 bxor ?CAN64(BC1_3_r2, BC0_3_r2),
+  A4_2 = BC4_3_r2 bxor ?CAN64(BC1_3_r2, BC0_3_r2),
 
   BC1_4_r2 = ?ROTL64(A10_1 bxor D0_r2, 36),
   BC2_4_r2 = ?ROTL64(A1_1 bxor D1_r2, 10),
@@ -493,9 +862,9 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC4_4_r2 = ?ROTL64(A8_1 bxor D3_r2, 56),
   BC0_4_r2 = ?ROTL64(A24_1 bxor D4_r2, 27),
   A10_2 = BC0_4_r2 bxor ?CAN64(BC2_4_r2, BC1_4_r2),
-  A1_2  = BC1_4_r2 bxor ?CAN64(BC3_4_r2, BC2_4_r2),
+  A1_2 = BC1_4_r2 bxor ?CAN64(BC3_4_r2, BC2_4_r2),
   A17_2 = BC2_4_r2 bxor ?CAN64(BC4_4_r2, BC3_4_r2),
-  A8_2  = BC3_4_r2 bxor ?CAN64(BC0_4_r2, BC4_4_r2),
+  A8_2 = BC3_4_r2 bxor ?CAN64(BC0_4_r2, BC4_4_r2),
   A24_2 = BC4_4_r2 bxor ?CAN64(BC1_4_r2, BC0_4_r2),
 
   BC3_5_r2 = ?ROTL64(A5_1 bxor D0_r2, 41),
@@ -503,10 +872,10 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC0_5_r2 = ?ROTL64(A12_1 bxor D2_r2, 62),
   BC1_5_r2 = ?ROTL64(A3_1 bxor D3_r2, 55),
   BC2_5_r2 = ?ROTL64(A19_1 bxor D4_r2, 39),
-  A5_2  = BC0_5_r2 bxor ?CAN64(BC2_5_r2, BC1_5_r2),
+  A5_2 = BC0_5_r2 bxor ?CAN64(BC2_5_r2, BC1_5_r2),
   A21_2 = BC1_5_r2 bxor ?CAN64(BC3_5_r2, BC2_5_r2),
   A12_2 = BC2_5_r2 bxor ?CAN64(BC4_5_r2, BC3_5_r2),
-  A3_2  = BC3_5_r2 bxor ?CAN64(BC0_5_r2, BC4_5_r2),
+  A3_2 = BC3_5_r2 bxor ?CAN64(BC0_5_r2, BC4_5_r2),
   A19_2 = BC4_5_r2 bxor ?CAN64(BC1_5_r2, BC0_5_r2),
 
   %% Round 3
@@ -527,10 +896,10 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC2_1_r3 = ?ROTL64(A22_2 bxor D2_r3, 43),
   BC3_1_r3 = ?ROTL64(A8_2 bxor D3_r3, 21),
   BC4_1_r3 = ?ROTL64(A19_2 bxor D4_r3, 14),
-  A0_3  = BC0_1_r3 bxor ?CAN64(BC2_1_r3, BC1_1_r3) bxor RC2,
+  A0_3 = BC0_1_r3 bxor ?CAN64(BC2_1_r3, BC1_1_r3) bxor RC2,
   A11_3 = BC1_1_r3 bxor ?CAN64(BC3_1_r3, BC2_1_r3),
   A22_3 = BC2_1_r3 bxor ?CAN64(BC4_1_r3, BC3_1_r3),
-  A8_3  = BC3_1_r3 bxor ?CAN64(BC0_1_r3, BC4_1_r3),
+  A8_3 = BC3_1_r3 bxor ?CAN64(BC0_1_r3, BC4_1_r3),
   A19_3 = BC4_1_r3 bxor ?CAN64(BC1_1_r3, BC0_1_r3),
 
   BC2_2_r3 = ?ROTL64(A15_2 bxor D0_r3, 3),
@@ -539,19 +908,19 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC0_2_r3 = ?ROTL64(A23_2 bxor D3_r3, 28),
   BC1_2_r3 = ?ROTL64(A9_2 bxor D4_r3, 20),
   A15_3 = BC0_2_r3 bxor ?CAN64(BC2_2_r3, BC1_2_r3),
-  A1_3  = BC1_2_r3 bxor ?CAN64(BC3_2_r3, BC2_2_r3),
+  A1_3 = BC1_2_r3 bxor ?CAN64(BC3_2_r3, BC2_2_r3),
   A12_3 = BC2_2_r3 bxor ?CAN64(BC4_2_r3, BC3_2_r3),
   A23_3 = BC3_2_r3 bxor ?CAN64(BC0_2_r3, BC4_2_r3),
-  A9_3  = BC4_2_r3 bxor ?CAN64(BC1_2_r3, BC0_2_r3),
+  A9_3 = BC4_2_r3 bxor ?CAN64(BC1_2_r3, BC0_2_r3),
 
   BC4_3_r3 = ?ROTL64(A5_2 bxor D0_r3, 18),
   BC0_3_r3 = ?ROTL64(A16_2 bxor D1_r3, 1),
   BC1_3_r3 = ?ROTL64(A2_2 bxor D2_r3, 6),
   BC2_3_r3 = ?ROTL64(A13_2 bxor D3_r3, 25),
   BC3_3_r3 = ?ROTL64(A24_2 bxor D4_r3, 8),
-  A5_3  = BC0_3_r3 bxor ?CAN64(BC2_3_r3, BC1_3_r3),
+  A5_3 = BC0_3_r3 bxor ?CAN64(BC2_3_r3, BC1_3_r3),
   A16_3 = BC1_3_r3 bxor ?CAN64(BC3_3_r3, BC2_3_r3),
-  A2_3  = BC2_3_r3 bxor ?CAN64(BC4_3_r3, BC3_3_r3),
+  A2_3 = BC2_3_r3 bxor ?CAN64(BC4_3_r3, BC3_3_r3),
   A13_3 = BC3_3_r3 bxor ?CAN64(BC0_3_r3, BC4_3_r3),
   A24_3 = BC4_3_r3 bxor ?CAN64(BC1_3_r3, BC0_3_r3),
 
@@ -561,9 +930,9 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC4_4_r3 = ?ROTL64(A3_2 bxor D3_r3, 56),
   BC0_4_r3 = ?ROTL64(A14_2 bxor D4_r3, 27),
   A20_3 = BC0_4_r3 bxor ?CAN64(BC2_4_r3, BC1_4_r3),
-  A6_3  = BC1_4_r3 bxor ?CAN64(BC3_4_r3, BC2_4_r3),
+  A6_3 = BC1_4_r3 bxor ?CAN64(BC3_4_r3, BC2_4_r3),
   A17_3 = BC2_4_r3 bxor ?CAN64(BC4_4_r3, BC3_4_r3),
-  A3_3  = BC3_4_r3 bxor ?CAN64(BC0_4_r3, BC4_4_r3),
+  A3_3 = BC3_4_r3 bxor ?CAN64(BC0_4_r3, BC4_4_r3),
   A14_3 = BC4_4_r3 bxor ?CAN64(BC1_4_r3, BC0_4_r3),
 
   BC3_5_r3 = ?ROTL64(A10_2 bxor D0_r3, 41),
@@ -573,9 +942,9 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC2_5_r3 = ?ROTL64(A4_2 bxor D4_r3, 39),
   A10_3 = BC0_5_r3 bxor ?CAN64(BC2_5_r3, BC1_5_r3),
   A21_3 = BC1_5_r3 bxor ?CAN64(BC3_5_r3, BC2_5_r3),
-  A7_3  = BC2_5_r3 bxor ?CAN64(BC4_5_r3, BC3_5_r3),
+  A7_3 = BC2_5_r3 bxor ?CAN64(BC4_5_r3, BC3_5_r3),
   A18_3 = BC3_5_r3 bxor ?CAN64(BC0_5_r3, BC4_5_r3),
-  A4_3  = BC4_5_r3 bxor ?CAN64(BC1_5_r3, BC0_5_r3),
+  A4_3 = BC4_5_r3 bxor ?CAN64(BC1_5_r3, BC0_5_r3),
 
   %% Round 4
 
@@ -595,22 +964,22 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   BC2_1_r4 = ?ROTL64(A2_3 bxor D2_r4, 43),
   BC3_1_r4 = ?ROTL64(A3_3 bxor D3_r4, 21),
   BC4_1_r4 = ?ROTL64(A4_3 bxor D4_r4, 14),
-  A0_4  = BC0_1_r4 bxor ?CAN64(BC2_1_r4, BC1_1_r4) bxor RC3,
-  A1_4  = BC1_1_r4 bxor ?CAN64(BC3_1_r4, BC2_1_r4),
-  A2_4  = BC2_1_r4 bxor ?CAN64(BC4_1_r4, BC3_1_r4),
-  A3_4  = BC3_1_r4 bxor ?CAN64(BC0_1_r4, BC4_1_r4),
-  A4_4  = BC4_1_r4 bxor ?CAN64(BC1_1_r4, BC0_1_r4),
+  A0_4 = BC0_1_r4 bxor ?CAN64(BC2_1_r4, BC1_1_r4) bxor RC3,
+  A1_4 = BC1_1_r4 bxor ?CAN64(BC3_1_r4, BC2_1_r4),
+  A2_4 = BC2_1_r4 bxor ?CAN64(BC4_1_r4, BC3_1_r4),
+  A3_4 = BC3_1_r4 bxor ?CAN64(BC0_1_r4, BC4_1_r4),
+  A4_4 = BC4_1_r4 bxor ?CAN64(BC1_1_r4, BC0_1_r4),
 
   BC2_2_r4 = ?ROTL64(A5_3 bxor D0_r4, 3),
   BC3_2_r4 = ?ROTL64(A6_3 bxor D1_r4, 45),
   BC4_2_r4 = ?ROTL64(A7_3 bxor D2_r4, 61),
   BC0_2_r4 = ?ROTL64(A8_3 bxor D3_r4, 28),
   BC1_2_r4 = ?ROTL64(A9_3 bxor D4_r4, 20),
-  A5_4  = BC0_2_r4 bxor ?CAN64(BC2_2_r4, BC1_2_r4),
-  A6_4  = BC1_2_r4 bxor ?CAN64(BC3_2_r4, BC2_2_r4),
-  A7_4  = BC2_2_r4 bxor ?CAN64(BC4_2_r4, BC3_2_r4),
-  A8_4  = BC3_2_r4 bxor ?CAN64(BC0_2_r4, BC4_2_r4),
-  A9_4  = BC4_2_r4 bxor ?CAN64(BC1_2_r4, BC0_2_r4),
+  A5_4 = BC0_2_r4 bxor ?CAN64(BC2_2_r4, BC1_2_r4),
+  A6_4 = BC1_2_r4 bxor ?CAN64(BC3_2_r4, BC2_2_r4),
+  A7_4 = BC2_2_r4 bxor ?CAN64(BC4_2_r4, BC3_2_r4),
+  A8_4 = BC3_2_r4 bxor ?CAN64(BC0_2_r4, BC4_2_r4),
+  A9_4 = BC4_2_r4 bxor ?CAN64(BC1_2_r4, BC0_2_r4),
 
   BC4_3_r4 = ?ROTL64(A10_3 bxor D0_r4, 18),
   BC0_3_r4 = ?ROTL64(A11_3 bxor D1_r4, 1),
@@ -645,5 +1014,5 @@ fast_round({A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
   A23_4 = BC3_5_r4 bxor ?CAN64(BC0_5_r4, BC4_5_r4),
   A24_4 = BC4_5_r4 bxor ?CAN64(BC1_5_r4, BC0_5_r4),
 
-  {A0_4, A1_4, A2_4, A3_4, A4_4, A5_4, A6_4, A7_4, A8_4, A9_4, A10_4, A11_4, A12_4, A13_4,
-   A14_4, A15_4, A16_4, A17_4, A18_4, A19_4, A20_4, A21_4, A22_4, A23_4, A24_4}.
+  {A0_4, A1_4, A2_4, A3_4, A4_4, A5_4, A6_4, A7_4, A8_4, A9_4, A10_4, A11_4, A12_4, A13_4, A14_4, A15_4,
+    A16_4, A17_4, A18_4, A19_4, A20_4, A21_4, A22_4, A23_4, A24_4}.

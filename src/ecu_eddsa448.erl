@@ -1,5 +1,11 @@
-%%% File        : ecu_eddsa448.erl
-%%% Description : Pure Erlang EdDSA over Curve448 (Ed448, RFC 8032)
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Pure Erlang EdDSA signatures over Curve448 (Ed448, RFC 8032).
+%%%
+%%% Reference:
+%%%   RFC 8032: https://datatracker.ietf.org/doc/html/rfc8032
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_eddsa448).
 
 -typing([eqwalizer]).
@@ -8,18 +14,20 @@
 
 -type public_key() :: <<_:456>>.
 -type secret_key() :: <<_:456>> | <<_:912>>.
--type keypair() :: #{ public := public_key(), secret := <<_:912>> }.
+-type keypair() :: #{public := public_key(), secret := <<_:912>>}.
 -type signature() :: <<_:912>>.
 
 -export_type([public_key/0, secret_key/0, keypair/0, signature/0]).
 
--export([sign_keypair/0,
-         sign_seed_keypair/1,
-         sign/2, sign/3,
-         sign_open/2, sign_open/3,
-         sign_detached/2, sign_detached/3,
-         sign_verify_detached/3, sign_verify_detached/4,
-         sign_verify_batch/1, sign_verify_batch/2]).
+-export([
+  sign_keypair/0,
+  sign_seed_keypair/1,
+  sign/2, sign/3,
+  sign_open/2, sign_open/3,
+  sign_detached/2, sign_detached/3,
+  sign_verify_detached/3, sign_verify_detached/4,
+  sign_verify_batch/1, sign_verify_batch/2
+]).
 
 %% @doc sign_keypair/0 creates a keypair for signing
 %%
@@ -49,8 +57,10 @@ sign(Msg, SK) ->
 %% @doc sign/3 signs a message with private/secret key and context.
 %% @end
 -spec sign(Msg :: iodata(), SK :: secret_key(), Context :: binary()) -> SM :: binary().
-sign(Msg, SK, Context) when (bit_size(SK) == 456 orelse bit_size(SK) == 912),
-                            byte_size(Context) =< 255 ->
+sign(Msg, SK, Context) when
+  (bit_size(SK) == 456 orelse bit_size(SK) == 912),
+  byte_size(Context) =< 255
+->
   BinMsg = iolist_to_binary(Msg),
   Sig = sign_detached(Msg, SK, Context),
   <<Sig/binary, BinMsg/binary>>.
@@ -58,18 +68,19 @@ sign(Msg, SK, Context) when (bit_size(SK) == 456 orelse bit_size(SK) == 912),
 %% @doc sign_open/2 opens a signed message using empty context.
 %% @end
 -spec sign_open(SMsg :: binary(), PK :: public_key()) ->
-    {ok, Msg :: binary()} | {error, failed_verification}.
+  {ok, Msg :: binary()} | {error, failed_verification}.
 sign_open(SMsg, PK) ->
   sign_open(SMsg, PK, <<>>).
 
 %% @doc sign_open/3 opens a signed message using specified context.
 %% @end
 -spec sign_open(SMsg :: binary(), PK :: public_key(), Context :: binary()) ->
-    {ok, Msg :: binary()} | {error, failed_verification}.
-sign_open(<<Sig:114/binary, BinMsg/binary>>, <<PK:57/binary>>, Context)
-  when byte_size(Context) =< 255 ->
+  {ok, Msg :: binary()} | {error, failed_verification}.
+sign_open(<<Sig:114/binary, BinMsg/binary>>, <<PK:57/binary>>, Context) when
+  byte_size(Context) =< 255
+->
   case sign_verify_detached(Sig, BinMsg, PK, Context) of
-    true  -> {ok, BinMsg};
+    true -> {ok, BinMsg};
     false -> {error, failed_verification}
   end;
 sign_open(_, _, _) ->
@@ -86,8 +97,10 @@ sign_detached(Msg, SK) ->
 %% key and context string.
 %% @end
 -spec sign_detached(Msg :: iodata(), SK :: secret_key(), Context :: binary()) -> Sig :: signature().
-sign_detached(Msg, SK, Context) when (bit_size(SK) == 456 orelse bit_size(SK) == 912),
-                                     byte_size(Context) =< 255 ->
+sign_detached(Msg, SK, Context) when
+  (bit_size(SK) == 456 orelse bit_size(SK) == 912),
+  byte_size(Context) =< 255
+->
   BinMsg = iolist_to_binary(Msg),
   <<Secret:57/binary, _/binary>> = SK,
 
@@ -95,15 +108,16 @@ sign_detached(Msg, SK, Context) when (bit_size(SK) == 456 orelse bit_size(SK) ==
   Seed = clamp(Seed0),
 
   DerivedPub = ecu_ed448:compress(ecu_ed448:scalar_mul_base(Seed0)),
-  Pub = case SK of
-          <<_:57/binary, Pub0:57/binary>> ->
-            case Pub0 == DerivedPub of
-              true  -> DerivedPub;
-              false -> error(badarg)
-            end;
-          _ ->
-            DerivedPub
-        end,
+  Pub =
+    case SK of
+      <<_:57/binary, Pub0:57/binary>> ->
+        case Pub0 == DerivedPub of
+          true -> DerivedPub;
+          false -> error(badarg)
+        end;
+      _ ->
+        DerivedPub
+    end,
 
   Dom = dom4(0, Context),
 
@@ -127,23 +141,29 @@ sign_detached(Msg, SK, Context) when (bit_size(SK) == 456 orelse bit_size(SK) ==
 %% @doc sign_verify_detached/3 verifies signature against message and public key
 %% using empty context.
 %% @end
--spec sign_verify_detached(Sig :: signature() | binary(), Msg :: iodata(), PK :: public_key() | binary()) -> boolean().
+-spec sign_verify_detached(
+  Sig :: signature() | binary(), Msg :: iodata(), PK :: public_key() | binary()
+) -> boolean().
 sign_verify_detached(Sig, Msg, PK) ->
   sign_verify_detached(Sig, Msg, PK, <<>>).
 
 %% @doc sign_verify_detached/4 verifies signature against message, public key, and context.
 %% @end
--spec sign_verify_detached(Sig :: signature() | binary(), Msg :: iodata(), PK :: public_key() | binary(), Context :: binary()) -> boolean().
+-spec sign_verify_detached(
+  Sig :: signature() | binary(), Msg :: iodata(), PK :: public_key() | binary(), Context :: binary()
+) -> boolean().
 sign_verify_detached(<<Sig:114/bytes>>, Msg, <<PK:57/bytes>>, Context) when byte_size(Context) =< 255 ->
   <<R:57/binary, Ss:57/binary>> = Sig,
   <<S:456/little-unsigned-integer>> = Ss,
   case S < ?N of
-    false -> false;
+    false ->
+      false;
     true ->
       try
         A = ecu_ed448:decompress(PK),
         case ecu_ed448:is_small_order(A) of
-          true -> false;
+          true ->
+            false;
           false ->
             BinMsg = iolist_to_binary(Msg),
             Dom = dom4(0, Context),
@@ -151,7 +171,7 @@ sign_verify_detached(<<Sig:114/bytes>>, Msg, <<PK:57/bytes>>, Context) when byte
             <<K:456/little-unsigned-integer>> = ecu_ed448:scalar_reduce(Ks0),
             R_prime = ecu_ed448:scalar_mul_dual_base(S, K, ecu_ed448:p_neg(A)),
             case ecu_ed448:is_small_order(R_prime) of
-              true  -> false;
+              true -> false;
               false -> ecu_ed448:compress(R_prime) == R
             end
         end
@@ -169,8 +189,10 @@ sign_verify_detached(_, _, _, _) ->
 %% Returns true iff ALL signatures in the batch are valid; false otherwise.
 %% @end
 -spec sign_verify_batch(
-    [{signature() | binary(), iodata(), public_key() | binary()} |
-     {signature() | binary(), iodata(), public_key() | binary(), binary()}]
+  [
+    {signature() | binary(), iodata(), public_key() | binary()}
+    | {signature() | binary(), iodata(), public_key() | binary(), binary()}
+  ]
 ) -> boolean().
 sign_verify_batch([]) ->
   true;
@@ -186,9 +208,11 @@ sign_verify_batch(_) ->
 %% @doc sign_verify_batch/2 verifies a batch of detached signatures with default context.
 %% @end
 -spec sign_verify_batch(
-    [{signature() | binary(), iodata(), public_key() | binary()} |
-     {signature() | binary(), iodata(), public_key() | binary(), binary()}],
-    binary()
+  [
+    {signature() | binary(), iodata(), public_key() | binary()}
+    | {signature() | binary(), iodata(), public_key() | binary(), binary()}
+  ],
+  binary()
 ) -> boolean().
 sign_verify_batch([], _DefaultCtx) ->
   true;
@@ -206,9 +230,11 @@ sign_verify_batch(_, _) ->
   false.
 
 -spec verify_batch_impl(
-    [{signature() | binary(), iodata(), public_key() | binary()} |
-     {signature() | binary(), iodata(), public_key() | binary(), binary()}],
-    binary()
+  [
+    {signature() | binary(), iodata(), public_key() | binary()}
+    | {signature() | binary(), iodata(), public_key() | binary(), binary()}
+  ],
+  binary()
 ) -> boolean().
 verify_batch_impl(Items, DefaultCtx) ->
   {Points, S_Batch} = parse_batch(Items, DefaultCtx, [], 0),
@@ -217,41 +243,57 @@ verify_batch_impl(Items, DefaultCtx) ->
   P_total = ecu_ed448:p_sub(P_others, P_base),
   ecu_ed448:pt_eq(P_total, {0, 1, 1}).
 
--spec parse_batch([{signature() | binary(), iodata(), public_key() | binary()} |
-                   {signature() | binary(), iodata(), public_key() | binary(), binary()}],
-                  binary(),
-                  [{non_neg_integer(), ecu_ed448:pt_projective()}],
-                  non_neg_integer()) ->
-    {[{non_neg_integer(), ecu_ed448:pt_projective()}], non_neg_integer()}.
+-spec parse_batch(
+  [
+    {signature() | binary(), iodata(), public_key() | binary()}
+    | {signature() | binary(), iodata(), public_key() | binary(), binary()}
+  ],
+  binary(),
+  [{non_neg_integer(), ecu_ed448:pt_projective()}],
+  non_neg_integer()
+) ->
+  {[{non_neg_integer(), ecu_ed448:pt_projective()}], non_neg_integer()}.
 parse_batch([], _DefaultCtx, PointsAcc, SAcc) ->
   {PointsAcc, SAcc};
 parse_batch([Item | Rest], DefaultCtx, PointsAcc, SAcc) ->
   {Sig, Msg, PK, Context} =
     case Item of
-      {ItemSig, ItemMsg, ItemPK}                                        -> {ItemSig, ItemMsg, ItemPK, DefaultCtx};
-      {ItemSig, ItemMsg, ItemPK, ItemCtx} when byte_size(ItemCtx) =< 255 -> {ItemSig, ItemMsg, ItemPK, ItemCtx};
-      _                                                                 -> error(badarg)
+      {ItemSig, ItemMsg, ItemPK} ->
+        {ItemSig, ItemMsg, ItemPK, DefaultCtx};
+      {ItemSig, ItemMsg, ItemPK, ItemCtx} when byte_size(ItemCtx) =< 255 ->
+        {ItemSig, ItemMsg, ItemPK, ItemCtx};
+      _ ->
+        error(badarg)
     end,
   case {Sig, PK} of
     {<<R_bin:57/binary, Ss:57/binary>>, <<_:57/binary>>} ->
       <<S:456/little-unsigned-integer>> = Ss,
       case S < ?N of
-        false -> error(badarg);
+        false ->
+          error(badarg);
         true ->
           A = ecu_ed448:decompress(PK),
           case ecu_ed448:is_small_order(A) of
-            true  -> error(badarg);
+            true ->
+              error(badarg);
             false ->
               R = ecu_ed448:decompress(R_bin),
               case ecu_ed448:is_small_order(R) of
-                true  -> error(badarg);
+                true ->
+                  error(badarg);
                 false ->
                   BinMsg = iolist_to_binary(Msg),
                   Dom = dom4(0, Context),
-                  Ks0 = crypto:hash_xof(shake256, <<Dom/binary, R_bin/binary, PK/binary, BinMsg/binary>>, 114 * 8),
+                  Ks0 = crypto:hash_xof(
+                    shake256, <<Dom/binary, R_bin/binary, PK/binary, BinMsg/binary>>, 114 * 8
+                  ),
                   <<K:456/little-unsigned-integer>> = ecu_ed448:scalar_reduce(Ks0),
                   <<Z0:128/little-unsigned-integer>> = crypto:strong_rand_bytes(16),
-                  Z = case Z0 of 0 -> 1; _ -> Z0 end,
+                  Z =
+                    case Z0 of
+                      0 -> 1;
+                      _ -> Z0
+                    end,
                   C = (Z * K) rem ?N,
                   NewSAcc = (SAcc + Z * S) rem ?N,
                   NewPoints = [{Z, R}, {C, A} | PointsAcc],

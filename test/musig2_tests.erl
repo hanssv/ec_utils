@@ -51,7 +51,6 @@ bip327_2party_test() ->
         false ->
           ok
       end
-
     end,
     lists:seq(1, 5)
   ).
@@ -78,7 +77,7 @@ bip327_3party_test() ->
           ?assert(ecu_musig2:verify_partial(Ctx, Psig, PN, PK, AggN, Msg)),
           Psig
         end
-        || {SK, SN, PN, PK} <- zip4(SKs, SecNonces, PubNonces, PKs)
+       || {SK, SN, PN, PK} <- zip4(SKs, SecNonces, PubNonces, PKs)
       ],
 
       {ok, Sig} = ecu_musig2:aggregate_partial(Ctx, AggN, Msg, Psigs),
@@ -188,7 +187,13 @@ ed25519_3party_test() ->
   lists:foreach(
     fun(_) ->
       SKs = [crypto:strong_rand_bytes(32) || _ <- lists:seq(1, 3)],
-      PKs = [begin #{public := PK} = ecu_eddsa:sign_seed_keypair(SK), PK end || SK <- SKs],
+      PKs = [
+        begin
+          #{public := PK} = ecu_eddsa:sign_seed_keypair(SK),
+          PK
+        end
+       || SK <- SKs
+      ],
       Msg = crypto:strong_rand_bytes(32),
 
       {ok, Ctx} = ecu_musig2:key_agg(ed25519, PKs),
@@ -206,7 +211,7 @@ ed25519_3party_test() ->
           ?assert(ecu_musig2:verify_partial(Ctx, Psig, PN, PK, AggN, Msg)),
           Psig
         end
-        || {SK, SN, PN, PK} <- zip4(SKs, SecNonces, PubNonces, PKs)
+       || {SK, SN, PN, PK} <- zip4(SKs, SecNonces, PubNonces, PKs)
       ],
 
       {ok, Sig} = ecu_musig2:aggregate_partial(Ctx, AggN, Msg, Psigs),

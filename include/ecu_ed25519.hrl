@@ -1,5 +1,8 @@
-%%% File        : ecu_ed25519.hrl
-%%% Description : Curve parameters for Ed25519
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Curve parameters for Ed25519.
+%%% @end
+%%%-------------------------------------------------------------------
 
 -define(P, 16#7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFED).
 

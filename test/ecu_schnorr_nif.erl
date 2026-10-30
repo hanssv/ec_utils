@@ -1,5 +1,8 @@
-%%% File        : ecu_schnorr_nif.erl
-%%% Description : Backward compatibility forwarder to ecu_rustcrypto_nif
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Backward compatibility forwarder to ecu_rustcrypto_nif.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_schnorr_nif).
 
 -export([is_available/0, sign/3, verify/3, public_key/1]).

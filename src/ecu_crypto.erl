@@ -1,17 +1,28 @@
-%%% File        : ecu_crypto.erl
-%%% Author      : Hans Svensson
-%%% Description :
-%%% Created     : 13 Jan 2022 by Hans Svensson
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Cryptographic utilities: Ethereum-compatible signing, recovery, and
+%%% address generation.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_crypto).
 
 -typing([eqwalizer]).
 
--export([private_to_short/2, public_to_short/2,
-         ec_recover/2,
-         eth_sign/2, eth_recover/2, eth_verify/3,
-         eth_msg_sign/2, eth_msg_recover/2, eth_msg_verify/3, eth_msg_hash/1,
-         eth_sig_to_rsv/1, eth_sig_from_rsv/1,
-         keccak256/1]).
+-export([
+  private_to_short/2,
+  public_to_short/2,
+  ec_recover/2,
+  eth_sign/2,
+  eth_recover/2,
+  eth_verify/3,
+  eth_msg_sign/2,
+  eth_msg_recover/2,
+  eth_msg_verify/3,
+  eth_msg_hash/1,
+  eth_sig_to_rsv/1,
+  eth_sig_from_rsv/1,
+  keccak256/1
+]).
 
 -include("ecu_secp256k1.hrl").
 
@@ -19,7 +30,8 @@
 -type short_address() :: <<_:160>>.
 -type eth_signature() :: <<_:520>>.
 -type eth_recovered() :: <<_:256>>.
--type pubkey() :: ecu_secp256k1:pt_compressed() | ecu_secp256k1:pt_uncompressed() | ecu_secp256k1:pt_affine().
+-type pubkey() ::
+  ecu_secp256k1:pt_compressed() | ecu_secp256k1:pt_uncompressed() | ecu_secp256k1:pt_affine().
 
 -export_type([coin/0, short_address/0, eth_signature/0, eth_recovered/0, pubkey/0]).
 
@@ -36,8 +48,10 @@ public_to_short(bitcoin, PubKey) ->
   crypto:hash(ripemd160, crypto:hash(sha256, ecu_secp256k1:compress(PubKey)));
 public_to_short(ethereum, PubKey) ->
   case PubKey of
-    <<_:33/bytes>> -> public_to_short(ethereum, ecu_secp256k1:decompress(PubKey));
-    <<4:8, X:256, Y:256>> -> public_to_short(ethereum, {X, Y});
+    <<_:33/bytes>> ->
+      public_to_short(ethereum, ecu_secp256k1:decompress(PubKey));
+    <<4:8, X:256, Y:256>> ->
+      public_to_short(ethereum, {X, Y});
     {X, Y} ->
       <<_:12/bytes, ShortPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
       ShortPub
@@ -59,9 +73,11 @@ eth_msg_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
 -spec eth_sign(ecu_ecdsa:msg_hash(), ecu_ecdsa:privkey()) -> eth_signature().
 eth_sign(Msg, PrivateKey = <<_:32/bytes>>) ->
   {BaseSig, YVal} = ecu_ecdsa:sign_secp256k1(Msg, PrivateKey),
-  V = if YVal rem 2 == 0 -> 27;
-         true            -> 28
-      end,
+  V =
+    if
+      YVal rem 2 == 0 -> 27;
+      true -> 28
+    end,
   <<V:8, BaseSig/bytes>>.
 
 -spec eth_msg_recover(iodata(), eth_signature()) -> short_address().
@@ -72,14 +88,17 @@ eth_msg_recover(Msg, Sig = <<_:65/bytes>>) ->
 -spec ec_recover(ecu_ecdsa:msg_hash(), eth_signature()) -> eth_recovered().
 ec_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
   <<V:8, R:256, S:256>> = Sig,
-  case (V == 27 orelse V == 28) andalso
-       (R >= 1 andalso R < ?N) andalso
-       (S >= 1 andalso S < ?N) of
+  case
+    (V == 27 orelse V == 28) andalso
+      (R >= 1 andalso R < ?N) andalso
+      (S >= 1 andalso S < ?N)
+  of
     true ->
       try eth_recover(MsgHash, Sig) of
         ShortPub -> <<0:96, ShortPub/binary>>
-      catch _:_ ->
-        <<0:256>>
+      catch
+        _:_ ->
+          <<0:256>>
       end;
     false ->
       <<0:256>>
@@ -95,7 +114,8 @@ eth_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
   K1 = (?N - ecu_secp256k1:s_mul(RInv, Z)) rem ?N,
   K2 = ecu_secp256k1:s_mul(RInv, S),
   case ecu_secp256k1:scalar_mul_dual(K1, {?X, ?Y}, K2, Rd) of
-    {0, 0} -> error(point_at_infinity);
+    {0, 0} ->
+      error(point_at_infinity);
     {X, Y} ->
       <<_:12/bytes, RPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
       RPub

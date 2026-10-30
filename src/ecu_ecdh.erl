@@ -1,38 +1,48 @@
-%%% File        : ecu_ecdh.erl
-%%% Author      : Hans Svensson
-%%% Description : Diffie-Hellman Key Exchange (X25519, X448, secp256k1)
-%%% Created     : 28 Oct 2026 by Hans Svensson
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Diffie-Hellman Key Exchange (X25519, X448, secp256k1).
+%%%
+%%% Reference:
+%%%   RFC 7748: https://datatracker.ietf.org/doc/html/rfc7748
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_ecdh).
 
 -typing([eqwalizer]).
 
--export([keypair/1,
-         keypair_from_seed/2,
-         compute_key/3,
-         x25519/2,
-         x448/2,
-         clamp/2,
-         ed25519_public_to_x25519/1,
-         ed25519_secret_to_x25519/1]).
+-export([
+  keypair/1,
+  keypair_from_seed/2,
+  compute_key/3,
+  x25519/2,
+  x448/2,
+  clamp/2,
+  ed25519_public_to_x25519/1,
+  ed25519_secret_to_x25519/1
+]).
 
 -include("ecu_secp256k1.hrl").
 
 -define(P25519, 16#7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFED).
 -define(A24_25519, 121665).
 
--define(P448, 16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF).
+-define(P448,
+  16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+).
 -define(A24_448, 39081).
 
 -type curve() :: x25519 | x448 | secp256k1.
 -type privkey() :: <<_:256>> | <<_:448>>.
--type pubkey() :: <<_:256>> | <<_:448>> | <<_:520>> | ecu_secp256k1:pt_compressed() | ecu_secp256k1:pt_affine().
+-type pubkey() ::
+  <<_:256>> | <<_:448>> | <<_:520>> | ecu_secp256k1:pt_compressed() | ecu_secp256k1:pt_affine().
 
 -export_type([curve/0, privkey/0, pubkey/0]).
 
 %% @doc Generates a fresh keypair {PublicKey, PrivateKey} for the given curve.
--spec keypair(x25519) -> {<<_:256>>, <<_:256>>};
-             (x448) -> {<<_:448>>, <<_:448>>};
-             (secp256k1) -> {ecu_secp256k1:pt_compressed(), <<_:256>>}.
+-spec keypair
+  (x25519) -> {<<_:256>>, <<_:256>>};
+  (x448) -> {<<_:448>>, <<_:448>>};
+  (secp256k1) -> {ecu_secp256k1:pt_compressed(), <<_:256>>}.
 keypair(x25519) ->
   Priv = crypto:strong_rand_bytes(32),
   keypair_from_seed(x25519, Priv);
@@ -45,9 +55,10 @@ keypair(secp256k1) ->
   {ecu_ecdsa:private_to_public(secp256k1, Priv), Priv}.
 
 %% @doc Deterministically derives a keypair from a seed.
--spec keypair_from_seed(x25519, binary()) -> {<<_:256>>, <<_:256>>};
-                       (x448, binary()) -> {<<_:448>>, <<_:448>>};
-                       (secp256k1, binary()) -> {ecu_secp256k1:pt_compressed(), <<_:256>>}.
+-spec keypair_from_seed
+  (x25519, binary()) -> {<<_:256>>, <<_:256>>};
+  (x448, binary()) -> {<<_:448>>, <<_:448>>};
+  (secp256k1, binary()) -> {ecu_secp256k1:pt_compressed(), <<_:256>>}.
 keypair_from_seed(x25519, Seed = <<_:32/bytes>>) ->
   Clamped = clamp(x25519, Seed),
   Pub = x25519(Clamped, <<9:256/little>>),
@@ -58,10 +69,11 @@ keypair_from_seed(x448, Seed = <<_:56/bytes>>) ->
   {Pub, Clamped};
 keypair_from_seed(secp256k1, Seed = <<_:32/bytes>>) ->
   <<PrivInt0:256>> = Seed,
-  PrivInt = case PrivInt0 rem ?N of
-              0 -> 1;
-              N -> N
-            end,
+  PrivInt =
+    case PrivInt0 rem ?N of
+      0 -> 1;
+      N -> N
+    end,
   Priv = <<PrivInt:256>>,
   {ecu_ecdsa:private_to_public(secp256k1, Priv), Priv};
 keypair_from_seed(_, _) ->
@@ -77,22 +89,23 @@ compute_key(x25519, PeerPub = <<_:32/bytes>>, MyPriv = <<_:32/bytes>>) ->
 compute_key(x448, PeerPub = <<_:56/bytes>>, MyPriv = <<_:56/bytes>>) ->
   x448(MyPriv, PeerPub);
 compute_key(secp256k1, PeerPub, <<PrivInt:256>>) when PrivInt >= 1, PrivInt < ?N ->
-  Pt = case PeerPub of
-         <<_:33/bytes>> ->
-           ecu_secp256k1:decompress(PeerPub);
-         <<4:8, X:256, Y:256>> ->
-           case valid_secp256k1_point({X, Y}) of
-             true  -> {X, Y};
-             false -> error(badarg)
-           end;
-         {X, Y} when is_integer(X), is_integer(Y) ->
-           case valid_secp256k1_point({X, Y}) of
-             true  -> {X, Y};
-             false -> error(badarg)
-           end;
-         _ ->
-           error(badarg)
-       end,
+  Pt =
+    case PeerPub of
+      <<_:33/bytes>> ->
+        ecu_secp256k1:decompress(PeerPub);
+      <<4:8, X:256, Y:256>> ->
+        case valid_secp256k1_point({X, Y}) of
+          true -> {X, Y};
+          false -> error(badarg)
+        end;
+      {X, Y} when is_integer(X), is_integer(Y) ->
+        case valid_secp256k1_point({X, Y}) of
+          true -> {X, Y};
+          false -> error(badarg)
+        end;
+      _ ->
+        error(badarg)
+    end,
   case ecu_secp256k1:scalar_mul(PrivInt, Pt) of
     {0, 0} -> error(point_at_infinity);
     {SX, _SY} -> <<SX:256>>
@@ -143,11 +156,13 @@ ed25519_public_to_x25519(EdPK = <<_:32/bytes>>) ->
   YLast = LastByte band 127,
   <<Y:256/little>> = <<YBytes/binary, YLast:8>>,
   case Y < ?P25519 of
-    false -> error(badarg);
+    false ->
+      error(badarg);
     true ->
       OneMinusY = (?P25519 - Y + 1) rem ?P25519,
       case OneMinusY of
-        0 -> error(badarg);
+        0 ->
+          error(badarg);
         _ ->
           OnePlusY = (1 + Y) rem ?P25519,
           U = (OnePlusY * f_inv(OneMinusY, ?P25519)) rem ?P25519,
@@ -171,8 +186,14 @@ ed25519_secret_to_x25519(_) ->
 
 %% --- internal helpers
 
--spec montgomery_ladder(non_neg_integer(), non_neg_integer(), non_neg_integer(),
-                        non_neg_integer(), pos_integer(), pos_integer()) -> binary().
+-spec montgomery_ladder(
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  pos_integer(),
+  pos_integer()
+) -> binary().
 montgomery_ladder(KInt, X1, TopBit, A24, P, ByteLen) ->
   {X2Fin, Z2Fin, X3Fin, Z3Fin, LastSwap} =
     ladder_loop(TopBit, KInt, X1, 1, 0, X1, 1, 0, A24, P),
@@ -182,10 +203,19 @@ montgomery_ladder(KInt, X1, TopBit, A24, P, ByteLen) ->
   OutInt = (X2Res * InvZ) rem P,
   <<OutInt:(ByteLen * 8)/little>>.
 
--spec ladder_loop(integer(), non_neg_integer(), non_neg_integer(),
-                  non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
-                  0 | 1, non_neg_integer(), pos_integer()) ->
-    {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), 0 | 1}.
+-spec ladder_loop(
+  integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  0 | 1,
+  non_neg_integer(),
+  pos_integer()
+) ->
+  {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), 0 | 1}.
 ladder_loop(T, _KInt, _X1, X2, Z2, X3, Z3, Swap, _A24, _P) when T < 0 ->
   {X2, Z2, X3, Z3, Swap};
 ladder_loop(T, KInt, X1, X2, Z2, X3, Z3, Swap, A24, P) ->
@@ -214,7 +244,7 @@ ladder_loop(T, KInt, X1, X2, Z2, X3, Z3, Swap, A24, P) ->
 
 -compile({inline, [cswap/3]}).
 -spec cswap(0 | 1, non_neg_integer(), non_neg_integer()) ->
-    {non_neg_integer(), non_neg_integer()}.
+  {non_neg_integer(), non_neg_integer()}.
 cswap(1, A, B) -> {B, A};
 cswap(0, A, B) -> {A, B}.
 
@@ -226,9 +256,9 @@ f_inv(A, P) ->
 
 -spec valid_secp256k1_point(term()) -> boolean().
 valid_secp256k1_point({X, Y}) when is_integer(X), is_integer(Y) ->
-  X >= 0 andalso X < ?P
-  andalso Y >= 0 andalso Y < ?P
-  andalso ecu_secp256k1:on_curve({X, Y});
+  X >= 0 andalso X < ?P andalso
+    Y >= 0 andalso Y < ?P andalso
+    ecu_secp256k1:on_curve({X, Y});
 valid_secp256k1_point(_) ->
   false.
 
@@ -236,6 +266,6 @@ valid_secp256k1_point(_) ->
 rnd_secp256k1_scalar() ->
   <<K:256>> = crypto:strong_rand_bytes(32),
   case K == 0 orelse K >= ?N of
-    true  -> rnd_secp256k1_scalar();
+    true -> rnd_secp256k1_scalar();
     false -> K
   end.

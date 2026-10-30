@@ -1,5 +1,8 @@
-%%% File        : schnorr_tests.erl
-%%% Description : Unit tests and official BIP-340 test vector runner
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% EUnit tests and official BIP-340 test vectors for ecu_schnorr.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(schnorr_tests).
 
 -compile([export_all, nowarn_export_all]).
@@ -10,10 +13,11 @@
 
 bip340_test_vectors_test() ->
   Filename = filename:join([code:priv_dir(ec_utils), "..", "test", "bip340_test_vectors.csv"]),
-  Path = case filelib:is_file(Filename) of
-           true  -> Filename;
-           false -> "test/bip340_test_vectors.csv"
-         end,
+  Path =
+    case filelib:is_file(Filename) of
+      true -> Filename;
+      false -> "test/bip340_test_vectors.csv"
+    end,
   {ok, CsvBinary} = file:read_file(Path),
   Lines = binary:split(CsvBinary, [<<"\r\n">>, <<"\n">>], [global, trim_all]),
   [_Header | Rows] = Lines,
@@ -32,8 +36,9 @@ run_test_vector(RowBin) ->
 
       %% 1. If secret key is provided, test public key derivation and signing
       case SecBinHex of
-        <<>> -> ok;
-        _  ->
+        <<>> ->
+          ok;
+        _ ->
           SecBin = hex_to_bin(SecBinHex),
           AuxBin = hex_to_bin(AuxBinHex),
           #{public := DerivedPub} = ecu_schnorr:sign_keypair_from_secret(SecBin),
@@ -49,7 +54,8 @@ run_test_vector(RowBin) ->
       ok
   end.
 
-hex_to_bin(<<>>) -> <<>>;
+hex_to_bin(<<>>) ->
+  <<>>;
 hex_to_bin(Bin) when is_binary(Bin) ->
   binary:decode_hex(Bin).
 
@@ -72,15 +78,15 @@ tagged_hash_test() ->
   ?assertEqual(Expected, Actual).
 
 schnorr_benchmark_test() ->
-  Pairs = [ ecu_schnorr:sign_keypair() || _ <- lists:seq(1, 10) ],
+  Pairs = [ecu_schnorr:sign_keypair() || _ <- lists:seq(1, 10)],
   Msg = <<"Benchmark test message for BIP-340 Schnorr signatures">>,
   {SignTime, Sigs} = timer:tc(fun() ->
-    [ ecu_schnorr:sign(Msg, maps:get(secret, KP)) || KP <- Pairs ]
+    [ecu_schnorr:sign(Msg, maps:get(secret, KP)) || KP <- Pairs]
   end),
   {VerifyTime, Results} = timer:tc(fun() ->
-    [ ecu_schnorr:verify(Sig, Msg, maps:get(public, KP)) || {Sig, KP} <- lists:zip(Sigs, Pairs) ]
+    [ecu_schnorr:verify(Sig, Msg, maps:get(public, KP)) || {Sig, KP} <- lists:zip(Sigs, Pairs)]
   end),
   ?debugFmt("", []),
   ?debugFmt("Average time for BIP-340 sign:   ~.3f ms", [(SignTime / 1000) / length(Pairs)]),
   ?debugFmt("Average time for BIP-340 verify: ~.3f ms", [(VerifyTime / 1000) / length(Pairs)]),
-  [ ?assert(R) || R <- Results ].
+  [?assert(R) || R <- Results].

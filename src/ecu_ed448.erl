@@ -1,18 +1,28 @@
-%%% File        : ecu_ed448.erl
-%%% Description : Pure Erlang Ed448 (Curve448 / Goldilocks) elliptic curve arithmetic
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Pure Erlang Ed448 (Curve448 / Goldilocks) elliptic curve arithmetic.
+%%%
+%%% Reference:
+%%%   RFC 8032: https://datatracker.ietf.org/doc/html/rfc8032
+%%%   RFC 7748: https://datatracker.ietf.org/doc/html/rfc7748
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_ed448).
 
 -typing([eqwalizer]).
 
 -include("ecu_ed448.hrl").
 
--type pt_affine() :: {field_elem(), field_elem()}. %% {X, Y}
--type pt_projective() :: {field_elem(), field_elem(), field_elem()}. %% {X, Y, Z}
--type pt_compressed() :: <<_:456>>. %% Y coord + odd/even X (57 bytes)
+%% {X, Y}
+-type pt_affine() :: {field_elem(), field_elem()}.
+%% {X, Y, Z}
+-type pt_projective() :: {field_elem(), field_elem(), field_elem()}.
+%% Y coord + odd/even X (57 bytes)
+-type pt_compressed() :: <<_:456>>.
 
 -type pt() :: pt_affine() | pt_projective() | pt_compressed().
 
--type scalar_elem() :: 0..(?N-1).
+-type scalar_elem() :: 0..(?N - 1).
 -type scalar() :: non_neg_integer() | <<_:456>>.
 -type field_elem() :: non_neg_integer().
 
@@ -21,18 +31,46 @@
 -define(SUB(A, B), ((A - B + ?P) rem ?P)).
 -define(DIV(A, B), f_div(A, B)).
 
--export_type([pt/0, pt_affine/0, pt_projective/0, pt_compressed/0,
-              scalar/0, scalar_elem/0, field_elem/0]).
+-export_type([
+  pt/0,
+  pt_affine/0,
+  pt_projective/0,
+  pt_compressed/0,
+  scalar/0,
+  scalar_elem/0,
+  field_elem/0
+]).
 
--export([on_curve/1, p/0, n/0, pt_eq/2,
-         scalar_mul/2, scalar_mul_base/1, scalar_mul_dual_base/3,
-         scalar_mul_noclamp/2, scalar_mul_base_noclamp/1,
-         multi_scalar_mul/1,
-         scalar_reduce/1,
-         p_add/2, p_sub/2, p_neg/1, p_dbl/1,
-         compress/1, decompress/1, is_small_order/1,
-         f_add/2, f_mul/2, f_sub/2, f_div/2, f_inv/1,
-         s_add/2, s_mul/2, s_sub/2, s_div/2, s_inv/1]).
+-export([
+  on_curve/1,
+  p/0,
+  n/0,
+  pt_eq/2,
+  scalar_mul/2,
+  scalar_mul_base/1,
+  scalar_mul_dual_base/3,
+  scalar_mul_noclamp/2,
+  scalar_mul_base_noclamp/1,
+  multi_scalar_mul/1,
+  scalar_reduce/1,
+  p_add/2,
+  p_sub/2,
+  p_neg/1,
+  p_dbl/1,
+  compress/1,
+  decompress/1,
+  is_small_order/1,
+  f_add/2,
+  f_mul/2,
+  f_sub/2,
+  f_div/2,
+  f_inv/1,
+  s_add/2,
+  s_mul/2,
+  s_sub/2,
+  s_div/2,
+  s_inv/1
+]).
 
 -on_load(init/0).
 
@@ -46,8 +84,8 @@ pt_eq({X1, Y1}, {X2, Y2}) ->
 pt_eq(C1, C2) when is_binary(C1), is_binary(C2) ->
   C1 == C2;
 pt_eq({X1, Y1, Z1}, {X2, Y2, Z2}) ->
-  ?SUB(?MUL(X1, Z2), ?MUL(X2, Z1)) == 0
-  andalso ?SUB(?MUL(Y1, Z2), ?MUL(Y2, Z1)) == 0;
+  ?SUB(?MUL(X1, Z2), ?MUL(X2, Z1)) == 0 andalso
+    ?SUB(?MUL(Y1, Z2), ?MUL(Y2, Z1)) == 0;
 pt_eq(P1, P2) ->
   pt_eq(to_projective(P1), to_projective(P2)).
 
@@ -68,8 +106,10 @@ p() -> ?P.
 n() -> ?N.
 
 -spec compress(P :: pt()) -> pt_compressed().
-compress(<<_:57/binary>> = P) -> P;
-compress({_, _, _} = P)       -> compress(to_affine(P));
+compress(<<_:57/binary>> = P) ->
+  P;
+compress({_, _, _} = P) ->
+  compress(to_affine(P));
 compress({X, Y}) when is_integer(X), is_integer(Y) ->
   Sign = X band 1,
   EncY = <<Y:448/little>>,
@@ -82,7 +122,8 @@ decompress(<<Y_bytes:56/binary, LastByte:8>>) ->
       X0 = LastByte bsr 7,
       <<Y:448/little>> = Y_bytes,
       case Y < ?P of
-        false -> error(badarg);
+        false ->
+          error(badarg);
         true ->
           X = xrecover(Y, X0),
           to_projective({X, Y})
@@ -107,9 +148,14 @@ p_neg(P) -> p_neg(to_projective(P)).
 p_sub(P1, P2) -> p_add(P1, p_neg(P2)).
 
 -spec p_add(pt(), pt()) -> pt_projective().
-p_add({X1, Y1, Z1}, {X2, Y2, Z2})
-  when is_integer(X1), is_integer(Y1), is_integer(Z1),
-       is_integer(X2), is_integer(Y2), is_integer(Z2) ->
+p_add({X1, Y1, Z1}, {X2, Y2, Z2}) when
+  is_integer(X1),
+  is_integer(Y1),
+  is_integer(Z1),
+  is_integer(X2),
+  is_integer(Y2),
+  is_integer(Z2)
+->
   A = ?MUL(Z1, Z2),
   B = ?MUL(A, A),
   C = ?MUL(X1, X2),
@@ -126,8 +172,9 @@ p_add(P1, P2) ->
   p_add(to_projective(P1), to_projective(P2)).
 
 -spec p_dbl(pt()) -> pt_projective().
-p_dbl({X1, Y1, Z1})
-  when is_integer(X1), is_integer(Y1), is_integer(Z1) ->
+p_dbl({X1, Y1, Z1}) when
+  is_integer(X1), is_integer(Y1), is_integer(Z1)
+->
   XY = ?ADD(X1, Y1),
   B = ?MUL(XY, XY),
   C = ?MUL(X1, X1),
@@ -185,7 +232,8 @@ multi_scalar_mul(Pairs) ->
       fun({Scalar, Pt}) ->
         K = to_scalar_int(Scalar),
         case K of
-          0 -> false;
+          0 ->
+            false;
           _ ->
             ProjPt = to_projective(Pt),
             Table = precompute_window_table(ProjPt),
@@ -221,14 +269,14 @@ build_slices(StepCount, Points) ->
   [SlicePoints | build_slices(StepCount - 1, NextPoints)].
 
 -spec collect_slice([{[0..15], dynamic()}], [dynamic()], [{[0..15], dynamic()}]) ->
-    {[dynamic()], [{[0..15], dynamic()}]}.
+  {[dynamic()], [{[0..15], dynamic()}]}.
 collect_slice([], SliceAcc, NextAcc) ->
   {SliceAcc, NextAcc};
 collect_slice([{[], _Table} | _], SliceAcc, NextAcc) ->
   {SliceAcc, NextAcc};
-collect_slice([{ [0 | Rest], Table } | More], SliceAcc, NextAcc) ->
+collect_slice([{[0 | Rest], Table} | More], SliceAcc, NextAcc) ->
   collect_slice(More, SliceAcc, [{Rest, Table} | NextAcc]);
-collect_slice([{ [W | Rest], Table } | More], SliceAcc, NextAcc) ->
+collect_slice([{[W | Rest], Table} | More], SliceAcc, NextAcc) ->
   Pt = element(W + 1, Table),
   collect_slice(More, [Pt | SliceAcc], [{Rest, Table} | NextAcc]).
 
@@ -236,26 +284,33 @@ collect_slice([{ [W | Rest], Table } | More], SliceAcc, NextAcc) ->
 multi_scalar_loop([], Acc) ->
   Acc;
 multi_scalar_loop([Slice | RestSlices], Acc) ->
-  D4 = case Acc of
-         {0, 1, 1} -> {0, 1, 1};
-         _         -> dbl4(Acc)
-       end,
-  NewAcc = lists:foldl(fun(Pt, CurAcc) ->
-                         case CurAcc of
-                           {0, 1, 1} -> Pt;
-                           _         -> p_add(CurAcc, Pt)
-                         end
-                       end, D4, Slice),
+  D4 =
+    case Acc of
+      {0, 1, 1} -> {0, 1, 1};
+      _ -> dbl4(Acc)
+    end,
+  NewAcc = lists:foldl(
+    fun(Pt, CurAcc) ->
+      case CurAcc of
+        {0, 1, 1} -> Pt;
+        _ -> p_add(CurAcc, Pt)
+      end
+    end,
+    D4,
+    Slice
+  ),
   multi_scalar_loop(RestSlices, NewAcc).
 
 -spec to_projective(pt()) -> pt_projective().
-to_projective({_, _, _} = P)       -> P;
+to_projective({_, _, _} = P) -> P;
 to_projective(<<_:57/binary>> = P) -> decompress(P);
-to_projective({X, Y})              -> {X, Y, 1}.
+to_projective({X, Y}) -> {X, Y, 1}.
 
 -spec to_affine(pt()) -> pt_affine().
-to_affine({_, _} = P) -> P;
-to_affine(<<_:57/binary>> = P) -> to_affine(decompress(P));
+to_affine({_, _} = P) ->
+  P;
+to_affine(<<_:57/binary>> = P) ->
+  to_affine(decompress(P));
 to_affine({X, Y, Z}) ->
   ZInv = f_inv(Z),
   {?MUL(X, ZInv), ?MUL(Y, ZInv)}.
@@ -297,7 +352,8 @@ s_div(A, B) when is_binary(A), is_binary(B) -> s_mul(A, s_inv(B)).
 -spec s_inv(<<_:456>>) -> <<_:456>>.
 s_inv(<<A:456/little>>) ->
   case A rem ?N of
-    0 -> error(badarg);
+    0 ->
+      error(badarg);
     A_red ->
       case ecu_misc:eea(A_red, ?N) of
         {1, S, _T} -> <<((S + ?N) rem ?N):456/little>>;
@@ -317,8 +373,10 @@ scalar_reduce(S) when is_integer(S), S >= 0 ->
 
 %% --- internal functions
 -spec scalar_mul_(non_neg_integer(), pt_projective()) -> pt_projective().
-scalar_mul_(0, _P) -> {0, 1, 1};
-scalar_mul_(1, P)  -> P;
+scalar_mul_(0, _P) ->
+  {0, 1, 1};
+scalar_mul_(1, P) ->
+  P;
 scalar_mul_(K, P) ->
   case K rem 2 of
     0 -> scalar_mul_(K div 2, p_dbl(P));
@@ -346,12 +404,13 @@ window_loop(<<W:4, Rest/bitstring>>, Table, Acc) ->
   D4 = dbl4(Acc),
   NewAcc =
     case W of
-      0 -> D4;
+      0 ->
+        D4;
       _ ->
         Pt = element(W + 1, Table),
         case D4 of
           {0, 1, 1} -> Pt;
-          _         -> p_add(D4, Pt)
+          _ -> p_add(D4, Pt)
         end
     end,
   window_loop(Rest, Table, NewAcc).
@@ -374,7 +433,8 @@ scalar_mul_base_comb(0) ->
 scalar_mul_base_comb(K) ->
   RedK = K rem ?N,
   case RedK of
-    0 -> {0, 1, 1};
+    0 ->
+      {0, 1, 1};
     _ ->
       Table = get_base_comb(),
       mul_comb(RedK, 1, Table, {0, 1, 1})
@@ -388,12 +448,13 @@ mul_comb(K, I, Table, Acc) ->
   NextK = K bsr 4,
   NextAcc =
     case W of
-      0 -> Acc;
+      0 ->
+        Acc;
       _ ->
         Pt = element(W + 1, element(I, Table)),
         case Acc of
           {0, 1, 1} -> Pt;
-          _         -> p_add(Acc, Pt)
+          _ -> p_add(Acc, Pt)
         end
     end,
   mul_comb(NextK, I + 1, Table, NextAcc).
@@ -452,18 +513,21 @@ xrecover(Y, X0) ->
     U ->
       V = ?SUB(?MUL(?D, Y2), 1),
       case V of
-        0 -> error(badarg);
+        0 ->
+          error(badarg);
         _ ->
           UdivV = ?DIV(U, V),
           X_cand = f_pow(UdivV, ?PPLUS1DIV4),
           case ?MUL(V, ?MUL(X_cand, X_cand)) == U of
-            false -> error(badarg);
+            false ->
+              error(badarg);
             true ->
               case X_cand rem 2 == X0 of
-                true -> X_cand;
+                true ->
+                  X_cand;
                 false ->
                   case X_cand == 0 of
-                    true  -> error(badarg);
+                    true -> error(badarg);
                     false -> ?P - X_cand
                   end
               end
