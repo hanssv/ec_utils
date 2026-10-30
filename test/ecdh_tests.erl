@@ -205,3 +205,9 @@ ecdh_error_handling_test() ->
   ?assertError(badarg, ecu_ecdh:clamp(x448, <<1, 2>>)),
   ?assertError(badarg, ecu_ecdh:ed25519_public_to_x25519(<<1, 2, 3>>)),
   ?assertError(badarg, ecu_ecdh:ed25519_secret_to_x25519(<<1, 2, 3>>)).
+
+ecdh_small_order_test() ->
+  Priv25519 = crypto:strong_rand_bytes(32),
+  ?assertError(small_order_point, ecu_ecdh:compute_key(x25519, <<0:256>>, Priv25519)),
+  Priv448 = crypto:strong_rand_bytes(56),
+  ?assertError(small_order_point, ecu_ecdh:compute_key(x448, <<0:448>>, Priv448)).

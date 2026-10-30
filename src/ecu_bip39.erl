@@ -150,11 +150,19 @@ mnemonic_to_seed(Mnemonic) ->
 %% Both the mnemonic sentence and passphrase are normalized using UTF-8 NFKD per BIP-39.
 -spec mnemonic_to_seed(unicode:chardata() | [unicode:chardata()], unicode:chardata()) -> <<_:512>>.
 mnemonic_to_seed(Mnemonic, Passphrase) ->
-  NormalizedMnemonic = normalize_mnemonic_string(Mnemonic),
-  NFKDMnemonic = to_nfkd_binary(NormalizedMnemonic),
+  MnemonicBin =
+    case is_binary(Mnemonic) of
+      true ->
+        to_nfkd_binary(Mnemonic);
+      false ->
+        case is_list(Mnemonic) andalso io_lib:printable_unicode_list(Mnemonic) of
+          true -> to_nfkd_binary(Mnemonic);
+          false -> to_nfkd_binary(normalize_mnemonic_string(Mnemonic))
+        end
+    end,
   NFKDPassphrase = to_nfkd_binary(Passphrase),
   Salt = <<"mnemonic", NFKDPassphrase/binary>>,
-  crypto:pbkdf2_hmac(sha512, NFKDMnemonic, Salt, 2048, 64).
+  crypto:pbkdf2_hmac(sha512, MnemonicBin, Salt, 2048, 64).
 
 %% @doc Direct bridge to derive an HD master key from a mnemonic with empty passphrase.
 -spec mnemonic_to_master_key(ecu_hd:curve(), unicode:chardata() | [unicode:chardata()]) ->
@@ -214,26 +222,35 @@ is_valid_word_count(_) -> false.
 
 -spec tokenize_words(unicode:chardata() | [unicode:chardata()]) -> [binary()].
 tokenize_words(Bin) when is_binary(Bin) ->
-  string:lexemes(Bin, [$\s, $\t, $\r, $\n]);
+  case unicode:characters_to_binary(Bin) of
+    NormBin when is_binary(NormBin) ->
+      string:lexemes(NormBin, [$\s, $\t, $\r, $\n]);
+    _ ->
+      error({bad_unicode, Bin})
+  end;
 tokenize_words(List) when is_list(List) ->
-  case io_lib:printable_list(List) of
+  case io_lib:printable_unicode_list(List) of
     true ->
       case unicode:characters_to_binary(List) of
         Bin when is_binary(Bin) -> string:lexemes(Bin, [$\s, $\t, $\r, $\n]);
-        _ -> []
+        _ -> error({bad_unicode, List})
       end;
     false ->
-      lists:filtermap(
+      lists:map(
         fun(Item) ->
           case Item of
-            W when is_binary(W) -> {true, W};
+            W when is_binary(W) ->
+              case unicode:characters_to_binary(W) of
+                NormW when is_binary(NormW) -> NormW;
+                _ -> error({bad_unicode, W})
+              end;
             W when is_list(W) ->
               case unicode:characters_to_binary(W) of
-                Bin when is_binary(Bin) -> {true, Bin};
-                _ -> false
+                NormW when is_binary(NormW) -> NormW;
+                _ -> error({bad_unicode, W})
               end;
-            _ ->
-              false
+            Other ->
+              error({bad_token, Other})
           end
         end,
         List
@@ -244,13 +261,18 @@ tokenize_words(List) when is_list(List) ->
 to_nfkd_binary(Data) ->
   case unicode:characters_to_nfkd_binary(Data) of
     Bin when is_binary(Bin) -> Bin;
-    _ -> <<>>
+    _ -> error({bad_unicode, Data})
   end.
 
 -spec normalize_mnemonic_string(unicode:chardata() | [unicode:chardata()]) -> binary().
 normalize_mnemonic_string(Mnemonic) ->
   Words = tokenize_words(Mnemonic),
   iolist_to_binary(lists:join(<<" ">>, Words)).
+
+-spec validate_unique_words([term()]) -> boolean().
+validate_unique_words(List) ->
+  lists:all(fun is_binary/1, List) andalso
+    sets:size(sets:from_list(List, [{version, 2}])) =:= 2048.
 
 -spec map_indices_to_words([non_neg_integer()], wordlist_ref()) ->
   {ok, [binary()]} | {error, bip39_error()}.
@@ -260,24 +282,38 @@ map_indices_to_words(Indices, english) ->
 map_indices_to_words(Indices, Mod) when is_atom(Mod) ->
   try
     Words = [Mod:word(Idx) || Idx <- Indices],
-    {ok, [W || W <- Words, is_binary(W)]}
+    case lists:all(fun is_binary/1, Words) of
+      true -> {ok, Words};
+      false -> {error, bad_wordlist}
+    end
   catch
     _:_ -> {error, bad_wordlist}
   end;
 map_indices_to_words(Indices, WordTuple) when is_tuple(WordTuple) ->
   case tuple_size(WordTuple) of
     2048 ->
-      Words = [element(Idx + 1, WordTuple) || Idx <- Indices],
-      {ok, [W || W <- Words, is_binary(W)]};
+      List = tuple_to_list(WordTuple),
+      case validate_unique_words(List) of
+        true ->
+          Words = [element(Idx + 1, WordTuple) || Idx <- Indices],
+          {ok, [W || W <- Words, is_binary(W)]};
+        false ->
+          {error, bad_wordlist}
+      end;
     _ ->
       {error, bad_wordlist}
   end;
 map_indices_to_words(Indices, WordList) when is_list(WordList) ->
   case length(WordList) of
     2048 ->
-      Tuple = list_to_tuple(WordList),
-      Words = [element(Idx + 1, Tuple) || Idx <- Indices],
-      {ok, [W || W <- Words, is_binary(W)]};
+      case validate_unique_words(WordList) of
+        true ->
+          Tuple = list_to_tuple(WordList),
+          Words = [element(Idx + 1, Tuple) || Idx <- Indices],
+          {ok, [W || W <- Words, is_binary(W)]};
+        false ->
+          {error, bad_wordlist}
+      end;
     _ ->
       {error, bad_wordlist}
   end.
@@ -295,16 +331,27 @@ map_words_to_indices(Words, Mod) when is_atom(Mod) ->
 map_words_to_indices(Words, WordTuple) when is_tuple(WordTuple) ->
   case tuple_size(WordTuple) of
     2048 ->
-      Map = maps:from_list([{element(I + 1, WordTuple), I} || I <- lists:seq(0, 2047)]),
-      lookup_indices(Words, fun(W) -> maps:get(W, Map, undefined) end);
+      List = tuple_to_list(WordTuple),
+      case validate_unique_words(List) of
+        true ->
+          Map = maps:from_list([{element(I + 1, WordTuple), I} || I <- lists:seq(0, 2047)]),
+          lookup_indices(Words, fun(W) -> maps:get(W, Map, undefined) end);
+        false ->
+          {error, bad_wordlist}
+      end;
     _ ->
       {error, bad_wordlist}
   end;
 map_words_to_indices(Words, WordList) when is_list(WordList) ->
   case length(WordList) of
     2048 ->
-      Map = maps:from_list(lists:zip(WordList, lists:seq(0, 2047))),
-      lookup_indices(Words, fun(W) -> maps:get(W, Map, undefined) end);
+      case validate_unique_words(WordList) of
+        true ->
+          Map = maps:from_list(lists:zip(WordList, lists:seq(0, 2047))),
+          lookup_indices(Words, fun(W) -> maps:get(W, Map, undefined) end);
+        false ->
+          {error, bad_wordlist}
+      end;
     _ ->
       {error, bad_wordlist}
   end.

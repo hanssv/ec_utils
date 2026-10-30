@@ -364,11 +364,24 @@ encode(Bin) when is_binary(Bin) ->
       <<ZeroPrefix/binary, (list_to_binary(Chars))/binary>>
   end.
 
--spec decode(binary() | string()) -> {ok, binary()} | {error, bad_char | bad_encoding}.
+-define(MAX_DECODE_LEN, 4096).
+
+-spec decode(binary() | string()) ->
+  {ok, binary()} | {error, bad_char | bad_encoding | input_too_long}.
 decode(Input) when is_binary(Input) ->
-  decode_chars(binary_to_list(Input));
+  if
+    byte_size(Input) > ?MAX_DECODE_LEN ->
+      {error, input_too_long};
+    true ->
+      decode_chars(binary_to_list(Input))
+  end;
 decode(Input) when is_list(Input) ->
-  decode_chars(Input).
+  if
+    length(Input) > ?MAX_DECODE_LEN ->
+      {error, input_too_long};
+    true ->
+      decode_chars(Input)
+  end.
 
 -spec encode_check(binary()) -> binary().
 encode_check(Payload) when is_binary(Payload) ->
@@ -376,7 +389,7 @@ encode_check(Payload) when is_binary(Payload) ->
   encode(<<Payload/binary, Checksum:4/binary>>).
 
 -spec decode_check(binary() | string()) ->
-  {ok, binary()} | {error, bad_checksum | bad_char | bad_encoding}.
+  {ok, binary()} | {error, bad_checksum | bad_char | bad_encoding | input_too_long}.
 decode_check(Input) ->
   case decode(Input) of
     {ok, Bin} when byte_size(Bin) >= 4 ->
@@ -471,7 +484,7 @@ decode_chars(Chars) ->
     [] ->
       {ok, ZeroPrefix};
     _ ->
-      case decode_bignum(RestChars) of
+      try decode_bignum(RestChars) of
         {ok, 0} ->
           {ok, ZeroPrefix};
         {ok, Num} ->
@@ -479,6 +492,9 @@ decode_chars(Chars) ->
           {ok, <<ZeroPrefix/binary, Body/binary>>};
         {error, Reason} ->
           {error, Reason}
+      catch
+        error:system_limit ->
+          {error, bad_encoding}
       end
   end.
 

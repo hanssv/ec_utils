@@ -309,14 +309,21 @@ parse_path("M/" ++ Rest) ->
   parse_path_segments(Rest, public, []);
 parse_path("M") ->
   {ok, public, []};
-parse_path(Path) ->
-  parse_path_segments(Path, private, []).
+parse_path([C | _] = Path) when C =/= $/ ->
+  parse_path_segments(Path, private, []);
+parse_path(_InvalidPath) ->
+  {error, invalid_path}.
 
 -spec parse_path_segments(string(), private | public, [non_neg_integer()]) ->
   {ok, private | public, [non_neg_integer()]} | {error, term()}.
 parse_path_segments(PathStr, Mode, Acc) ->
-  Tokens = string:lexemes(PathStr, "/"),
-  parse_tokens(Tokens, Mode, Acc).
+  Tokens = string:split(PathStr, "/", all),
+  case lists:any(fun(T) -> T =:= [] end, Tokens) of
+    true ->
+      {error, invalid_path};
+    false ->
+      parse_tokens(Tokens, Mode, Acc)
+  end.
 
 -spec parse_tokens([string()], private | public, [non_neg_integer()]) ->
   {ok, private | public, [non_neg_integer()]} | {error, term()}.
@@ -345,19 +352,26 @@ parse_index_token(Token) ->
   end.
 
 -spec parse_numeric_index(string(), boolean()) -> {ok, non_neg_integer()} | {error, term()}.
+parse_numeric_index([], _Hardened) ->
+  {error, {invalid_path_index, ""}};
 parse_numeric_index(Str, Hardened) ->
-  try list_to_integer(Str) of
-    N when is_integer(N), N >= 0, N < ?HARDENED_BIT ->
-      if
-        Hardened ->
-          {ok, N + ?HARDENED_BIT};
-        true ->
-          {ok, N}
+  case lists:all(fun(C) -> C >= $0 andalso C =< $9 end, Str) of
+    true ->
+      try list_to_integer(Str) of
+        N when is_integer(N), N >= 0, N < ?HARDENED_BIT ->
+          if
+            Hardened ->
+              {ok, N + ?HARDENED_BIT};
+            true ->
+              {ok, N}
+          end;
+        _OutOfRange ->
+          {error, {invalid_path_index, Str}}
+      catch
+        _:_ ->
+          {error, {invalid_path_index, Str}}
       end;
-    _OutOfRange ->
-      {error, {invalid_path_index, Str}}
-  catch
-    _:_ ->
+    false ->
       {error, {invalid_path_index, Str}}
   end.
 
@@ -520,36 +534,59 @@ serialize(public, #{curve := secp256k1} = Key) ->
 deserialize(
   <<Vsn:4/binary, Depth:8, FP:4/binary, Child:32/unsigned-big, CC:32/binary, KeyBytes:33/binary>>
 ) ->
-  case Vsn of
-    ?BIP32_MAINNET_PRIV ->
-      <<0:8, Priv:32/binary>> = KeyBytes,
-      Pub = derive_public_bytes(secp256k1, Priv),
-      {ok, #{
-        curve => secp256k1,
-        depth => Depth,
-        fprint => FP,
-        child_num => Child,
-        chain_code => CC,
-        priv_key => Priv,
-        pub_key => Pub
-      }};
-    ?BIP32_MAINNET_PUB ->
-      case KeyBytes of
-        <<Header:8, _/binary>> when Header =:= 2; Header =:= 3 ->
-          {ok, #{
-            curve => secp256k1,
-            depth => Depth,
-            fprint => FP,
-            child_num => Child,
-            chain_code => CC,
-            priv_key => undefined,
-            pub_key => KeyBytes
-          }};
-        _InvalidHeader ->
-          {error, invalid_public_key_header}
-      end;
-    _UnsupportedVersion ->
-      {error, unsupported_bip32_version}
+  if
+    Depth =:= 0 andalso (FP =/= <<0:32>> orelse Child =/= 0) ->
+      {error, invalid_master_key_metadata};
+    true ->
+      case Vsn of
+        ?BIP32_MAINNET_PRIV ->
+          case KeyBytes of
+            <<0:8, PrivInt:256>> ->
+              if
+                PrivInt =:= 0 orelse PrivInt >= ?SECP256K1_ORDER ->
+                  {error, invalid_private_key};
+                true ->
+                  Priv = <<PrivInt:256>>,
+                  Pub = derive_public_bytes(secp256k1, Priv),
+                  {ok, #{
+                    curve => secp256k1,
+                    depth => Depth,
+                    fprint => FP,
+                    child_num => Child,
+                    chain_code => CC,
+                    priv_key => Priv,
+                    pub_key => Pub
+                  }}
+              end;
+            _ ->
+              {error, invalid_private_key_prefix}
+          end;
+        ?BIP32_MAINNET_PUB ->
+          case KeyBytes of
+            <<Header:8, _/binary>> when Header =:= 2; Header =:= 3 ->
+              try ecu_secp256k1:decompress(KeyBytes) of
+                {0, 0} ->
+                  {error, invalid_public_key};
+                _Pt ->
+                  {ok, #{
+                    curve => secp256k1,
+                    depth => Depth,
+                    fprint => FP,
+                    child_num => Child,
+                    chain_code => CC,
+                    priv_key => undefined,
+                    pub_key => KeyBytes
+                  }}
+              catch
+                _:_ ->
+                  {error, invalid_public_key}
+              end;
+            _InvalidHeader ->
+              {error, invalid_public_key_header}
+          end;
+        _UnsupportedVersion ->
+          {error, unsupported_bip32_version}
+      end
   end;
 deserialize(_InvalidBinary) ->
   {error, invalid_extended_key_binary}.

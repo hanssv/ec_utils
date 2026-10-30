@@ -85,9 +85,15 @@ keypair_from_seed(_, _) ->
 %% For secp256k1: returns 32-byte shared secret (the x-coordinate of [d_A] Q_B).
 -spec compute_key(curve(), pubkey(), privkey()) -> binary().
 compute_key(x25519, PeerPub = <<_:32/bytes>>, MyPriv = <<_:32/bytes>>) ->
-  x25519(MyPriv, PeerPub);
+  case x25519(MyPriv, PeerPub) of
+    <<0:256>> -> error(small_order_point);
+    Secret -> Secret
+  end;
 compute_key(x448, PeerPub = <<_:56/bytes>>, MyPriv = <<_:56/bytes>>) ->
-  x448(MyPriv, PeerPub);
+  case x448(MyPriv, PeerPub) of
+    <<0:448>> -> error(small_order_point);
+    Secret -> Secret
+  end;
 compute_key(secp256k1, PeerPub, <<PrivInt:256>>) when PrivInt >= 1, PrivInt < ?N ->
   Pt =
     case PeerPub of

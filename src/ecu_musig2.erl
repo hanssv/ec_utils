@@ -92,12 +92,25 @@ key_agg(bip340, Pubkeys) when is_list(Pubkeys), Pubkeys =/= [] ->
   end;
 key_agg(ed25519, Pubkeys) when is_list(Pubkeys), Pubkeys =/= [] ->
   try
+    lists:foreach(
+      fun(PK) ->
+        case ecu_ed25519:is_small_order(PK) of
+          true -> throw(invalid_pubkey);
+          false -> ok
+        end
+      end,
+      Pubkeys
+    ),
     SortedPks = lists:sort(Pubkeys),
     AllPks = iolist_to_binary(SortedPks),
     Coeffs = [compute_ed25519_coeff(AllPks, PK) || PK <- SortedPks],
     ScaledPts = [ecu_ed25519:scalar_mul_noclamp(C, PK) || {C, PK} <- lists:zip(Coeffs, SortedPks)],
     AggPt = lists:foldl(fun(Pt, Acc) -> ecu_ed25519:p_add(Acc, Pt) end, hd(ScaledPts), tl(ScaledPts)),
     CompAggPk = ecu_ed25519:compress(AggPt),
+    case CompAggPk =:= <<1:256/little>> orelse ecu_ed25519:is_small_order(CompAggPk) of
+      true -> throw(invalid_agg_pk);
+      false -> ok
+    end,
     Ctx = #key_agg_ctx{
       ciphersuite = ed25519,
       agg_pk_point = AggPt,
@@ -187,7 +200,9 @@ nonce_gen(bip340, SecKey) when is_binary(SecKey), byte_size(SecKey) =:= 32 ->
   K2 = rand_scalar_secp_aux(Rand, SecKey, 2),
   R1 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K1)),
   R2 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K2)),
-  {<<K1:256, K2:256>>, <<R1/binary, R2/binary>>};
+  <<SK:256>> = SecKey,
+  SignerPub = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK)),
+  {<<K1:256, K2:256, SignerPub/binary>>, <<R1/binary, R2/binary>>};
 nonce_gen(ed25519, _SecKey) ->
   nonce_gen(ed25519).
 
@@ -202,17 +217,17 @@ nonce_agg(bip340, PubNonces) when is_list(PubNonces), PubNonces =/= [] ->
     Pairs = [
       case PN of
         <<R1:33/binary, R2:33/binary>> ->
-          {ecu_secp256k1:decompress(R1), ecu_secp256k1:decompress(R2)};
+          {decode_secp_pub_or_infinity(R1), decode_secp_pub_or_infinity(R2)};
         [R1, R2] ->
-          {ecu_secp256k1:decompress(R1), ecu_secp256k1:decompress(R2)}
+          {decode_secp_pub_or_infinity(R1), decode_secp_pub_or_infinity(R2)}
       end
      || PN <- PubNonces
     ],
     {R1s, R2s} = lists:unzip(Pairs),
     SumR1 = lists:foldl(fun(Pt, Acc) -> ecu_secp256k1:p_add(Acc, Pt) end, hd(R1s), tl(R1s)),
     SumR2 = lists:foldl(fun(Pt, Acc) -> ecu_secp256k1:p_add(Acc, Pt) end, hd(R2s), tl(R2s)),
-    CompR1 = ecu_secp256k1:compress(SumR1),
-    CompR2 = ecu_secp256k1:compress(SumR2),
+    CompR1 = encode_secp_pub_or_infinity(SumR1),
+    CompR2 = encode_secp_pub_or_infinity(SumR2),
     {ok, <<CompR1/binary, CompR2/binary>>}
   catch
     _:Reason -> {error, Reason}
@@ -254,12 +269,19 @@ sign_partial(Ctx, SecKey, SecNonce, AggNonce, Msg) ->
 sign_partial(
   Ctx = #key_agg_ctx{ciphersuite = bip340},
   SecKey,
-  <<K1:256, K2:256>>,
+  SecNonce,
   <<AggR1Bin:33/binary, AggR2Bin:33/binary>>,
   Msg,
   Occurrence
-) ->
+) when is_binary(SecNonce) ->
   try
+    {K1, K2, StoredPubOpt} =
+      case SecNonce of
+        <<K1Int:256, K2Int:256, StoredPub:33/binary>> ->
+          {K1Int, K2Int, {ok, StoredPub}};
+        <<K1Int:256, K2Int:256>> ->
+          {K1Int, K2Int, undefined}
+      end,
     N = ecu_secp256k1:n(),
     SK =
       case SecKey of
@@ -268,47 +290,54 @@ sign_partial(
       end,
     PubPt = ecu_secp256k1:scalar_mul_base(SK),
     PubKeyComp = ecu_secp256k1:compress(PubPt),
-    {ok, KeyCoeff} = key_agg_coeff(Ctx, PubKeyComp, Occurrence),
+    case StoredPubOpt of
+      {ok, ExpectedPub} when ExpectedPub =/= PubKeyComp ->
+        {error, public_key_mismatch};
+      _ ->
+        {ok, KeyCoeff} = key_agg_coeff(Ctx, PubKeyComp, Occurrence),
 
-    AggPt = Ctx#key_agg_ctx.agg_pk_point,
-    AggXonly = key_agg_pubkey(Ctx),
+        AggPt = Ctx#key_agg_ctx.agg_pk_point,
+        AggXonly = key_agg_pubkey(Ctx),
 
-    AggR1 = ecu_secp256k1:decompress(AggR1Bin),
-    AggR2 = ecu_secp256k1:decompress(AggR2Bin),
+        AggR1 = decode_secp_pub_or_infinity(AggR1Bin),
+        AggR2 = decode_secp_pub_or_infinity(AggR2Bin),
 
-    B = compute_secp_noncecoef(AggR1Bin, AggR2Bin, AggXonly, Msg),
-    FinalNoncePt =
-      case ecu_secp256k1:p_add(AggR1, ecu_secp256k1:scalar_mul(B, AggR2)) of
-        {0, 0} -> {?X, ?Y};
-        Pt -> Pt
-      end,
+        B = compute_secp_noncecoef(AggR1Bin, AggR2Bin, AggXonly, Msg),
+        FinalNoncePt =
+          case ecu_secp256k1:p_add(AggR1, ecu_secp256k1:scalar_mul(B, AggR2)) of
+            {0, 0} -> {?X, ?Y};
+            Pt -> Pt
+          end,
 
-    {_Rx, Ry} = FinalNoncePt,
-    KSign =
-      case Ry rem 2 of
-        0 -> 1;
-        1 -> N - 1
-      end,
+        {_Rx, Ry} = FinalNoncePt,
+        KSign =
+          case Ry rem 2 of
+            0 -> 1;
+            1 -> N - 1
+          end,
 
-    {_Qx, Qy} = AggPt,
-    DSign =
-      case is_integer(Qy) andalso (Qy rem 2 =:= 0) of
-        true -> 1;
-        false -> N - 1
-      end,
+        {_Qx, Qy} = AggPt,
+        DSign =
+          case is_integer(Qy) andalso (Qy rem 2 =:= 0) of
+            true -> 1;
+            false -> N - 1
+          end,
 
-    RxOnly = <<(element(1, FinalNoncePt)):256>>,
-    E = ecu_schnorr:tagged_hash(<<"BIP0340/challenge">>, <<RxOnly/binary, AggXonly/binary, Msg/binary>>),
-    EInt = binary:decode_unsigned(E),
+        RxOnly = <<(element(1, FinalNoncePt)):256>>,
+        E = ecu_schnorr:tagged_hash(
+          <<"BIP0340/challenge">>, <<RxOnly/binary, AggXonly/binary, Msg/binary>>
+        ),
+        EInt = binary:decode_unsigned(E),
 
-    K_eff = (KSign * (K1 + (B * K2) rem N)) rem N,
-    K_eff_pos = (K_eff + N) rem N,
+        K_eff = (KSign * (K1 + (B * K2) rem N)) rem N,
+        K_eff_pos = (K_eff + N) rem N,
 
-    D_eff = (DSign * SK) rem N,
-    D_eff_pos = (D_eff + N) rem N,
+        D_eff = (DSign * SK) rem N,
+        D_eff_pos = (D_eff + N) rem N,
 
-    S_part = (K_eff_pos + (EInt * KeyCoeff rem N) * D_eff_pos) rem N,
-    {ok, <<S_part:256>>}
+        S_part = (K_eff_pos + (EInt * KeyCoeff rem N) * D_eff_pos) rem N,
+        {ok, <<S_part:256>>}
+    end
   catch
     _:Reason -> {error, Reason}
   end;
@@ -383,8 +412,8 @@ verify_partial(
             AggPt = Ctx#key_agg_ctx.agg_pk_point,
             AggXonly = key_agg_pubkey(Ctx),
 
-            AggR1 = ecu_secp256k1:decompress(AggR1Bin),
-            AggR2 = ecu_secp256k1:decompress(AggR2Bin),
+            AggR1 = decode_secp_pub_or_infinity(AggR1Bin),
+            AggR2 = decode_secp_pub_or_infinity(AggR2Bin),
             B = compute_secp_noncecoef(AggR1Bin, AggR2Bin, AggXonly, Msg),
             FinalNoncePt =
               case ecu_secp256k1:p_add(AggR1, ecu_secp256k1:scalar_mul(B, AggR2)) of
@@ -488,8 +517,8 @@ aggregate_partial(
   try
     N = ecu_secp256k1:n(),
     <<_:8, AggXonly:32/binary>> = AggPkComp,
-    AggR1 = ecu_secp256k1:decompress(AggR1Bin),
-    AggR2 = ecu_secp256k1:decompress(AggR2Bin),
+    AggR1 = decode_secp_pub_or_infinity(AggR1Bin),
+    AggR2 = decode_secp_pub_or_infinity(AggR2Bin),
     B = compute_secp_noncecoef(AggR1Bin, AggR2Bin, AggXonly, Msg),
     FinalNoncePt =
       case ecu_secp256k1:p_add(AggR1, ecu_secp256k1:scalar_mul(B, AggR2)) of
@@ -604,3 +633,15 @@ clamp_ed25519(<<B0:8, B1_30:30/bytes, B31:8>>) ->
 tagged_hash_prefix(Tag) ->
   TagHash = crypto:hash(sha256, Tag),
   <<TagHash/binary, TagHash/binary>>.
+
+-spec encode_secp_pub_or_infinity({non_neg_integer(), non_neg_integer()}) -> binary().
+encode_secp_pub_or_infinity({0, 0}) ->
+  binary:copy(<<0>>, 33);
+encode_secp_pub_or_infinity(Pt) ->
+  ecu_secp256k1:compress(Pt).
+
+-spec decode_secp_pub_or_infinity(binary()) -> {non_neg_integer(), non_neg_integer()}.
+decode_secp_pub_or_infinity(<<0:264>>) ->
+  {0, 0};
+decode_secp_pub_or_infinity(Bin) ->
+  ecu_secp256k1:decompress(Bin).

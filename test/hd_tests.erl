@@ -380,4 +380,37 @@ invalid_operations_test() ->
 
   %% Invalid seed sizes
   ?assertEqual({error, invalid_seed_length}, ecu_hd:master_key(secp256k1, binary:copy(<<0>>, 15))),
-  ?assertEqual({error, invalid_seed_length}, ecu_hd:master_key(secp256k1, binary:copy(<<0>>, 65))).
+  ?assertEqual({error, invalid_seed_length}, ecu_hd:master_key(secp256k1, binary:copy(<<0>>, 65))),
+
+  %% Deserialization validation: private key bounds and prefix
+  N = 16#FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141,
+  PrivHdr = <<16#0488ADE4:32, 0:8, 0:32, 0:32, 0:256>>,
+  ?assertEqual({error, invalid_private_key}, ecu_hd:deserialize(<<PrivHdr/binary, 0:8, 0:256>>)),
+  ?assertEqual({error, invalid_private_key}, ecu_hd:deserialize(<<PrivHdr/binary, 0:8, N:256>>)),
+  ?assertEqual({error, invalid_private_key}, ecu_hd:deserialize(<<PrivHdr/binary, 0:8, (N + 1):256>>)),
+  ?assertEqual({error, invalid_private_key_prefix}, ecu_hd:deserialize(<<PrivHdr/binary, 1:8, 1:256>>)),
+
+  %% Deserialization validation: off-curve public key
+  PubHdr = <<16#0488B21E:32, 0:8, 0:32, 0:32, 0:256>>,
+  ?assertEqual({error, invalid_public_key}, ecu_hd:deserialize(<<PubHdr/binary, 2:8, 5:256>>)),
+
+  %% Deserialization validation: depth-0 master key metadata
+  ?assertEqual(
+    {error, invalid_master_key_metadata},
+    ecu_hd:deserialize(<<16#0488ADE4:32, 0:8, 1:32, 0:32, 0:256, 0:8, 1:256>>)
+  ),
+  ?assertEqual(
+    {error, invalid_master_key_metadata},
+    ecu_hd:deserialize(<<16#0488ADE4:32, 0:8, 0:32, 1:32, 0:256, 0:8, 1:256>>)
+  ),
+
+  %% Strict path parsing rejects invalid signs, empty segments, trailing slashes
+  ?assertEqual({error, {invalid_path_index, "+5"}}, ecu_hd:derive_path("m/+5", MSecp)),
+  ?assertEqual({error, {invalid_path_index, "-0"}}, ecu_hd:derive_path("m/-0", MSecp)),
+  ?assertEqual({error, invalid_path}, ecu_hd:derive_path("m/0//1", MSecp)),
+  ?assertEqual({error, invalid_path}, ecu_hd:derive_path("m/0/1/", MSecp)),
+
+  %% Base58 length capping rejects inputs exceeding 4096 bytes
+  LongInput = binary:copy(<<"1">>, 4097),
+  ?assertEqual({error, input_too_long}, ecu_base58:decode(LongInput)),
+  ?assertEqual({error, input_too_long}, ecu_base58:decode_check(LongInput)).

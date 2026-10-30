@@ -465,7 +465,7 @@ bench_musig2_test() ->
     [ecu_musig2:nonce_agg([PN || {_, PN} <- Ns]) || Ns <- NoncesList]
   end),
 
-  {<<_:64/binary>> = SN1, <<_:33/binary, _:33/binary>> = PN1} = hd(hd(NoncesList)),
+  {<<_:97/binary>> = SN1, <<_:33/binary, _:33/binary>> = PN1} = hd(hd(NoncesList)),
   {ok, <<_:33/binary, _:33/binary>> = AggN} = ecu_musig2:nonce_agg([PN || {_, PN} <- hd(NoncesList)]),
 
   %% 4. Sign Partial

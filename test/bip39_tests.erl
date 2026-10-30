@@ -147,7 +147,22 @@ nfkd_unicode_test() ->
   DecomposedPassphrase = <<101, 101, 204, 129>>,
   Seed1 = ecu_bip39:mnemonic_to_seed(Mnemonic, ComposedPassphrase),
   Seed2 = ecu_bip39:mnemonic_to_seed(Mnemonic, DecomposedPassphrase),
-  ?assertEqual(Seed1, Seed2).
+  ?assertEqual(Seed1, Seed2),
+
+  %% Invalid non-UTF8 latin1 binary raises error rather than silently becoming <<>>
+  BadLatin1 = <<"p", 233, "ss">>,
+  ?assertError({bad_unicode, _}, ecu_bip39:mnemonic_to_seed(Mnemonic, BadLatin1)),
+
+  %% Unicode charlist with codepoints > 255 (Japanese) succeeds
+  JapaneseWords = [12354, 12356, 32, 12358],
+  SeedJ1 = ecu_bip39:mnemonic_to_seed(JapaneseWords),
+  BinJ =
+    case unicode:characters_to_binary(JapaneseWords) of
+      B when is_binary(B) -> B
+    end,
+  SeedJ2 = ecu_bip39:mnemonic_to_seed(BinJ),
+  ?assertEqual(SeedJ1, SeedJ2),
+  ?assertNotEqual(SeedJ1, ecu_bip39:mnemonic_to_seed(<<>>)).
 
 custom_wordlist_test() ->
   %% Create a dummy 2048-element wordlist
@@ -158,7 +173,15 @@ custom_wordlist_test() ->
   ?assertEqual(12, length(string:lexemes(Mnemonic, " "))),
   ?assertEqual({ok, Entropy}, ecu_bip39:mnemonic_to_entropy(Mnemonic, CustomTuple)),
   ?assertEqual(ok, ecu_bip39:validate_mnemonic(Mnemonic, CustomTuple)),
-  ?assertEqual({error, bad_wordlist}, ecu_bip39:entropy_to_mnemonic(Entropy, {bad_tuple})).
+  ?assertEqual({error, bad_wordlist}, ecu_bip39:entropy_to_mnemonic(Entropy, {bad_tuple})),
+
+  %% Non-binary custom wordlist rejected
+  NonBinList = [binary_to_list(W) || W <- CustomList],
+  ?assertEqual({error, bad_wordlist}, apply(ecu_bip39, entropy_to_mnemonic, [Entropy, NonBinList])),
+
+  %% Duplicate custom wordlist rejected
+  DupTuple = list_to_tuple([<<"w">> || _ <- lists:seq(0, 2047)]),
+  ?assertEqual({error, bad_wordlist}, ecu_bip39:entropy_to_mnemonic(Entropy, DupTuple)).
 
 %% ===================================================================
 %% Helpers & Test Vectors

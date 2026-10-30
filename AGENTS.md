@@ -59,3 +59,27 @@ make eqc               # QuickCheck properties
 rebar3 dialyzer        # Dialyzer type analysis
 mise run eqwalize      # EqWAlizer type checking
 ```
+
+---
+
+## 5. Security Scans & Lessons Learned
+
+Periodic, focused security reviews should be run after adding new cryptographic modules or protocols. Scans should focus on concrete cryptographic risks, protocol deviations, and BEAM edge cases rather than stylistic nits. Scratch notes should remain temporary and not be committed to git.
+
+### Common Pitfalls & Invariants
+
+1. **Strict Domain & Range Validation**:
+   - *Private scalars*: Explicitly check $0 < s < n$. Never silently modulo-reduce out-of-range scalars on deserialization.
+   - *Public keys*: Decompress and verify points lie on the curve and in the prime-order subgroup; reject identity and small-order points unless explicitly permitted by the RFC.
+   - *Contributory ECDH*: Detect and reject all-zero shared secrets in X25519 and X448.
+   - *Protocol metadata*: Enforce boundary constraints (e.g., BIP-32 depth-0 parent fingerprint and child index must be zero).
+
+2. **Encoding & Unicode Handling on BEAM**:
+   - *Fail closed*: Never silently coerce invalid or incomplete UTF-8/Unicode data into empty binaries (`<<>>`). Raise or return explicit error tuples.
+   - *Charlists*: Do not use `io_lib:printable_list/1` for Unicode validation; use `io_lib:printable_unicode_list/1`.
+   - *DoS & Resource Limits*: Bound input lengths for bignum decoders (e.g., Base58) to prevent quadratic BEAM bignum multiplication and `system_limit` crashes.
+
+3. **Multi-Party State & Nonce Hygiene**:
+   - Embed and verify signer public keys inside secret nonce structures to prevent signer mismatch in multi-party protocols (BIP-327).
+   - Accurately handle protocol-specified point-at-infinity representations (e.g., BIP-327 33 zero bytes) across nonce aggregation and partial signing.
+
