@@ -133,6 +133,26 @@ XPub = ecu_ecdh:ed25519_public_to_x25519(Ed25519PubKey),
 XPriv = ecu_ecdh:ed25519_secret_to_x25519(Ed25519SecretKey).
 ```
 
+### Hierarchical Deterministic (HD) Wallets (BIP-32 & SLIP-0010)
+
+```erlang
+%% Master key derivation from seed
+Seed = crypto:strong_rand_bytes(32),
+{ok, MasterKey} = ecu_hd:master_key(secp256k1, Seed),
+
+%% Standard BIP-44 key derivation path (e.g. Ethereum: m/44'/60'/0'/0/0)
+{ok, ChildKey} = ecu_hd:derive_path("m/44'/60'/0'/0/0", MasterKey),
+{ok, PrivKey} = ecu_hd:private_key(ChildKey),
+{ok, PubKey} = ecu_hd:public_key(ChildKey),
+
+%% Base58Check extended keys (xprv / xpub)
+XPub = ecu_hd:to_base58(public, ChildKey),
+XPrv = ecu_hd:to_base58(private, ChildKey),
+
+%% Ed25519 SLIP-0010 & AEX-10 (e.g. Aeternity: m/44H/457H/0H/0H/0H)
+{ok, AexKey} = ecu_hd:derive_aex10(Seed, 0, 0).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -264,6 +284,20 @@ Supported Curves & API
   - `verify_partial/6,7`: Verify individual partial signatures prior to aggregation.
   - `aggregate_partial/4,5`: Combine partial signatures into a standard 64-byte Schnorr signature with optional tweak accumulator support.
 
+### Hierarchical Deterministic (HD) Wallets & Base58
+
+- `ecu_hd`: BIP-32 and SLIP-0010 hierarchical deterministic wallet key derivation:
+  - `master_key/2`: Master key derivation from seed (`secp256k1` or `ed25519`).
+  - `ckd_priv/2`, `ckd_pub/2`: Child key derivation (hardened and unhardened for secp256k1; hardened-only for Ed25519).
+  - `derive_path/2`, `derive_path_from_seed/3`: Path evaluation (`"m/44'/60'/0'/0/0"`, `"M/0/1"`).
+  - `derive_bip44/5,6`: Standard BIP-44 multi-account derivation.
+  - `derive_aex10/3,4`, `derive_aex10_from_masterkey/3,4`: Aeternity AEX-10 account/address derivation.
+  - `to_base58/1,2`, `from_base58/1`: Extended key serialization with Base58Check (`xprv`, `xpub`).
+- `ecu_base58`: High-performance pure-Erlang Base58 and Base58Check encoding:
+  - Optimized Radix-$58^{10}$ chunking (~3.5 µs/op encode/decode; ~5.5–6.0 µs/op Base58Check).
+  - `encode/1`, `decode/1`: Raw Base58 with leading-zero preservation.
+  - `encode_check/1`, `decode_check/1`: Base58Check with double SHA-256 checksums.
+
 Performance & Benchmarks
 ------------------------
 
@@ -328,6 +362,13 @@ the library incorporates key algorithmic optimizations:
 | **musig2 bip327 sign_part** | — | **1.00 ms** | — | 67.3 µs (musig2 Rust NIF) | 14.9× |
 | **musig2 bip327 verify_part** | — | **2.64 ms** | — | 190 µs (musig2 Rust NIF) | 13.9× |
 | **musig2 bip327 aggregate** | — | **1.83 ms** | — | 159 µs (musig2 Rust NIF) | 11.5× |
+| **base58 encode (78B)** | — | **3.6 µs** | — | — | — |
+| **base58 decode (78B)** | — | **3.5 µs** | — | — | — |
+| **base58check encode (78B)** | — | **5.6 µs** | — | — | — |
+| **base58check decode (78B)** | — | **6.0 µs** | — | — | — |
+| **bip32 ckd_priv (secp256k1)** | — | **172 µs** | — | — | — |
+| **bip32 ckd_pub (secp256k1)** | — | **205 µs** | — | — | — |
+| **slip10 ckd_priv (ed25519)** | — | **163 µs** | — | — | — |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*

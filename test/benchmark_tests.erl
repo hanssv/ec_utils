@@ -539,6 +539,49 @@ bench_musig2_test() ->
   end,
   ok.
 
+bench_hd_and_base58_test() ->
+  Iters = 2000,
+  Payload = crypto:strong_rand_bytes(78),
+  B58Str = ecu_base58:encode_check(Payload),
+
+  {TimeB58Enc, _} = timer:tc(fun() ->
+    [ecu_base58:encode(Payload) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeB58Dec, _} = timer:tc(fun() ->
+    [ecu_base58:decode(B58Str) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeB58CheckEnc, _} = timer:tc(fun() ->
+    [ecu_base58:encode_check(Payload) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeB58CheckDec, _} = timer:tc(fun() ->
+    [ecu_base58:decode_check(B58Str) || _ <- lists:seq(1, Iters)]
+  end),
+
+  Seed = crypto:strong_rand_bytes(32),
+  {ok, MSecp} = ecu_hd:master_key(secp256k1, Seed),
+  MSecpPub = ecu_hd:to_public(MSecp),
+  {ok, MEd} = ecu_hd:master_key(ed25519, Seed),
+
+  {TimeSecpPriv, _} = timer:tc(fun() ->
+    [ecu_hd:ckd_priv(MSecp, 1) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeSecpPub, _} = timer:tc(fun() ->
+    [ecu_hd:ckd_pub(MSecpPub, 1) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeEdPriv, _} = timer:tc(fun() ->
+    [ecu_hd:ckd_priv(MEd, 16#80000001) || _ <- lists:seq(1, Iters)]
+  end),
+
+  ?debugFmt("", []),
+  stats("Base58 encode (78B)", "ecu_base58   ", Iters, TimeB58Enc),
+  stats("Base58 decode (78B)", "ecu_base58   ", Iters, TimeB58Dec),
+  stats("Base58Check encode (78B)", "ecu_base58   ", Iters, TimeB58CheckEnc),
+  stats("Base58Check decode (78B)", "ecu_base58   ", Iters, TimeB58CheckDec),
+  stats("BIP-32 CKDpriv (secp256k1)", "ecu_hd       ", Iters, TimeSecpPriv),
+  stats("BIP-32 CKDpub (secp256k1)", "ecu_hd       ", Iters, TimeSecpPub),
+  stats("SLIP-0010 CKDpriv (Ed25519)", "ecu_hd       ", Iters, TimeEdPriv),
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

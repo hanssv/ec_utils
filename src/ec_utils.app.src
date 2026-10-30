@@ -18,7 +18,9 @@
     ecu_frost_dkg,
     ecu_ecdh,
     ecu_keccak,
-    ecu_musig2
+    ecu_musig2,
+    ecu_base58,
+    ecu_hd
   ]},
   {licenses, ["MIT"]},
   {links, []}
