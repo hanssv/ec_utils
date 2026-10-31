@@ -24,3 +24,4 @@ priv/ecu_schnorr_nif.*
 priv/ecu_rustcrypto_nif.*
 priv/ecu_frost_nif.*
 priv/ecu_musig2_nif.*
+doc/

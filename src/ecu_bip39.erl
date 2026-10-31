@@ -1,12 +1,17 @@
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% BIP-39: Mnemonic code for generating deterministic keys.
+%%%
+%%% Implements pure-Erlang BIP-39 mnemonic phrase generation, validation,
+%%% entropy round-trips, and PBKDF2-HMAC-SHA512 seed derivation with UTF-8 NFKD
+%%% normalization. Zero external dependencies.
+%%%
+%%% Reference: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
+%%% @end
+%%%-------------------------------------------------------------------
 -module(ecu_bip39).
--typing([eqwalizer]).
 
-%% @doc BIP-39: Mnemonic code for generating deterministic keys.
-%% Reference: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
-%%
-%% Implements pure-Erlang BIP-39 mnemonic phrase generation, validation,
-%% entropy round-trips, and PBKDF2-HMAC-SHA512 seed derivation with UTF-8 NFKD
-%% normalization. Zero external dependencies.
+-typing([eqwalizer]).
 
 -export([
   generate_mnemonic/1,

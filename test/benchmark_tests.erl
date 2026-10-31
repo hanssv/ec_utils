@@ -613,6 +613,39 @@ bench_bip39_test() ->
   stats("BIP-39 mnemonic_to_seed (2048 iters)", "ecu_bip39    ", Pbkdf2Iters, TimeMnemonicToSeed),
   ok.
 
+bench_bech32_test() ->
+  Iters = 2000,
+  Prog = crypto:strong_rand_bytes(32),
+  {ok, Addr} = ecu_bech32:encode_segwit_address(<<"bc">>, 1, Prog),
+
+  {TimeSegwitEnc, _} = timer:tc(fun() ->
+    [ecu_bech32:encode_segwit_address(<<"bc">>, 1, Prog) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeSegwitDec, _} = timer:tc(fun() ->
+    [ecu_bech32:decode_segwit_address(<<"bc">>, Addr) || _ <- lists:seq(1, Iters)]
+  end),
+
+  ?debugFmt("", []),
+  stats("SegWit v1 encode (Taproot 32B)", "ecu_bech32   ", Iters, TimeSegwitEnc),
+  stats("SegWit v1 decode (Taproot 32B)", "ecu_bech32   ", Iters, TimeSegwitDec),
+
+  case ecu_rustcrypto_nif:is_available() of
+    true ->
+      {TimeNifEnc, _} = timer:tc(fun() ->
+        [ecu_rustcrypto_nif:bech32_segwit_encode(<<"bc">>, 1, Prog) || _ <- lists:seq(1, Iters)]
+      end),
+      {TimeNifDec, _} = timer:tc(fun() ->
+        [ecu_rustcrypto_nif:bech32_segwit_decode(Addr) || _ <- lists:seq(1, Iters)]
+      end),
+      stats("SegWit v1 encode (Taproot 32B)", "bech32 (NIF) ", Iters, TimeNifEnc),
+      diff(TimeSegwitEnc, TimeNifEnc),
+      stats("SegWit v1 decode (Taproot 32B)", "bech32 (NIF) ", Iters, TimeNifDec),
+      diff(TimeSegwitDec, TimeNifDec);
+    false ->
+      ok
+  end,
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

@@ -4,10 +4,10 @@
 %%%
 %%% Implements the Keccak sponge function family with zero external C/NIF
 %%% dependencies, including:
-%%%   - Ethereum Keccak-256 (`keccak256/1`)
-%%%   - NIST FIPS 202 SHA-3 (`sha3_224/1`, `sha3_256/1`, `sha3_384/1`, `sha3_512/1`)
-%%%   - NIST FIPS 202 SHAKE XOF (`shake128/2`, `shake256/2`)
-%%%   - Generic Keccak sponge (`keccak/4`)
+%%%   - Ethereum Keccak-256 (`keccak256/1')
+%%%   - NIST FIPS 202 SHA-3 (`sha3_224/1', `sha3_256/1', `sha3_384/1', `sha3_512/1')
+%%%   - NIST FIPS 202 SHAKE XOF (`shake128/2', `shake256/2')
+%%%   - Generic Keccak sponge (`keccak/4')
 %%%
 %%% Algorithmic optimizations:
 %%%   1. State is represented throughout absorption as a 25-tuple of 64-bit uints,
@@ -16,15 +16,15 @@
 %%%      avoiding bit-by-bit slicing and flipping.
 %%%   3. Unrolled 4-round symmetry by Hans Svensson, fusing 4 Keccak rounds into
 %%%      a single function pass to eliminate intermediate 25-tuple heap allocations.
-%%%   4. Branchless 64-bit uint arithmetic using bitwise operations (`?CAN64`,
-%%%      `?ROTL64`) that stay strictly within 64-bit positive integers.
+%%%   4. Branchless 64-bit uint arithmetic using bitwise operations (`?CAN64',
+%%%      `?ROTL64') that stay strictly within 64-bit positive integers.
 %%%
 %%% Note on usage:
-%%%   `ecu_keccak` is provided to ensure `ec_utils` remains completely self-contained
+%%%   `ecu_keccak' is provided to ensure `ec_utils' remains completely self-contained
 %%%   with zero external C dependencies for Ethereum message signing/recovery
-%%%   (`ecu_crypto:eth_msg_recover/2`), address derivation, and Ed448/SHAKE256.
+%%%   (`ecu_crypto:eth_msg_recover/2'), address derivation, and Ed448/SHAKE256.
 %%%   Do NOT use this library if you only require standalone, high-throughput hash
-%%%   functions! For bulk or streaming hashing, use OTP's built-in `crypto:hash/2`
+%%%   functions! For bulk or streaming hashing, use OTP built-in `crypto:hash/2'
 %%%   (for NIST SHA-3) or a dedicated native NIF, which are ~40x–70x faster.
 %%% @end
 %%%-------------------------------------------------------------------

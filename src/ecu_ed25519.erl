@@ -26,7 +26,7 @@
 
 -type pt() :: pt_affine() | pt_hom_ext() | pt_compressed().
 
--type scalar_elem() :: 0..(?N - 1).
+-type scalar_elem() :: non_neg_integer().
 -type scalar() :: non_neg_integer() | <<_:256>>.
 -type field_elem() :: non_neg_integer().
 

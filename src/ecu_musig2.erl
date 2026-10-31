@@ -53,12 +53,12 @@
 %% API Functions
 %% ====================================================================
 
-%% @doc Aggregate public keys using the default `bip340` (secp256k1) ciphersuite.
+%% @doc Aggregate public keys using the default 'bip340' (secp256k1) ciphersuite.
 -spec key_agg([pubkey()]) -> {ok, key_agg_ctx()} | {error, term()}.
 key_agg(Pubkeys) ->
   key_agg(bip340, Pubkeys).
 
-%% @doc Aggregate public keys using the specified ciphersuite (`bip340` or `ed25519`).
+%% @doc Aggregate public keys using the specified ciphersuite ('bip340' or 'ed25519').
 -spec key_agg(ciphersuite(), [pubkey()]) -> {ok, key_agg_ctx()} | {error, term()}.
 key_agg(bip340, Pubkeys) when is_list(Pubkeys), Pubkeys =/= [] ->
   try
@@ -127,8 +127,8 @@ key_agg(_, _) ->
   {error, badarg}.
 
 %% @doc Retrieve the aggregated public key from context.
-%% For `bip340`, returns the 32-byte BIP-340 x-only public key.
-%% For `ed25519`, returns the 32-byte Ed25519 compressed public key.
+%% For 'bip340', returns the 32-byte BIP-340 x-only public key.
+%% For 'ed25519', returns the 32-byte Ed25519 compressed public key.
 -spec key_agg_pubkey(key_agg_ctx()) -> pubkey().
 key_agg_pubkey(#key_agg_ctx{ciphersuite = bip340, agg_pk_bin = <<_:8, X:32/binary>>}) ->
   X;

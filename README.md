@@ -1,12 +1,16 @@
 ec_utils
 ========
 
-A pure Erlang library containing elliptic curve cryptography utilities for
-**Ed25519**, **Ed448**, and **secp256k1**.
+A pure Erlang cryptographic library implementing elliptic curve arithmetic
+(**Ed25519**, **Ed448**, **secp256k1**), digital signatures (ECDSA, EdDSA,
+BIP-340 Schnorr), threshold signatures (FROST RFC 9591), multi-signatures
+(MuSig2 BIP-327), key exchange (X25519, X448), hierarchical deterministic
+wallets (BIP-32, SLIP-0010, AEX-10), mnemonics (BIP-39), and address encodings
+(Base58, Base58Check, Bech32, Bech32m).
 
-This library is intended for learning, experimentation, and as a portable
-pure-Erlang fallback when native C/Rust NIFs (such as `libsodium`/`enacl` or
-native `secp256k1` bindings) are unavailable.
+This library has **zero external C or third-party dependencies** in production
+and runs completely self-contained on the BEAM. Reference NIFs in `crates/`
+exist purely as test oracles for differential fuzzing and cross-verification.
 
 Build & Verification
 --------------------
@@ -114,6 +118,34 @@ Signature = ecu_frost:aggregate(bip340, Commitments, Msg, GroupPK, [Z1, Z2]),
 true = ecu_schnorr:verify(Signature, Msg, GroupPK).
 ```
 
+### MuSig2 Multi-Signatures (BIP-327)
+
+```erlang
+%% Key aggregation for 2 signers
+SK1 = crypto:strong_rand_bytes(32),
+SK2 = crypto:strong_rand_bytes(32),
+PK1 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK1)),
+PK2 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK2)),
+{ok, Ctx} = ecu_musig2:key_agg([PK1, PK2]),
+AggPK = ecu_musig2:key_agg_pubkey(Ctx),
+Msg = <<"Multi-party payment">>,
+
+%% Round 1: Generate nonces and aggregate
+{SecN1, PubN1} = ecu_musig2:nonce_gen(bip340, SK1),
+{SecN2, PubN2} = ecu_musig2:nonce_gen(bip340, SK2),
+{ok, AggN} = ecu_musig2:nonce_agg([PubN1, PubN2]),
+
+%% Round 2: Partial signing and verification
+{ok, Psig1} = ecu_musig2:sign_partial(Ctx, SK1, SecN1, AggN, Msg),
+{ok, Psig2} = ecu_musig2:sign_partial(Ctx, SK2, SecN2, AggN, Msg),
+true = ecu_musig2:verify_partial(Ctx, Psig1, PubN1, PK1, AggN, Msg),
+true = ecu_musig2:verify_partial(Ctx, Psig2, PubN2, PK2, AggN, Msg),
+
+%% Aggregate into a standard 64-byte BIP-340 Schnorr signature
+{ok, Sig} = ecu_musig2:aggregate_partial(Ctx, AggN, Msg, [Psig1, Psig2]),
+true = ecu_schnorr:verify(Sig, Msg, AggPK).
+```
+
 ### Diffie-Hellman Key Exchange (X25519, X448, secp256k1)
 
 ```erlang
@@ -166,6 +198,24 @@ Seed = ecu_bip39:mnemonic_to_seed(Mnemonic12, "optional_passphrase"),
 
 %% One-step derivation from mnemonic directly to HD master key
 {ok, MasterKey} = ecu_bip39:mnemonic_to_master_key(secp256k1, Mnemonic12, "passphrase").
+```
+
+### Bech32 & Bech32m Address Encoding (BIP-173 & BIP-350)
+
+```erlang
+%% Encode a Bitcoin SegWit v0 P2WPKH address (20-byte pubkey hash)
+PubKeyHash = crypto:hash(ripemd160, crypto:hash(sha256, PubKey)),
+{ok, SegwitV0Addr} = ecu_bech32:encode_segwit_address(<<"bc">>, 0, PubKeyHash),
+
+%% Encode a Bitcoin Taproot v1 P2TR address (32-byte x-only pubkey, automatically uses Bech32m)
+{ok, TaprootAddr} = ecu_bech32:encode_segwit_address(<<"bc">>, 1, TaprootPubKey),
+
+%% Decode and validate SegWit address with strict checksum variant enforcement
+{ok, {WitnessVersion, Program}} = ecu_bech32:decode_segwit_address(<<"bc">>, TaprootAddr),
+
+%% Generic Bech32/Bech32m encoding with 5-bit conversion
+{ok, Bits5} = ecu_bech32:convert_bits(<<"payload">>, 8, 5, true),
+{ok, Bech32Str} = ecu_bech32:encode(<<"custom">>, Bits5, bech32m).
 ```
 
 Supported Curves & API
@@ -321,6 +371,15 @@ Supported Curves & API
   - `encode/1`, `decode/1`: Raw Base58 with leading-zero preservation.
   - `encode_check/1`, `decode_check/1`: Base58Check with double SHA-256 checksums.
 
+### Bech32 & Bech32m Address Encoding (BIP-173 & BIP-350)
+
+- `ecu_bech32`: Pure-Erlang Bech32 and Bech32m base32 checksummed encoding:
+  - `encode/3`: Encode human-readable part (HRP) and 5-bit payload using `bech32` ($M = 1$) or `bech32m` ($M = 0x2bc830a3$).
+  - `decode/1`, `decode_lenient/1`: Parse and verify Bech32/Bech32m strings with strict casing and length verification.
+  - `convert_bits/4`: Convert between arbitrary bit sizes (e.g. 8-bit to 5-bit) with strict padding error checks.
+  - `encode_segwit_address/3`: Native Bitcoin SegWit address encoder, automatically selecting Bech32 for v0 and Bech32m for v1+ (Taproot) per BIP-350.
+  - `decode_segwit_address/2`: Native Bitcoin SegWit address parser enforcing HRP match, witness version ($0..16$), program length ($2..40$ bytes), and checksum variant rules.
+
 Performance & Benchmarks
 ------------------------
 
@@ -397,6 +456,8 @@ the library incorporates key algorithmic optimizations:
 | **bip39 mnemonic_to_entropy (12w)** | — | **6.2 µs** | — | — | — |
 | **bip39 validate_mnemonic (12w)** | — | **6.2 µs** | — | — | — |
 | **bip39 mnemonic_to_seed (2048 iters)** | — | **558 µs** | — | — | — |
+| **segwit v1 encode (Taproot 32B)** | — | **10.8 µs** | — | 0.42 µs (bech32 NIF) | 25.5× |
+| **segwit v1 decode (Taproot 32B)** | — | **15.3 µs** | — | 0.75 µs (bech32 NIF) | 20.5× |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*

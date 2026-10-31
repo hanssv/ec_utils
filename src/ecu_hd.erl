@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Hierarchical Deterministic (HD) Key Derivation (BIP-32 & SLIP-0010).
+%%% Hierarchical Deterministic (HD) Key Derivation (BIP-32 and SLIP-0010).
 %%%
 %%% Pure Erlang implementation of hierarchical deterministic wallet derivation
 %%% for secp256k1 (BIP-32, BIP-44) and Ed25519 (SLIP-0010, AEX-10).

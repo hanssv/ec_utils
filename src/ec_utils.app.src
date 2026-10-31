@@ -22,7 +22,8 @@
     ecu_base58,
     ecu_hd,
     ecu_bip39_words,
-    ecu_bip39
+    ecu_bip39,
+    ecu_bech32
   ]},
   {licenses, ["MIT"]},
   {links, []}
