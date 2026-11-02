@@ -14,7 +14,9 @@
   bech32_encode/3,
   bech32_decode/1,
   bech32_segwit_encode/3,
-  bech32_segwit_decode/1
+  bech32_segwit_decode/1,
+  secp256k1_hash_to_curve/2,
+  secp256k1_encode_to_curve/2
 ]).
 -export([init/0]).
 
@@ -78,4 +80,10 @@ bech32_segwit_encode(_Hrp, _WitVer, _Program) ->
   erlang:nif_error(not_loaded).
 
 bech32_segwit_decode(_String) ->
+  erlang:nif_error(not_loaded).
+
+secp256k1_hash_to_curve(_Msg, _DST) ->
+  erlang:nif_error(not_loaded).
+
+secp256k1_encode_to_curve(_Msg, _DST) ->
   erlang:nif_error(not_loaded).

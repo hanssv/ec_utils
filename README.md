@@ -4,9 +4,9 @@ ec_utils
 A pure Erlang cryptographic library implementing elliptic curve arithmetic
 (**Ed25519**, **Ed448**, **secp256k1**), digital signatures (ECDSA, EdDSA,
 BIP-340 Schnorr), threshold signatures (FROST RFC 9591), multi-signatures
-(MuSig2 BIP-327), key exchange (X25519, X448), hierarchical deterministic
-wallets (BIP-32, SLIP-0010, AEX-10), mnemonics (BIP-39), and address encodings
-(Base58, Base58Check, Bech32, Bech32m).
+(MuSig2 BIP-327), key exchange (X25519, X448), Hash-to-Curve (RFC 9380),
+hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10), mnemonics (BIP-39),
+and address encodings (Base58, Base58Check, Bech32, Bech32m).
 
 This library has **zero external C or third-party dependencies** in production
 and runs completely self-contained on the BEAM. Reference NIFs in `crates/`
@@ -218,6 +218,25 @@ PubKeyHash = crypto:hash(ripemd160, crypto:hash(sha256, PubKey)),
 {ok, Bech32Str} = ecu_bech32:encode(<<"custom">>, Bits5, bech32m).
 ```
 
+### Hash-to-Curve & Encode-to-Curve (RFC 9380)
+
+Deterministic, indifferentiable hashing and non-uniform encoding of arbitrary binary payloads to curve points across `secp256k1`, `edwards25519`, and `edwards448`:
+
+```erlang
+%% Hash to secp256k1 (Random Oracle, SSWU + 3-isogeny)
+PtRO = ecu_h2c:hash_to_curve(secp256k1_xmd_sha256_sswu_ro, <<"identity-payload">>),
+true = ecu_secp256k1:on_curve(PtRO).
+
+%% Encode to edwards25519 with custom domain separation tag (Elligator 2 + cofactor clearing)
+CustomDST = <<"MY-APP-ED25519-V1">>,
+PtNU = ecu_h2c:encode_to_curve(edwards25519_xmd_sha512_ell2_nu, <<"message">>, CustomDST),
+true = ecu_ed25519:on_curve(PtNU).
+
+%% Hash to edwards448 (SHAKE256 XOF + Elligator 2 + 4-isogeny)
+Pt448 = ecu_h2c:hash_to_curve(edwards448_xof_shake256_ell2_ro, <<"high-security-payload">>),
+true = ecu_ed448:on_curve(Pt448).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -380,6 +399,23 @@ Supported Curves & API
   - `encode_segwit_address/3`: Native Bitcoin SegWit address encoder, automatically selecting Bech32 for v0 and Bech32m for v1+ (Taproot) per BIP-350.
   - `decode_segwit_address/2`: Native Bitcoin SegWit address parser enforcing HRP match, witness version ($0..16$), program length ($2..40$ bytes), and checksum variant rules.
 
+### Hash-to-Curve (RFC 9380)
+
+- `ecu_h2c`: Pure-Erlang indifferentiable random oracle and non-uniform curve mapping (RFC 9380):
+  - `hash_to_curve/2,3`: Indifferentiable hash-to-curve mapping ($Q_0 + Q_1$ with cofactor clearing) targeting:
+    - `secp256k1_xmd_sha256_sswu_ro`: Simplified SWU on 3-isogenous curve with degree-3 rational map.
+    - `edwards25519_xmd_sha512_ell2_ro`: Elligator 2 on Montgomery Curve25519 with birational map and $h_{\text{eff}} = 8$ cofactor clearing.
+    - `edwards448_xof_shake256_ell2_ro`: Elligator 2 on Montgomery Curve448 with degree-4 rational isogeny and $h_{\text{eff}} = 4$ cofactor clearing.
+  - `encode_to_curve/2,3`: Non-uniform encoding ($Q$ with cofactor clearing) for applications not requiring random oracle indifferentiability:
+    - `secp256k1_xmd_sha256_sswu_nu`
+    - `edwards25519_xmd_sha512_ell2_nu`
+    - `edwards448_xof_shake256_ell2_nu`
+  - `expand_message_xmd/4`: Merkle-Damgaard message expansion (SHA-256, SHA-512) with oversize DST hashing.
+  - `expand_message_xof/3`: SHAKE256 extensible-output message expansion.
+  - `hash_to_field/4`: Uniform pseudorandom field element generation with modulo reduction.
+  - `map_to_curve/2`: Direct field-to-curve point mapping.
+  - `clear_cofactor/2`: Curve-specific cofactor clearing ($h_{\text{eff}}$ scalar multiplication).
+
 Performance & Benchmarks
 ------------------------
 
@@ -458,11 +494,17 @@ the library incorporates key algorithmic optimizations:
 | **bip39 mnemonic_to_seed (2048 iters)** | — | **558 µs** | — | — | — |
 | **segwit v1 encode (Taproot 32B)** | — | **10.8 µs** | — | 0.42 µs (bech32 NIF) | 25.5× |
 | **segwit v1 decode (Taproot 32B)** | — | **15.3 µs** | — | 0.75 µs (bech32 NIF) | 20.5× |
+| **secp256k1 hash_to_curve (RO)** | — | **166 µs** | — | 56.2 µs (RustCrypto NIF) | 2.95× |
+| **secp256k1 encode_to_curve (NU)** | — | **63 µs** | — | 31.2 µs (RustCrypto NIF) | 2.02× |
+| **edwards25519 hash_to_curve (RO)** | — | **382 µs** | — | — | — |
+| **edwards25519 encode_to_curve (NU)** | — | **285 µs** | — | — | — |
+| **edwards448 hash_to_curve (RO)** | — | **1.05 ms** | — | — | — |
+| **edwards448 encode_to_curve (NU)** | — | **760 µs** | — | — | — |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
 - *Pure Erlang `secp256k1` base-point scalar multiplication is faster than OpenSSL due to the precomputed 1,024-entry comb table.*
-- *BIP-340 Schnorr and Keccak-256 reference benchmarks use an optional test NIF (`k256` and `sha3`) buildable via `make rustcrypto_reference`.*
+- *BIP-340 Schnorr, Keccak-256, and Hash-to-Curve reference benchmarks use an optional test NIF (`k256`, `sha3`, `hash2curve`) buildable via `make rustcrypto_reference`.*
 - *FROST threshold reference benchmarks use optional RFC 9591 test NIFs (Zcash Foundation `frost-core` crates) buildable via `make frost_reference`.*
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
 - *All reference NIFs can be built together using `make reference_nifs`.*

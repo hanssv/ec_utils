@@ -175,6 +175,54 @@ fn bech32_segwit_decode<'a>(
     Ok((hrp_bin.into(), witver.to_u8(), prog_bin.into()))
 }
 
+#[rustler::nif]
+fn secp256k1_hash_to_curve<'a>(
+    env: Env<'a>,
+    msg: Binary,
+    dst: Binary,
+) -> Result<Binary<'a>, rustler::Error> {
+    use hash2curve::ExpandMsgXmd;
+    use k256::elliptic_curve::sec1::ToSec1Point;
+    use k256::sha2::Sha256;
+    use k256::{AffinePoint, Secp256k1};
+
+    let pt = hash2curve::hash_from_bytes::<Secp256k1, ExpandMsgXmd<Sha256>>(
+        &[msg.as_slice()],
+        &[dst.as_slice()],
+    )
+    .map_err(|_| rustler::Error::BadArg)?;
+
+    let aff = AffinePoint::from(pt);
+    let enc = aff.to_sec1_point(false);
+    let bytes = enc.as_bytes();
+    let mut erl_bin = NewBinary::new(env, bytes.len());
+    erl_bin.as_mut_slice().copy_from_slice(bytes);
+    Ok(erl_bin.into())
+}
+
+#[rustler::nif]
+fn secp256k1_encode_to_curve<'a>(
+    env: Env<'a>,
+    msg: Binary,
+    dst: Binary,
+) -> Result<Binary<'a>, rustler::Error> {
+    use hash2curve::ExpandMsgXmd;
+    use k256::elliptic_curve::sec1::ToSec1Point;
+    use k256::sha2::Sha256;
+    use k256::{AffinePoint, Secp256k1};
+
+    let pt = hash2curve::encode_from_bytes::<Secp256k1, ExpandMsgXmd<Sha256>>(
+        &[msg.as_slice()],
+        &[dst.as_slice()],
+    )
+    .map_err(|_| rustler::Error::BadArg)?;
+
+    let aff = AffinePoint::from(pt);
+    let enc = aff.to_sec1_point(false);
+    let bytes = enc.as_bytes();
+    let mut erl_bin = NewBinary::new(env, bytes.len());
+    erl_bin.as_mut_slice().copy_from_slice(bytes);
+    Ok(erl_bin.into())
+}
+
 rustler::init!("ecu_rustcrypto_nif");
-
-

@@ -63,6 +63,7 @@
   p_dbl/1,
   compress/1,
   decompress/1,
+  to_affine/1,
   is_small_order/1,
   f_add/2,
   f_mul/2,

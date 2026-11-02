@@ -646,6 +646,59 @@ bench_bech32_test() ->
   end,
   ok.
 
+bench_hash_to_curve_test() ->
+  Iters = 50,
+  Iters448 = 20,
+  Msg = <<"Benchmark RFC 9380 Hash to Curve">>,
+
+  {TimeSecpRO, _} = timer:tc(fun() ->
+    [ecu_h2c:hash_to_curve(secp256k1_xmd_sha256_sswu_ro, Msg) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeSecpNU, _} = timer:tc(fun() ->
+    [ecu_h2c:encode_to_curve(secp256k1_xmd_sha256_sswu_nu, Msg) || _ <- lists:seq(1, Iters)]
+  end),
+
+  {TimeEd25519RO, _} = timer:tc(fun() ->
+    [ecu_h2c:hash_to_curve(edwards25519_xmd_sha512_ell2_ro, Msg) || _ <- lists:seq(1, Iters)]
+  end),
+  {TimeEd25519NU, _} = timer:tc(fun() ->
+    [ecu_h2c:encode_to_curve(edwards25519_xmd_sha512_ell2_nu, Msg) || _ <- lists:seq(1, Iters)]
+  end),
+
+  {TimeEd448RO, _} = timer:tc(fun() ->
+    [ecu_h2c:hash_to_curve(edwards448_xof_shake256_ell2_ro, Msg) || _ <- lists:seq(1, Iters448)]
+  end),
+  {TimeEd448NU, _} = timer:tc(fun() ->
+    [ecu_h2c:encode_to_curve(edwards448_xof_shake256_ell2_nu, Msg) || _ <- lists:seq(1, Iters448)]
+  end),
+
+  ?debugFmt("", []),
+  stats("secp256k1 hash_to_curve (RO)", "ecu_h2c       ", Iters, TimeSecpRO),
+  stats("secp256k1 encode_to_curve (NU)", "ecu_h2c       ", Iters, TimeSecpNU),
+  stats("edwards25519 hash_to_curve (RO)", "ecu_h2c       ", Iters, TimeEd25519RO),
+  stats("edwards25519 encode_to_curve (NU)", "ecu_h2c       ", Iters, TimeEd25519NU),
+  stats("edwards448 hash_to_curve (RO)", "ecu_h2c       ", Iters448, TimeEd448RO),
+  stats("edwards448 encode_to_curve (NU)", "ecu_h2c       ", Iters448, TimeEd448NU),
+
+  case ecu_rustcrypto_nif:is_available() of
+    true ->
+      DST = <<"secp256k1_XMD:SHA-256_SSWU_RO_">>,
+      DSTNU = <<"secp256k1_XMD:SHA-256_SSWU_NU_">>,
+      {TimeRustRO, _} = timer:tc(fun() ->
+        [ecu_rustcrypto_nif:secp256k1_hash_to_curve(Msg, DST) || _ <- lists:seq(1, Iters)]
+      end),
+      {TimeRustNU, _} = timer:tc(fun() ->
+        [ecu_rustcrypto_nif:secp256k1_encode_to_curve(Msg, DSTNU) || _ <- lists:seq(1, Iters)]
+      end),
+      stats("secp256k1 hash_to_curve (RO)", "RustCrypto NIF", Iters, TimeRustRO),
+      diff(TimeSecpRO, TimeRustRO),
+      stats("secp256k1 encode_to_curve (NU)", "RustCrypto NIF", Iters, TimeRustNU),
+      diff(TimeSecpNU, TimeRustNU);
+    false ->
+      ok
+  end,
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

@@ -185,6 +185,7 @@ name = "ecu_rustcrypto_nif"
 version = "0.1.0"
 dependencies = [
  "bech32",
+ "hash2curve",
  "k256",
  "rustler",
  "sha3",
@@ -254,6 +255,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash2curve"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1eaf40612d7d854743e7189228a6d528f0f6e8502cf6a0cb831d28a218b7f3f6"
+dependencies = [
+ "digest 0.11.3",
+ "elliptic-curve",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -297,6 +308,7 @@ dependencies = [
  "cpubits",
  "ecdsa",
  "elliptic-curve",
+ "hash2curve",
  "primeorder",
  "sha2",
  "signature",
