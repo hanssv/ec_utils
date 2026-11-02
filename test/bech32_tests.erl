@@ -175,4 +175,30 @@ convert_bits_test() ->
   %% Incomplete padding rejected when Pad = false
   ?assertEqual({error, invalid_padding}, ecu_bech32:convert_bits(<<1, 2, 3>>, 8, 5, false)),
   %% Invalid character outside bit boundary
-  ?assertEqual({error, invalid_character}, ecu_bech32:convert_bits([32], 5, 8, true)).
+  ?assertEqual({error, invalid_character}, ecu_bech32:convert_bits([32], 5, 8, true)),
+  %% Invalid ToBits boundary
+  ?assertEqual({error, invalid_bits}, ecu_bech32:convert_bits(<<1>>, 8, 16, true)).
+
+bech32_unicode_smuggling_test() ->
+  %% Unicode Kelvin sign \x{212A} (folds to 'k') must be rejected with invalid_character
+  AddrWithKelvin = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7\x{212A}v8f3t4",
+  ?assertEqual({error, invalid_character}, ecu_bech32:decode_segwit_address("bc", AddrWithKelvin)),
+  ?assertEqual({error, invalid_character}, ecu_bech32:decode(AddrWithKelvin)),
+  %% Negative codepoints in input list
+  ?assertEqual({error, invalid_character}, apply(ecu_bech32, decode, [[-1, $a, $b]])),
+  ?assertEqual(
+    {error, invalid_hrp},
+    apply(ecu_bech32, decode_segwit_address, [[-1], "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"])
+  ).
+
+bech32_hrp_casing_test() ->
+  Data5 = [0, 1, 2, 3, 4],
+  %% Uppercase HRP produces valid lowercase Bech32 binary with correct lowercase checksum
+  {ok, Encoded} = ecu_bech32:encode(<<"BC">>, Data5, bech32),
+  ?assertMatch(<<"bc1", _/binary>>, Encoded),
+  {ok, {Hrp, DecodedData, Variant}} = ecu_bech32:decode(Encoded),
+  ?assertEqual(<<"bc">>, Hrp),
+  ?assertEqual(list_to_binary(Data5), DecodedData),
+  ?assertEqual(bech32, Variant),
+  %% Mixed-case HRP rejected
+  ?assertEqual({error, mixed_case}, ecu_bech32:encode(<<"Bc">>, Data5, bech32)).

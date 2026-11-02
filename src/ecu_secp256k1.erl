@@ -57,11 +57,13 @@
 -endif.
 
 -spec on_curve(pt_affine()) -> boolean().
-on_curve({X, Y}) when is_integer(X), is_integer(Y) ->
+on_curve({X, Y}) when is_integer(X), is_integer(Y), X >= 0, X < ?P, Y >= 0, Y < ?P ->
   %% y^2 = x^3 + 7
   X3 = ?MUL(?MUL(X, X), X),
   Y2 = ?MUL(Y, Y),
-  Y2 == ?ADD(X3, ?B).
+  Y2 == ?ADD(X3, ?B);
+on_curve(_) ->
+  false.
 
 -spec p() -> pos_integer().
 p() -> ?P.

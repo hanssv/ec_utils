@@ -211,3 +211,14 @@ ecdh_small_order_test() ->
   ?assertError(small_order_point, ecu_ecdh:compute_key(x25519, <<0:256>>, Priv25519)),
   Priv448 = crypto:strong_rand_bytes(56),
   ?assertError(small_order_point, ecu_ecdh:compute_key(x448, <<0:448>>, Priv448)).
+
+ed25519_public_to_x25519_twist_rejection_test() ->
+  %% Identity / small-order point (y = 1) must be rejected
+  EdIdentity = <<1, 0:248>>,
+  ?assertError(badarg, ecu_ecdh:ed25519_public_to_x25519(EdIdentity)),
+  %% Point of order 2 (y = -1 mod p) must be rejected
+  P = (1 bsl 255) - 19,
+  EdOrder2 = <<(P - 1):256/little>>,
+  ?assertError(badarg, ecu_ecdh:ed25519_public_to_x25519(EdOrder2)),
+  %% Non-curve point
+  ?assertError(badarg, ecu_ecdh:ed25519_public_to_x25519(<<0:256>>)).

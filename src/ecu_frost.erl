@@ -162,7 +162,31 @@ sign(Id, SecretShare, GroupPublicKey, NoncePair, Msg, CommitmentList) ->
   Msg :: binary(),
   CommitmentList :: commitment_list()
 ) -> sig_share().
-sign(ed25519, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
+sign(Suite, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
+  Order = suite_order(Suite),
+  case
+    Id > 0 andalso Id < Order andalso
+      is_canonical_scalar(Suite, SecretShare) andalso
+      is_canonical_scalar(Suite, HidingNonce) andalso
+      is_canonical_scalar(Suite, BindingNonce) andalso
+      lists:keymember(Id, 1, CommitmentList)
+  of
+    false ->
+      error(badarg);
+    true ->
+      sign_impl(Suite, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList)
+  end.
+
+-spec sign_impl(
+  Suite :: ciphersuite(),
+  Id :: participant_id(),
+  SecretShare :: scalar(),
+  GroupPublicKey :: compressed_pt(),
+  NoncePair :: nonce_pair(),
+  Msg :: binary(),
+  CommitmentList :: commitment_list()
+) -> sig_share().
+sign_impl(ed25519, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
   SortedList = sort_commitment_list(CommitmentList),
   BindingFactorList = compute_binding_factors(ed25519, GroupPublicKey, SortedList, Msg),
   BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
@@ -174,7 +198,7 @@ sign(ed25519, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg,
   Term1 = ecu_ed25519:s_mul(BindingNonce, BindingFactor),
   Term2 = ecu_ed25519:s_mul(LambdaId, ecu_ed25519:s_mul(SecretShare, Challenge)),
   ecu_ed25519:s_add(HidingNonce, ecu_ed25519:s_add(Term1, Term2));
-sign(ed448, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
+sign_impl(ed448, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
   SortedList = sort_commitment_list(CommitmentList),
   BindingFactorList = compute_binding_factors(ed448, GroupPublicKey, SortedList, Msg),
   BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
@@ -186,7 +210,7 @@ sign(ed448, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, C
   Term1 = ecu_ed448:s_mul(BindingNonce, BindingFactor),
   Term2 = ecu_ed448:s_mul(LambdaId, ecu_ed448:s_mul(SecretShare, Challenge)),
   ecu_ed448:s_add(HidingNonce, ecu_ed448:s_add(Term1, Term2));
-sign(bip340, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
+sign_impl(bip340, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
   SortedList = sort_commitment_list(CommitmentList),
   BindingFactorList = compute_binding_factors(bip340, GroupPublicKey, SortedList, Msg),
   BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
@@ -216,7 +240,7 @@ sign(bip340, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, 
   SignedSecretTerm = (Nu * SecretTerm) rem ?SECP256K1_N,
   Z = (SignedNonceTerm + SignedSecretTerm) rem ?SECP256K1_N,
   <<Z:256>>;
-sign(secp256k1, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
+sign_impl(secp256k1, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, CommitmentList) ->
   SortedList = sort_commitment_list(CommitmentList),
   BindingFactorList = compute_binding_factors(secp256k1, GroupPublicKey, SortedList, Msg),
   BindingFactor = binding_factor_for_participant(BindingFactorList, Id),
@@ -287,16 +311,22 @@ verify_signature_share(
   Msg
 ) ->
   try
-    verify_signature_share_impl(
-      Suite,
-      Id,
-      PublicKeyShare,
-      CommitmentPair,
-      SigShare,
-      CommitmentList,
-      GroupPublicKey,
-      Msg
-    )
+    {HidingComm, BindingComm} = CommitmentPair,
+    case lists:keyfind(Id, 1, CommitmentList) of
+      {Id, HidingComm, BindingComm} ->
+        verify_signature_share_impl(
+          Suite,
+          Id,
+          PublicKeyShare,
+          CommitmentPair,
+          SigShare,
+          CommitmentList,
+          GroupPublicKey,
+          Msg
+        );
+      _ ->
+        false
+    end
   catch
     _:_ -> false
   end.
@@ -1440,7 +1470,7 @@ participants_from_commitment_list(CommitmentList) ->
 sort_commitment_list(CommitmentList) ->
   Sorted = lists:sort(fun({IdA, _, _}, {IdB, _, _}) -> IdA =< IdB end, CommitmentList),
   Ids = [Id || {Id, _, _} <- Sorted],
-  case lists:all(fun(Id) -> is_integer(Id) andalso Id > 0 andalso Id < ?ED25519_N end, Ids) of
+  case lists:all(fun(Id) -> is_integer(Id) andalso Id > 0 andalso Id < ?ED448_N end, Ids) of
     false ->
       error({invalid_participant_ids, Ids});
     true ->

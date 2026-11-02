@@ -27,7 +27,7 @@
 -type ciphersuite() :: bip340 | ed25519.
 -type pubkey() :: binary().
 -type seckey() :: binary() | non_neg_integer().
--type secnonce() :: [binary()] | binary().
+-type secnonce() :: [binary() | non_neg_integer()] | binary().
 -type pubnonce() :: binary() | [binary()].
 -type aggnonce() :: binary() | [binary()].
 -type partial_sig() :: binary().
@@ -195,14 +195,31 @@ nonce_gen(SecKey) when is_binary(SecKey), byte_size(SecKey) =:= 32 ->
 
 -spec nonce_gen(ciphersuite(), seckey()) -> {secnonce(), pubnonce()}.
 nonce_gen(bip340, SecKey) when is_binary(SecKey), byte_size(SecKey) =:= 32 ->
-  Rand = crypto:strong_rand_bytes(32),
-  K1 = rand_scalar_secp_aux(Rand, SecKey, 1),
-  K2 = rand_scalar_secp_aux(Rand, SecKey, 2),
-  R1 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K1)),
-  R2 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K2)),
   <<SK:256>> = SecKey,
-  SignerPub = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK)),
-  {<<K1:256, K2:256, SignerPub/binary>>, <<R1/binary, R2/binary>>};
+  N = ecu_secp256k1:n(),
+  case SK > 0 andalso SK < N of
+    true ->
+      Rand = crypto:strong_rand_bytes(32),
+      K1 = rand_scalar_secp_aux(Rand, SecKey, 1),
+      K2 = rand_scalar_secp_aux(Rand, SecKey, 2),
+      R1 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K1)),
+      R2 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K2)),
+      SignerPub = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK)),
+      {<<K1:256, K2:256, SignerPub/binary>>, <<R1/binary, R2/binary>>};
+    false ->
+      error(badarg)
+  end;
+nonce_gen(ed25519, SecKey) when is_binary(SecKey), byte_size(SecKey) =:= 32 ->
+  Rand1 = crypto:strong_rand_bytes(32),
+  Rand2 = crypto:strong_rand_bytes(32),
+  <<N1:256/little>> = clamp_ed25519(crypto:hash(sha512, <<Rand1/binary, SecKey/binary>>)),
+  <<N2:256/little>> = clamp_ed25519(crypto:hash(sha512, <<Rand2/binary, SecKey/binary>>)),
+  R1 = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(N1)),
+  R2 = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(N2)),
+  <<Seed0:32/bytes, _/binary>> = crypto:hash(sha512, SecKey),
+  Seed = clamp_ed25519(Seed0),
+  MyPK = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Seed)),
+  {[N1, N2, MyPK], [R1, R2]};
 nonce_gen(ed25519, _SecKey) ->
   nonce_gen(ed25519).
 
@@ -217,9 +234,9 @@ nonce_agg(bip340, PubNonces) when is_list(PubNonces), PubNonces =/= [] ->
     Pairs = [
       case PN of
         <<R1:33/binary, R2:33/binary>> ->
-          {decode_secp_pub_or_infinity(R1), decode_secp_pub_or_infinity(R2)};
+          {ecu_secp256k1:decompress(R1), ecu_secp256k1:decompress(R2)};
         [R1, R2] ->
-          {decode_secp_pub_or_infinity(R1), decode_secp_pub_or_infinity(R2)}
+          {ecu_secp256k1:decompress(R1), ecu_secp256k1:decompress(R2)}
       end
      || PN <- PubNonces
     ],
@@ -236,8 +253,16 @@ nonce_agg(ed25519, PubNonces) when is_list(PubNonces), PubNonces =/= [] ->
   try
     Pairs = [
       case PN of
-        <<R1:32/binary, R2:32/binary>> -> [R1, R2];
-        [R1, R2] -> [R1, R2]
+        <<R1:32/binary, R2:32/binary>> ->
+          case ecu_ed25519:is_small_order(R1) orelse ecu_ed25519:is_small_order(R2) of
+            true -> error(small_order_nonce);
+            false -> [R1, R2]
+          end;
+        [R1, R2] ->
+          case ecu_ed25519:is_small_order(R1) orelse ecu_ed25519:is_small_order(R2) of
+            true -> error(small_order_nonce);
+            false -> [R1, R2]
+          end
       end
      || PN <- PubNonces
     ],
@@ -288,6 +313,10 @@ sign_partial(
         <<SKInt:256>> -> SKInt;
         _ when is_integer(SecKey) -> SecKey
       end,
+    case (SK > 0 andalso SK < N) andalso (K1 > 0 andalso K1 < N) andalso (K2 > 0 andalso K2 < N) of
+      true -> ok;
+      false -> error(invalid_scalar)
+    end,
     PubPt = ecu_secp256k1:scalar_mul_base(SK),
     PubKeyComp = ecu_secp256k1:compress(PubPt),
     case StoredPubOpt of
@@ -342,9 +371,14 @@ sign_partial(
     _:Reason -> {error, Reason}
   end;
 sign_partial(
-  Ctx = #key_agg_ctx{ciphersuite = ed25519}, SecKey, [N1s, N2s], [AccN1, AccN2], Msg, Occurrence
+  Ctx = #key_agg_ctx{ciphersuite = ed25519}, SecKey, SecNonce, [AccN1, AccN2], Msg, Occurrence
 ) ->
   try
+    {N1s, N2s, StoredPKOpt} =
+      case SecNonce of
+        [N1, N2, StoredPK] -> {N1, N2, {ok, StoredPK}};
+        [N1, N2] -> {N1, N2, undefined}
+      end,
     SecKeyBin =
       case SecKey of
         <<_:256>> -> SecKey;
@@ -353,29 +387,44 @@ sign_partial(
     <<Seed0:32/bytes, _/binary>> = crypto:hash(sha512, SecKeyBin),
     Seed = clamp_ed25519(Seed0),
     MyPK = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Seed)),
-    {ok, MyExpBin} = key_agg_coeff(Ctx, MyPK, Occurrence),
-    AggPK = Ctx#key_agg_ctx.agg_pk_bin,
+    case StoredPKOpt of
+      {ok, ExpectedPK} when ExpectedPK =/= MyPK ->
+        {error, public_key_mismatch};
+      _ ->
+        {ok, MyExpBin} = key_agg_coeff(Ctx, MyPK, Occurrence),
+        AggPK = Ctx#key_agg_ctx.agg_pk_bin,
 
-    Exp1 = <<1:256/little>>,
-    Exp2 = ecu_ed25519:scalar_reduce(
-      crypto:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
-    ),
+        Exp1 = <<1:256/little>>,
+        Exp2 = ecu_ed25519:scalar_reduce(
+          crypto:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
+        ),
 
-    AggN = ecu_ed25519:compress(
-      ecu_ed25519:p_add(
-        ecu_ed25519:scalar_mul_noclamp(Exp1, AccN1),
-        ecu_ed25519:scalar_mul_noclamp(Exp2, AccN2)
-      )
-    ),
+        AggN = ecu_ed25519:compress(
+          ecu_ed25519:p_add(
+            ecu_ed25519:scalar_mul_noclamp(Exp1, AccN1),
+            ecu_ed25519:scalar_mul_noclamp(Exp2, AccN2)
+          )
+        ),
 
-    Challenge = ecu_ed25519:scalar_reduce(
-      crypto:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
-    ),
-    Ns = ecu_ed25519:s_add(ecu_ed25519:s_mul(Exp1, N1s), ecu_ed25519:s_mul(Exp2, N2s)),
-    S = ecu_ed25519:s_add(
-      ecu_ed25519:s_mul(Challenge, ecu_ed25519:s_mul(<<MyExpBin:256/little>>, Seed)), Ns
-    ),
-    {ok, S}
+        Challenge = ecu_ed25519:scalar_reduce(
+          crypto:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
+        ),
+        N1Bin =
+          case N1s of
+            <<_:256>> -> N1s;
+            _ when is_integer(N1s) -> <<N1s:256/little>>
+          end,
+        N2Bin =
+          case N2s of
+            <<_:256>> -> N2s;
+            _ when is_integer(N2s) -> <<N2s:256/little>>
+          end,
+        Ns = ecu_ed25519:s_add(ecu_ed25519:s_mul(Exp1, N1Bin), ecu_ed25519:s_mul(Exp2, N2Bin)),
+        S = ecu_ed25519:s_add(
+          ecu_ed25519:s_mul(Challenge, ecu_ed25519:s_mul(<<MyExpBin:256/little>>, Seed)), Ns
+        ),
+        {ok, S}
+    end
   catch
     _:Reason -> {error, Reason}
   end;
@@ -459,39 +508,60 @@ verify_partial(
   Ctx = #key_agg_ctx{ciphersuite = ed25519}, PartSig, [R1, R2], SignerPk, [AccN1, AccN2], Msg, Occurrence
 ) ->
   try
-    case key_agg_coeff(Ctx, SignerPk, Occurrence) of
-      {ok, KeyExpBin} ->
-        AggPK = Ctx#key_agg_ctx.agg_pk_bin,
-        Exp1 = <<1:256/little>>,
-        Exp2 = ecu_ed25519:scalar_reduce(
-          crypto:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
-        ),
+    SInt =
+      case PartSig of
+        <<S0:256/little-unsigned-integer>> -> S0;
+        _ when is_integer(PartSig) -> PartSig;
+        _ -> error(badarg)
+      end,
+    L = ecu_ed25519:n(),
+    case SInt >= 0 andalso SInt < L of
+      false ->
+        false;
+      true ->
+        case
+          ecu_ed25519:is_small_order(R1) orelse
+            ecu_ed25519:is_small_order(R2) orelse
+            ecu_ed25519:is_small_order(SignerPk)
+        of
+          true ->
+            false;
+          false ->
+            case key_agg_coeff(Ctx, SignerPk, Occurrence) of
+              {ok, KeyExpBin} ->
+                AggPK = Ctx#key_agg_ctx.agg_pk_bin,
+                Exp1 = <<1:256/little>>,
+                Exp2 = ecu_ed25519:scalar_reduce(
+                  crypto:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
+                ),
 
-        AggN = ecu_ed25519:compress(
-          ecu_ed25519:p_add(
-            ecu_ed25519:scalar_mul_noclamp(Exp1, AccN1),
-            ecu_ed25519:scalar_mul_noclamp(Exp2, AccN2)
-          )
-        ),
+                AggN = ecu_ed25519:compress(
+                  ecu_ed25519:p_add(
+                    ecu_ed25519:scalar_mul_noclamp(Exp1, AccN1),
+                    ecu_ed25519:scalar_mul_noclamp(Exp2, AccN2)
+                  )
+                ),
 
-        Challenge = ecu_ed25519:scalar_reduce(
-          crypto:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
-        ),
-        Reff = ecu_ed25519:p_add(
-          ecu_ed25519:scalar_mul_noclamp(Exp1, R1),
-          ecu_ed25519:scalar_mul_noclamp(Exp2, R2)
-        ),
-        Lhs = ecu_ed25519:scalar_mul_base_noclamp(PartSig),
-        Rhs = ecu_ed25519:p_add(
-          Reff,
-          ecu_ed25519:scalar_mul_noclamp(
-            ecu_ed25519:s_mul(Challenge, <<KeyExpBin:256/little>>),
-            SignerPk
-          )
-        ),
-        ecu_ed25519:compress(Lhs) =:= ecu_ed25519:compress(Rhs);
-      _ ->
-        false
+                Challenge = ecu_ed25519:scalar_reduce(
+                  crypto:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
+                ),
+                Reff = ecu_ed25519:p_add(
+                  ecu_ed25519:scalar_mul_noclamp(Exp1, R1),
+                  ecu_ed25519:scalar_mul_noclamp(Exp2, R2)
+                ),
+                Lhs = ecu_ed25519:scalar_mul_base_noclamp(PartSig),
+                Rhs = ecu_ed25519:p_add(
+                  Reff,
+                  ecu_ed25519:scalar_mul_noclamp(
+                    ecu_ed25519:s_mul(Challenge, <<KeyExpBin:256/little>>),
+                    SignerPk
+                  )
+                ),
+                ecu_ed25519:compress(Lhs) =:= ecu_ed25519:compress(Rhs);
+              _ ->
+                false
+            end
+        end
     end
   catch
     _:_ -> false

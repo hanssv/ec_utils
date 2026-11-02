@@ -109,15 +109,20 @@ hash_to_curve(Suite, Msg) when is_binary(Msg) ->
 -spec hash_to_curve(suite(), binary(), binary()) -> pt_affine().
 hash_to_curve(Suite, Msg, DST) when is_binary(Msg), is_binary(DST) ->
   SuiteAtom = normalize_suite(Suite),
-  case byte_size(DST) of
-    0 ->
+  case is_ro_suite(SuiteAtom) of
+    false ->
       error(badarg);
-    _ ->
-      [U0, U1] = hash_to_field(Msg, DST, 2, SuiteAtom),
-      Q0 = map_to_curve(SuiteAtom, U0),
-      Q1 = map_to_curve(SuiteAtom, U1),
-      R = p_add(SuiteAtom, Q0, Q1),
-      clear_cofactor(SuiteAtom, R)
+    true ->
+      case byte_size(DST) of
+        0 ->
+          error(badarg);
+        _ ->
+          [U0, U1] = hash_to_field(Msg, DST, 2, SuiteAtom),
+          Q0 = map_to_curve(SuiteAtom, U0),
+          Q1 = map_to_curve(SuiteAtom, U1),
+          R = p_add(SuiteAtom, Q0, Q1),
+          clear_cofactor(SuiteAtom, R)
+      end
   end.
 
 %% @doc Encodes an arbitrary message to an elliptic curve point using the
@@ -133,19 +138,26 @@ encode_to_curve(Suite, Msg) when is_binary(Msg) ->
 -spec encode_to_curve(suite(), binary(), binary()) -> pt_affine().
 encode_to_curve(Suite, Msg, DST) when is_binary(Msg), is_binary(DST) ->
   SuiteAtom = normalize_suite(Suite),
-  case byte_size(DST) of
-    0 ->
+  case is_nu_suite(SuiteAtom) of
+    false ->
       error(badarg);
-    _ ->
-      [U0] = hash_to_field(Msg, DST, 1, SuiteAtom),
-      Q = map_to_curve(SuiteAtom, U0),
-      clear_cofactor(SuiteAtom, Q)
+    true ->
+      case byte_size(DST) of
+        0 ->
+          error(badarg);
+        _ ->
+          [U0] = hash_to_field(Msg, DST, 1, SuiteAtom),
+          Q = map_to_curve(SuiteAtom, U0),
+          clear_cofactor(SuiteAtom, Q)
+      end
   end.
 
 %% @doc Hashes an arbitrary message to finite field elements according to
 %% RFC 9380 Section 5.2.
 -spec hash_to_field(binary(), binary(), pos_integer(), suite()) -> [non_neg_integer()].
-hash_to_field(Msg, DST, Count, Suite) when is_binary(Msg), is_binary(DST), Count > 0 ->
+hash_to_field(Msg, DST, Count, Suite) when
+  is_binary(Msg), is_binary(DST), is_integer(Count), Count > 0
+->
   SuiteAtom = normalize_suite(Suite),
   case byte_size(DST) of
     0 ->
@@ -250,17 +262,39 @@ clear_cofactor(Suite, Pt) ->
   SuiteAtom = normalize_suite(Suite),
   case curve_family(SuiteAtom) of
     secp256k1 ->
-      %% secp256k1 has h_eff = 1, clear_cofactor is identity
-      Pt;
+      case ecu_secp256k1:on_curve(Pt) of
+        true -> Pt;
+        false -> error(badarg)
+      end;
     edwards25519 ->
-      %% edwards25519 has h_eff = 8
-      P = ecu_ed25519:scalar_mul_noclamp(8, Pt),
-      ecu_ed25519:to_affine(P);
+      case ecu_ed25519:on_curve(Pt) of
+        true ->
+          P = ecu_ed25519:scalar_mul_noclamp(8, Pt),
+          ecu_ed25519:to_affine(P);
+        false ->
+          error(badarg)
+      end;
     edwards448 ->
-      %% edwards448 has h_eff = 4
-      P = ecu_ed448:scalar_mul_noclamp(4, Pt),
-      ecu_ed448:to_affine(P)
+      case ecu_ed448:on_curve(Pt) of
+        true ->
+          P = ecu_ed448:scalar_mul_noclamp(4, Pt),
+          ecu_ed448:to_affine(P);
+        false ->
+          error(badarg)
+      end
   end.
+
+-spec is_ro_suite(suite()) -> boolean().
+is_ro_suite(secp256k1_xmd_sha256_sswu_ro) -> true;
+is_ro_suite(edwards25519_xmd_sha512_ell2_ro) -> true;
+is_ro_suite(edwards448_xof_shake256_ell2_ro) -> true;
+is_ro_suite(_) -> false.
+
+-spec is_nu_suite(suite()) -> boolean().
+is_nu_suite(secp256k1_xmd_sha256_sswu_nu) -> true;
+is_nu_suite(edwards25519_xmd_sha512_ell2_nu) -> true;
+is_nu_suite(edwards448_xof_shake256_ell2_nu) -> true;
+is_nu_suite(_) -> false.
 
 %%====================================================================
 %% Internal: Suite Normalization and Mapping
@@ -453,9 +487,14 @@ secp256k1_isogeny(Xp, Yp) ->
     ?ISO_K40,
     P
   ),
-  X = f_mul(Xnum, f_inv(Xden, P), P),
-  Y = f_mul(f_mul(Yp, Ynum, P), f_inv(Yden, P), P),
-  {X, Y}.
+  case Xden =:= 0 orelse Yden =:= 0 of
+    true ->
+      {0, 0};
+    false ->
+      X = f_mul(Xnum, f_inv(Xden, P), P),
+      Y = f_mul(f_mul(Yp, Ynum, P), f_inv(Yden, P), P),
+      {X, Y}
+  end.
 
 %%====================================================================
 %% Internal: edwards25519 Elligator 2 + Birational Map (RFC 9380 App G.2.1/2)

@@ -76,3 +76,18 @@ eth_sig_rsv_conversion_test() ->
   ?assertEqual(Addr, ecu_crypto:eth_msg_recover(Msg, ecu_crypto:eth_sig_from_rsv(SigRSV))),
   ?assertError(badarg, ecu_crypto:eth_sig_to_rsv(<<1, 2, 3>>)),
   ?assertError(badarg, ecu_crypto:eth_sig_from_rsv(<<1, 2, 3>>)).
+
+eth_recover_range_and_public_to_short_test() ->
+  MsgHash = <<1:256>>,
+  %% S = 0 must fail recovery
+  SigS0 = <<27:8, 1:256, 0:256>>,
+  ?assertError(invalid_signature, ecu_crypto:eth_recover(MsgHash, SigS0)),
+  %% S >= N must fail recovery
+  SigSOverN = <<27:8, 1:256, (ecu_secp256k1:n()):256>>,
+  ?assertError(invalid_signature, ecu_crypto:eth_recover(MsgHash, SigSOverN)),
+  %% Invalid V must fail gracefully in verify rather than crashing with function_clause
+  InvalidVSig = <<0:8, 1:256, 1:256>>,
+  ?assertEqual(false, ecu_crypto:eth_verify(MsgHash, <<0:160>>, InvalidVSig)),
+  %% Off-curve public key in public_to_short
+  ?assertError(invalid_public_key, ecu_crypto:public_to_short(ethereum, {0, 0})),
+  ?assertError(invalid_public_key, ecu_crypto:public_to_short(bitcoin, <<0:(33 * 8)>>)).

@@ -43,9 +43,29 @@ private_to_short(ethereum, PrivateKey) ->
 
 -spec public_to_short(coin(), pubkey()) -> short_address().
 public_to_short(bitcoin, PubKey = <<_:33/bytes>>) ->
-  crypto:hash(ripemd160, crypto:hash(sha256, PubKey));
+  try ecu_secp256k1:decompress(PubKey) of
+    Pt ->
+      case ecu_secp256k1:on_curve(Pt) of
+        true -> crypto:hash(ripemd160, crypto:hash(sha256, PubKey));
+        false -> error(invalid_public_key)
+      end
+  catch
+    _:_ ->
+      error(invalid_public_key)
+  end;
 public_to_short(bitcoin, PubKey) ->
-  crypto:hash(ripemd160, crypto:hash(sha256, ecu_secp256k1:compress(PubKey)));
+  case PubKey of
+    <<4:8, X:256, Y:256>> ->
+      case ecu_secp256k1:on_curve({X, Y}) of
+        true -> crypto:hash(ripemd160, crypto:hash(sha256, ecu_secp256k1:compress(PubKey)));
+        false -> error(invalid_public_key)
+      end;
+    {X, Y} ->
+      case ecu_secp256k1:on_curve({X, Y}) of
+        true -> crypto:hash(ripemd160, crypto:hash(sha256, ecu_secp256k1:compress(PubKey)));
+        false -> error(invalid_public_key)
+      end
+  end;
 public_to_short(ethereum, PubKey) ->
   case PubKey of
     <<_:33/bytes>> ->
@@ -53,8 +73,13 @@ public_to_short(ethereum, PubKey) ->
     <<4:8, X:256, Y:256>> ->
       public_to_short(ethereum, {X, Y});
     {X, Y} ->
-      <<_:12/bytes, ShortPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
-      ShortPub
+      case ecu_secp256k1:on_curve({X, Y}) of
+        true ->
+          <<_:12/bytes, ShortPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
+          ShortPub;
+        false ->
+          error(invalid_public_key)
+      end
   end.
 
 -spec eth_msg_sign(iodata(), ecu_ecdsa:privkey()) -> eth_signature().
@@ -108,17 +133,26 @@ ec_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
 eth_recover(MsgHash = <<_:32/bytes>>, Sig = <<_:65/bytes>>) ->
   <<E:256>> = MsgHash,
   <<V:8, R:256, S:256>> = Sig,
-  Z = E rem ?N,
-  RInv = ecu_secp256k1:s_inv(R),
-  Rd = ecu_secp256k1:decompress(<<(V - 27 + 2):8, R:256>>),
-  K1 = (?N - ecu_secp256k1:s_mul(RInv, Z)) rem ?N,
-  K2 = ecu_secp256k1:s_mul(RInv, S),
-  case ecu_secp256k1:scalar_mul_dual(K1, {?X, ?Y}, K2, Rd) of
-    {0, 0} ->
-      error(point_at_infinity);
-    {X, Y} ->
-      <<_:12/bytes, RPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
-      RPub
+  case
+    (V == 27 orelse V == 28) andalso
+      (R >= 1 andalso R < ?N) andalso
+      (S >= 1 andalso S < ?N)
+  of
+    true ->
+      Z = E rem ?N,
+      RInv = ecu_secp256k1:s_inv(R),
+      Rd = ecu_secp256k1:decompress(<<(V - 27 + 2):8, R:256>>),
+      K1 = (?N - ecu_secp256k1:s_mul(RInv, Z)) rem ?N,
+      K2 = ecu_secp256k1:s_mul(RInv, S),
+      case ecu_secp256k1:scalar_mul_dual(K1, {?X, ?Y}, K2, Rd) of
+        {0, 0} ->
+          error(point_at_infinity);
+        {X, Y} ->
+          <<_:12/bytes, RPub:20/bytes>> = keccak256(<<X:256, Y:256>>),
+          RPub
+      end;
+    false ->
+      error(invalid_signature)
   end.
 
 -spec eth_msg_verify(iodata(), short_address(), eth_signature()) -> boolean().
@@ -126,8 +160,12 @@ eth_msg_verify(Msg, PublicKey, Sig) ->
   eth_verify(eth_msg_hash(Msg), PublicKey, Sig).
 
 -spec eth_verify(ecu_ecdsa:msg_hash(), short_address(), eth_signature()) -> boolean().
-eth_verify(Msg, PublickKey, Sig) ->
-  PublickKey == eth_recover(Msg, Sig).
+eth_verify(Msg, PublicKey, Sig) ->
+  try eth_recover(Msg, Sig) of
+    Recovered -> PublicKey == Recovered
+  catch
+    _:_ -> false
+  end.
 
 %% Conversion between internal VRS layout (<<V:8, R:256, S:256>>) and
 %% external Ethereum web3/Solidity RSV layout (<<R:256, S:256, V:8>>).

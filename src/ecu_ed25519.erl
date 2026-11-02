@@ -100,13 +100,22 @@ pt_eq(P1, P2) ->
 %%  - main subgroup...
 -spec on_curve(pt()) -> boolean().
 on_curve({X, Y}) when is_integer(X), is_integer(Y) ->
-  X2 = ?MUL(X, X),
-  Y2 = ?MUL(Y, Y),
-  LHS = ?SUB(Y2, X2),
-  RHS = ?ADD(1, ?MUL(?D, ?MUL(X2, Y2))),
-  0 == ?SUB(LHS, RHS);
+  case X >= 0 andalso X < ?P andalso Y >= 0 andalso Y < ?P of
+    true ->
+      X2 = ?MUL(X, X),
+      Y2 = ?MUL(Y, Y),
+      LHS = ?SUB(Y2, X2),
+      RHS = ?ADD(1, ?MUL(?D, ?MUL(X2, Y2))),
+      0 == ?SUB(LHS, RHS);
+    false ->
+      false
+  end;
 on_curve(P) ->
-  on_curve(to_affine(P)).
+  try to_affine(P) of
+    {X, Y} -> on_curve({X, Y})
+  catch
+    _:_ -> false
+  end.
 
 -spec p() -> pos_integer().
 p() -> ?P.

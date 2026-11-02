@@ -1068,6 +1068,21 @@ argon06_empty_pubc_rejection_test() ->
     ecu_frost_dkg:compute_public_verification_share(ed25519, 1, [PubC1, PubC2])
   ).
 
+frost_commitment_consistency_test() ->
+  CommitmentList = [{1, <<0:256>>, <<0:256>>}],
+  MismatchedPair = {<<1:256>>, <<2:256>>},
+  ?assertEqual(
+    false,
+    ecu_frost:verify_signature_share(
+      ed25519, 1, <<0:256>>, MismatchedPair, <<0:256>>, CommitmentList, <<0:256>>, <<"msg">>
+    )
+  ),
+  %% sign with Id not in CommitmentList
+  ?assertError(
+    badarg,
+    ecu_frost:sign(ed25519, 2, <<1:256>>, <<0:256>>, {<<1:256>>, <<1:256>>}, <<"msg">>, CommitmentList)
+  ).
+
 %% ===================================================================
 %% Helpers
 %% ===================================================================

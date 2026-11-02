@@ -350,14 +350,22 @@ compute_private_sign_share(Shares) ->
   Shares :: [{participant_id(), scalar()}]
 ) -> scalar().
 compute_private_sign_share(ed25519, Shares) when length(Shares) >= 1 ->
-  lists:foldl(fun({_, S}, Acc) -> ecu_ed25519:s_add(Acc, S) end, <<0:256>>, Shares);
+  case lists:foldl(fun({_, S}, Acc) -> ecu_ed25519:s_add(Acc, S) end, <<0:256>>, Shares) of
+    <<0:256>> -> error(invalid_share);
+    Sum -> Sum
+  end;
 compute_private_sign_share(ed448, Shares) when length(Shares) >= 1 ->
-  lists:foldl(fun({_, S}, Acc) -> ecu_ed448:s_add(Acc, S) end, <<0:456>>, Shares);
+  case lists:foldl(fun({_, S}, Acc) -> ecu_ed448:s_add(Acc, S) end, <<0:456>>, Shares) of
+    <<0:456>> -> error(invalid_share);
+    Sum -> Sum
+  end;
 compute_private_sign_share(bip340, Shares) when length(Shares) >= 1 ->
   compute_private_sign_share(secp256k1, Shares);
 compute_private_sign_share(secp256k1, Shares) when length(Shares) >= 1 ->
-  Sum = lists:foldl(fun({_, <<S:256>>}, Acc) -> (Acc + S) rem ?SECP256K1_N end, 0, Shares),
-  <<Sum:256/big>>.
+  case lists:foldl(fun({_, <<S:256>>}, Acc) -> (Acc + S) rem ?SECP256K1_N end, 0, Shares) of
+    0 -> error(invalid_share);
+    Sum -> <<Sum:256/big>>
+  end.
 
 -spec compute_private_sign_share(
   Suite :: ciphersuite(),
@@ -418,7 +426,11 @@ compute_public_verification_share(ed25519, Id, [PubC1 | _] = PubCs) when is_inte
         ecu_ed25519:scalar_mul_noclamp(E, ecu_ed25519:decompress(C))
        || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC)
       ],
-      ecu_ed25519:compress(fold_pts_ed25519(Pts));
+      Pt = fold_pts_ed25519(Pts),
+      case ecu_frost:is_valid_point(ed25519, Pt) of
+        true -> ecu_ed25519:compress(Pt);
+        false -> error(invalid_public_key)
+      end;
     false ->
       error({invalid_participant_id, Id})
   end;
@@ -432,7 +444,11 @@ compute_public_verification_share(ed448, Id, [PubC1 | _] = PubCs) when is_intege
         ecu_ed448:scalar_mul_noclamp(E, ecu_ed448:decompress(C))
        || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC)
       ],
-      ecu_ed448:compress(fold_pts_ed448(Pts));
+      Pt = fold_pts_ed448(Pts),
+      case ecu_frost:is_valid_point(ed448, Pt) of
+        true -> ecu_ed448:compress(Pt);
+        false -> error(invalid_public_key)
+      end;
     false ->
       error({invalid_participant_id, Id})
   end;
@@ -456,7 +472,11 @@ compute_public_verification_share(secp256k1, Id, [PubC1 | _] = PubCs) when is_in
         ecu_secp256k1:scalar_mul(E, ecu_secp256k1:decompress(C))
        || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC)
       ],
-      ecu_secp256k1:compress(fold_pts_secp256k1(Pts));
+      Pt = fold_pts_secp256k1(Pts),
+      case ecu_frost:is_valid_point(secp256k1, Pt) of
+        true -> ecu_secp256k1:compress(Pt);
+        false -> error(invalid_public_key)
+      end;
     false ->
       error({invalid_participant_id, Id})
   end.

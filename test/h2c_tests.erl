@@ -249,3 +249,18 @@ subgroup_membership_test() ->
   PtEd448 = ecu_h2c:hash_to_curve(edwards448_xof_shake256_ell2_ro, Msg, DST),
   P448_mul = ecu_ed448:scalar_mul_noclamp(ecu_ed448:n(), PtEd448),
   ?assertEqual({0, 1}, ecu_ed448:to_affine(P448_mul)).
+
+suite_mismatch_test() ->
+  %% encode_to_curve must reject *_ro suites
+  ?assertError(badarg, ecu_h2c:encode_to_curve(secp256k1_xmd_sha256_sswu_ro, <<"msg">>)),
+  %% hash_to_curve must reject *_nu suites
+  ?assertError(badarg, ecu_h2c:hash_to_curve(secp256k1_xmd_sha256_sswu_nu, <<"msg">>)).
+
+clear_cofactor_and_input_validation_test() ->
+  ?assertError(badarg, ecu_h2c:clear_cofactor(secp256k1_xmd_sha256_sswu_ro, {0, 0})),
+  ?assertError(badarg, ecu_h2c:clear_cofactor(edwards25519_xmd_sha512_ell2_ro, {0, 0})),
+  ?assertError(badarg, ecu_h2c:clear_cofactor(edwards448_xof_shake256_ell2_ro, {0, 0})),
+  ?assertError(
+    function_clause,
+    apply(ecu_h2c, hash_to_field, [<<"msg">>, <<"dst">>, 1.5, secp256k1_xmd_sha256_sswu_ro])
+  ).

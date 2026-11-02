@@ -376,12 +376,17 @@ decode(Input) when is_binary(Input) ->
       decode_chars(binary_to_list(Input))
   end;
 decode(Input) when is_list(Input) ->
-  if
-    length(Input) > ?MAX_DECODE_LEN ->
+  try length(Input) of
+    Len when Len > ?MAX_DECODE_LEN ->
       {error, input_too_long};
-    true ->
+    _ ->
       decode_chars(Input)
-  end.
+  catch
+    _:_ ->
+      {error, bad_char}
+  end;
+decode(_) ->
+  {error, bad_char}.
 
 -spec encode_check(binary()) -> binary().
 encode_check(Payload) when is_binary(Payload) ->
@@ -520,7 +525,7 @@ decode_bignum(Chars) ->
 -spec decode_small(string(), non_neg_integer(), tuple()) -> {ok, non_neg_integer()} | {error, bad_char}.
 decode_small([], Acc, _T) ->
   {ok, Acc};
-decode_small([C | Rest], Acc, T) when C >= 0, C =< 255 ->
+decode_small([C | Rest], Acc, T) when is_integer(C), C >= 0, C =< 255 ->
   case element(C + 1, T) of
     Val when is_integer(Val) ->
       decode_small(Rest, Acc * 58 + Val, T);
@@ -534,24 +539,34 @@ decode_small([_ | _], _Acc, _T) ->
 decode_chunks([], Acc, _T) ->
   {ok, Acc};
 decode_chunks([C0, C1, C2, C3, C4, C5, C6, C7, C8, C9 | Rest], Acc, T) when
+  is_integer(C0),
   C0 >= 0,
   C0 =< 255,
+  is_integer(C1),
   C1 >= 0,
   C1 =< 255,
+  is_integer(C2),
   C2 >= 0,
   C2 =< 255,
+  is_integer(C3),
   C3 >= 0,
   C3 =< 255,
+  is_integer(C4),
   C4 >= 0,
   C4 =< 255,
+  is_integer(C5),
   C5 >= 0,
   C5 =< 255,
+  is_integer(C6),
   C6 >= 0,
   C6 =< 255,
+  is_integer(C7),
   C7 >= 0,
   C7 =< 255,
+  is_integer(C8),
   C8 >= 0,
   C8 =< 255,
+  is_integer(C9),
   C9 >= 0,
   C9 =< 255
 ->

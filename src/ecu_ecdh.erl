@@ -158,22 +158,27 @@ clamp(_, _) ->
 %% Matches libsodium `crypto_sign_ed25519_pk_to_curve25519'.
 -spec ed25519_public_to_x25519(<<_:256>>) -> <<_:256>>.
 ed25519_public_to_x25519(EdPK = <<_:32/bytes>>) ->
-  <<YBytes:31/binary, LastByte:8>> = EdPK,
-  YLast = LastByte band 127,
-  <<Y:256/little>> = <<YBytes/binary, YLast:8>>,
-  case Y < ?P25519 of
-    false ->
-      error(badarg);
-    true ->
-      OneMinusY = (?P25519 - Y + 1) rem ?P25519,
-      case OneMinusY of
-        0 ->
+  try ecu_ed25519:decompress(EdPK) of
+    Pt ->
+      case ecu_ed25519:is_small_order(Pt) of
+        true ->
           error(badarg);
-        _ ->
-          OnePlusY = (1 + Y) rem ?P25519,
-          U = (OnePlusY * f_inv(OneMinusY, ?P25519)) rem ?P25519,
-          <<U:256/little>>
+        false ->
+          <<Y0:256/little-unsigned-integer>> = EdPK,
+          Y = Y0 band ((1 bsl 255) - 1),
+          OneMinusY = (?P25519 - Y + 1) rem ?P25519,
+          case OneMinusY of
+            0 ->
+              error(badarg);
+            _ ->
+              OnePlusY = (1 + Y) rem ?P25519,
+              U = (OnePlusY * f_inv(OneMinusY, ?P25519)) rem ?P25519,
+              <<U:256/little>>
+          end
       end
+  catch
+    _:_ ->
+      error(badarg)
   end;
 ed25519_public_to_x25519(_) ->
   error(badarg).

@@ -265,3 +265,20 @@ ed25519_small_order_pubkey_test() ->
   %% Identity point (0, 1) has small order
   IdentityPk = <<1, 0:248>>,
   ?assertEqual({error, invalid_pubkey}, ecu_musig2:key_agg(ed25519, [IdentityPk])).
+
+musig2_validation_test() ->
+  %% Individual signer infinity nonce rejected
+  InfinityNonce = <<0:264, 0:264>>,
+  ?assertMatch({error, _}, ecu_musig2:nonce_agg(bip340, [InfinityNonce])),
+  %% Zero secret key rejected in nonce_gen
+  ?assertError(badarg, ecu_musig2:nonce_gen(bip340, <<0:256>>)),
+  %% Partial sig out-of-range in ed25519 verify_partial
+  #{public := PK1} = ecu_eddsa:sign_seed_keypair(crypto:strong_rand_bytes(32)),
+  #{public := PK2} = ecu_eddsa:sign_seed_keypair(crypto:strong_rand_bytes(32)),
+  {ok, Ctx} = ecu_musig2:key_agg(ed25519, [PK1, PK2]),
+  ?assertEqual(
+    false,
+    ecu_musig2:verify_partial(
+      Ctx, <<(ecu_ed25519:n()):256/little>>, [PK1, PK2], PK1, [PK1, PK2], <<"msg">>
+    )
+  ).

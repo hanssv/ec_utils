@@ -38,7 +38,8 @@
   | invalid_witness_version
   | invalid_witness_program
   | invalid_witness_length
-  | invalid_checksum_variant.
+  | invalid_checksum_variant
+  | invalid_bits.
 
 -export_type([variant/0, error_reason/0]).
 
@@ -58,6 +59,7 @@ encode(Hrp, Data5Bit, Variant) ->
   HrpStr = to_string(Hrp),
   case validate_hrp(HrpStr) of
     ok ->
+      LowerHrp = ascii_lowercase(HrpStr),
       case to_5bit_list(Data5Bit) of
         {ok, DataList} ->
           Const =
@@ -65,10 +67,10 @@ encode(Hrp, Data5Bit, Variant) ->
               bech32 -> ?BECH32_CONST;
               bech32m -> ?BECH32M_CONST
             end,
-          Checksum = create_checksum(HrpStr, DataList, Const),
+          Checksum = create_checksum(LowerHrp, DataList, Const),
           Combined = DataList ++ Checksum,
           Chars = [alphabet_char(D) || D <- Combined],
-          Total = HrpStr ++ "1" ++ Chars,
+          Total = LowerHrp ++ "1" ++ Chars,
           {ok, list_to_binary(Total)};
         error ->
           {error, invalid_character}
@@ -96,19 +98,34 @@ decode_lenient(String) ->
   ToBits :: pos_integer(),
   Pad :: boolean()
 ) -> {ok, binary()} | {error, error_reason()}.
-convert_bits(Data, FromBits, ToBits, Pad) ->
+convert_bits(Data, FromBits, ToBits, Pad) when
+  is_integer(FromBits),
+  FromBits > 0,
+  is_integer(ToBits),
+  ToBits > 0,
+  ToBits =< 8,
+  is_boolean(Pad)
+->
   Input =
     if
       is_binary(Data) -> binary_to_list(Data);
-      is_list(Data) -> Data
+      is_list(Data) -> Data;
+      true -> error
     end,
-  MaxIn = (1 bsl FromBits) - 1,
-  case lists:all(fun(V) -> is_integer(V) andalso V >= 0 andalso V =< MaxIn end, Input) of
-    false ->
+  case Input of
+    error ->
       {error, invalid_character};
-    true ->
-      convert_bits_loop(Input, FromBits, ToBits, Pad, 0, 0, [])
-  end.
+    _ ->
+      MaxIn = (1 bsl FromBits) - 1,
+      case lists:all(fun(V) -> is_integer(V) andalso V >= 0 andalso V =< MaxIn end, Input) of
+        false ->
+          {error, invalid_character};
+        true ->
+          convert_bits_loop(Input, FromBits, ToBits, Pad, 0, 0, [])
+      end
+  end;
+convert_bits(_Data, _FromBits, _ToBits, _Pad) ->
+  {error, invalid_bits}.
 
 %% @doc Encodes a Bitcoin SegWit address for witness version 0..16.
 %% Automatically selects Bech32 for v0 and Bech32m for v1+ (Taproot) per BIP-350.
@@ -148,51 +165,53 @@ encode_segwit_address(_Hrp, _WitnessVersion, _WitnessProgram) ->
 -spec decode_segwit_address(Hrp :: binary() | string(), Address :: binary() | string()) ->
   {ok, {0..16, binary()}} | {error, error_reason()}.
 decode_segwit_address(ExpectedHrp, Address) ->
-  ExpectedHrpBin =
-    if
-      is_binary(ExpectedHrp) -> string:lowercase(ExpectedHrp);
-      is_list(ExpectedHrp) -> string:lowercase(list_to_binary(ExpectedHrp))
-    end,
-  case decode(Address) of
-    {ok, {HrpBin, Data5Bit, Variant}} ->
-      case HrpBin =:= ExpectedHrpBin of
-        false ->
-          {error, invalid_hrp};
-        true ->
-          case Data5Bit of
-            <<>> ->
-              {error, invalid_witness_length};
-            <<WitnessVersion:8, Prog5Bit/binary>> ->
-              case WitnessVersion of
-                V when V >= 0, V =< 16 ->
-                  ExpectedVariant =
-                    case V of
-                      0 -> bech32;
-                      _ -> bech32m
-                    end,
-                  case Variant =:= ExpectedVariant of
-                    false ->
-                      {error, invalid_checksum_variant};
-                    true ->
-                      case convert_bits(Prog5Bit, 5, 8, false) of
-                        {ok, Program} ->
-                          case validate_witness_program(V, byte_size(Program)) of
-                            ok ->
-                              {ok, {V, Program}};
+  ExpectedHrpStr = to_string(ExpectedHrp),
+  case validate_hrp(ExpectedHrpStr) of
+    {error, Reason} ->
+      {error, Reason};
+    ok ->
+      ExpectedHrpBin = list_to_binary(ascii_lowercase(ExpectedHrpStr)),
+      case decode(Address) of
+        {ok, {HrpBin, Data5Bit, Variant}} ->
+          case HrpBin =:= ExpectedHrpBin of
+            false ->
+              {error, invalid_hrp};
+            true ->
+              case Data5Bit of
+                <<>> ->
+                  {error, invalid_witness_length};
+                <<WitnessVersion:8, Prog5Bit/binary>> ->
+                  case WitnessVersion of
+                    V when V >= 0, V =< 16 ->
+                      ExpectedVariant =
+                        case V of
+                          0 -> bech32;
+                          _ -> bech32m
+                        end,
+                      case Variant =:= ExpectedVariant of
+                        false ->
+                          {error, invalid_checksum_variant};
+                        true ->
+                          case convert_bits(Prog5Bit, 5, 8, false) of
+                            {ok, Program} ->
+                              case validate_witness_program(V, byte_size(Program)) of
+                                ok ->
+                                  {ok, {V, Program}};
+                                {error, Reason} ->
+                                  {error, Reason}
+                              end;
                             {error, Reason} ->
                               {error, Reason}
-                          end;
-                        {error, Reason} ->
-                          {error, Reason}
-                      end
-                  end;
-                _ ->
-                  {error, invalid_witness_version}
+                          end
+                      end;
+                    _ ->
+                      {error, invalid_witness_version}
+                  end
               end
-          end
-      end;
-    {error, Reason} ->
-      {error, Reason}
+          end;
+        {error, Reason} ->
+          {error, Reason}
+      end
   end.
 
 %% ===================================================================
@@ -202,44 +221,49 @@ decode_segwit_address(ExpectedHrp, Address) ->
 -spec decode_internal(string(), boolean()) ->
   {ok, {binary(), binary(), variant()}} | {error, error_reason()}.
 decode_internal(Str, StrictLen) ->
-  Len = length(Str),
-  if
-    Len < 8 ->
-      {error, string_too_short};
-    StrictLen andalso Len > 90 ->
-      {error, string_too_long};
+  case lists:all(fun(C) -> is_integer(C) andalso C >= 33 andalso C =< 126 end, Str) of
+    false ->
+      {error, invalid_character};
     true ->
-      case check_casing(Str) of
-        error ->
-          {error, mixed_case};
-        ok ->
-          Lower = string:lowercase(Str),
-          case find_last_separator(Lower) of
+      Len = length(Str),
+      if
+        Len < 8 ->
+          {error, string_too_short};
+        StrictLen andalso Len > 90 ->
+          {error, string_too_long};
+        true ->
+          case check_casing(Str) of
             error ->
-              {error, missing_separator};
-            {ok, HrpPart, DataPart} ->
-              case validate_hrp(HrpPart) of
-                {error, Reason} ->
-                  {error, Reason};
-                ok ->
-                  if
-                    length(DataPart) < 6 ->
-                      {error, invalid_data_length};
-                    true ->
-                      case parse_data_chars(DataPart) of
-                        {error, Reason} ->
-                          {error, Reason};
-                        {ok, AllValues} ->
-                          DataLen = length(AllValues) - 6,
-                          {DataPayload, _ChecksumValues} = lists:split(DataLen, AllValues),
-                          ValuesForPoly = hrp_expand(HrpPart) ++ AllValues,
-                          case polymod(ValuesForPoly) of
-                            ?BECH32_CONST ->
-                              {ok, {list_to_binary(HrpPart), list_to_binary(DataPayload), bech32}};
-                            ?BECH32M_CONST ->
-                              {ok, {list_to_binary(HrpPart), list_to_binary(DataPayload), bech32m}};
-                            _ ->
-                              {error, invalid_checksum}
+              {error, mixed_case};
+            ok ->
+              Lower = ascii_lowercase(Str),
+              case find_last_separator(Lower) of
+                error ->
+                  {error, missing_separator};
+                {ok, HrpPart, DataPart} ->
+                  case validate_hrp(HrpPart) of
+                    {error, Reason} ->
+                      {error, Reason};
+                    ok ->
+                      if
+                        length(DataPart) < 6 ->
+                          {error, invalid_data_length};
+                        true ->
+                          case parse_data_chars(DataPart) of
+                            {error, Reason} ->
+                              {error, Reason};
+                            {ok, AllValues} ->
+                              DataLen = length(AllValues) - 6,
+                              {DataPayload, _ChecksumValues} = lists:split(DataLen, AllValues),
+                              ValuesForPoly = hrp_expand(HrpPart) ++ AllValues,
+                              case polymod(ValuesForPoly) of
+                                ?BECH32_CONST ->
+                                  {ok, {list_to_binary(HrpPart), list_to_binary(DataPayload), bech32}};
+                                ?BECH32M_CONST ->
+                                  {ok, {list_to_binary(HrpPart), list_to_binary(DataPayload), bech32m}};
+                                _ ->
+                                  {error, invalid_checksum}
+                              end
                           end
                       end
                   end
@@ -257,12 +281,27 @@ validate_hrp(Hrp) ->
     Len > 83 ->
       {error, invalid_hrp};
     true ->
-      Valid = lists:all(fun(C) -> C >= 33 andalso C =< 126 end, Hrp),
+      Valid = lists:all(fun(C) -> is_integer(C) andalso C >= 33 andalso C =< 126 end, Hrp),
       case Valid of
-        true -> ok;
-        false -> {error, invalid_hrp}
+        true ->
+          case check_casing(Hrp) of
+            ok -> ok;
+            error -> {error, mixed_case}
+          end;
+        false ->
+          {error, invalid_hrp}
       end
   end.
+
+-spec ascii_lowercase(string()) -> string().
+ascii_lowercase(Str) ->
+  [
+    if
+      C >= $A andalso C =< $Z -> C + 32;
+      true -> C
+    end
+   || C <- Str
+  ].
 
 -spec validate_witness_program(0..16, non_neg_integer()) -> ok | {error, error_reason()}.
 validate_witness_program(0, Len) ->
@@ -463,7 +502,8 @@ char_value(_) -> error.
 
 -spec to_string(binary() | string()) -> string().
 to_string(Bin) when is_binary(Bin) -> binary_to_list(Bin);
-to_string(Str) when is_list(Str) -> Str.
+to_string(Str) when is_list(Str) -> Str;
+to_string(_) -> "".
 
 -spec to_5bit_list(binary() | [0..31]) -> {ok, [0..31]} | error.
 to_5bit_list(Bin) when is_binary(Bin) ->

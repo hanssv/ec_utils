@@ -41,7 +41,10 @@ base58_check_test() ->
   ?assertEqual({error, bad_char}, ecu_base58:decode(<<"0">>)),
   ?assertEqual({error, bad_char}, ecu_base58:decode(<<"O">>)),
   ?assertEqual({error, bad_char}, ecu_base58:decode(<<"I">>)),
-  ?assertEqual({error, bad_char}, ecu_base58:decode(<<"l">>)).
+  ?assertEqual({error, bad_char}, ecu_base58:decode(<<"l">>)),
+  ?assertEqual({error, bad_char}, apply(ecu_base58, decode, [[49.0]])),
+  ImproperList = binary_to_term(<<131, 108, 0, 0, 0, 1, 97, 49, 97, 50>>),
+  ?assertEqual({error, bad_char}, apply(ecu_base58, decode, [ImproperList])).
 
 %% ===================================================================
 %% BIP-32 Official Test Vectors
@@ -413,4 +416,10 @@ invalid_operations_test() ->
   %% Base58 length capping rejects inputs exceeding 4096 bytes
   LongInput = binary:copy(<<"1">>, 4097),
   ?assertEqual({error, input_too_long}, ecu_base58:decode(LongInput)),
-  ?assertEqual({error, input_too_long}, ecu_base58:decode_check(LongInput)).
+  ?assertEqual({error, input_too_long}, ecu_base58:decode_check(LongInput)),
+
+  %% Unsupported curve serialization (e.g. ed25519)
+  ?assertError(
+    {unsupported_curve_serialization, ed25519},
+    apply(ecu_hd, serialize, [private, #{curve => ed25519}])
+  ).

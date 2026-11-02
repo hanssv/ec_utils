@@ -128,3 +128,7 @@ argon04_scalar_mul_dual_large_scalar_test() ->
   ResLarge = ecu_secp256k1:scalar_mul_dual(LargeK1, P1, LargeK2, P2),
   ResExpected = ecu_secp256k1:scalar_mul_dual(LargeK1 rem ?N, P1, LargeK2 rem ?N, P2),
   ?assertEqual(ResExpected, ResLarge).
+
+on_curve_bounds_test() ->
+  ?assertEqual(false, ecu_secp256k1:on_curve({ecu_secp256k1:p() + 1, 0})),
+  ?assertEqual(false, ecu_secp256k1:on_curve({-1, 0})).

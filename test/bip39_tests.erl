@@ -164,6 +164,21 @@ nfkd_unicode_test() ->
   ?assertEqual(SeedJ1, SeedJ2),
   ?assertNotEqual(SeedJ1, ecu_bip39:mnemonic_to_seed(<<>>)).
 
+bip39_whitespace_normalization_test() ->
+  CanonStr =
+    <<"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about">>,
+  SpacedStr =
+    <<"abandon  abandon \tabandon\rabandon abandon abandon abandon abandon abandon abandon abandon about\n">>,
+  Seed1 = ecu_bip39:mnemonic_to_seed(CanonStr),
+  Seed2 = ecu_bip39:mnemonic_to_seed(SpacedStr),
+  ?assertEqual(Seed1, Seed2),
+  %% Validate mnemonic passes on whitespace-padded string
+  ?assertEqual(ok, ecu_bip39:validate_mnemonic(SpacedStr)),
+  %% Deriving master key from spaced string matches canonical
+  {ok, Key1} = ecu_bip39:mnemonic_to_master_key(secp256k1, CanonStr),
+  {ok, Key2} = ecu_bip39:mnemonic_to_master_key(secp256k1, SpacedStr),
+  ?assertEqual(Key1, Key2).
+
 custom_wordlist_test() ->
   %% Create a dummy 2048-element wordlist
   CustomList = [list_to_binary("word_" ++ integer_to_list(I)) || I <- lists:seq(0, 2047)],

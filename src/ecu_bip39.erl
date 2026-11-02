@@ -155,16 +155,7 @@ mnemonic_to_seed(Mnemonic) ->
 %% Both the mnemonic sentence and passphrase are normalized using UTF-8 NFKD per BIP-39.
 -spec mnemonic_to_seed(unicode:chardata() | [unicode:chardata()], unicode:chardata()) -> <<_:512>>.
 mnemonic_to_seed(Mnemonic, Passphrase) ->
-  MnemonicBin =
-    case is_binary(Mnemonic) of
-      true ->
-        to_nfkd_binary(Mnemonic);
-      false ->
-        case is_list(Mnemonic) andalso io_lib:printable_unicode_list(Mnemonic) of
-          true -> to_nfkd_binary(Mnemonic);
-          false -> to_nfkd_binary(normalize_mnemonic_string(Mnemonic))
-        end
-    end,
+  MnemonicBin = normalize_mnemonic_string(Mnemonic),
   NFKDPassphrase = to_nfkd_binary(Passphrase),
   Salt = <<"mnemonic", NFKDPassphrase/binary>>,
   crypto:pbkdf2_hmac(sha512, MnemonicBin, Salt, 2048, 64).
@@ -227,39 +218,21 @@ is_valid_word_count(_) -> false.
 
 -spec tokenize_words(unicode:chardata() | [unicode:chardata()]) -> [binary()].
 tokenize_words(Bin) when is_binary(Bin) ->
-  case unicode:characters_to_binary(Bin) of
-    NormBin when is_binary(NormBin) ->
-      string:lexemes(NormBin, [$\s, $\t, $\r, $\n]);
-    _ ->
-      error({bad_unicode, Bin})
-  end;
+  NormBin = to_nfkd_binary(Bin),
+  string:lexemes(NormBin, [$\s, $\t, $\r, $\n]);
 tokenize_words(List) when is_list(List) ->
   case io_lib:printable_unicode_list(List) of
     true ->
-      case unicode:characters_to_binary(List) of
-        Bin when is_binary(Bin) -> string:lexemes(Bin, [$\s, $\t, $\r, $\n]);
-        _ -> error({bad_unicode, List})
-      end;
+      NormBin = to_nfkd_binary(List),
+      string:lexemes(NormBin, [$\s, $\t, $\r, $\n]);
     false ->
-      lists:map(
-        fun(Item) ->
-          case Item of
-            W when is_binary(W) ->
-              case unicode:characters_to_binary(W) of
-                NormW when is_binary(NormW) -> NormW;
-                _ -> error({bad_unicode, W})
-              end;
-            W when is_list(W) ->
-              case unicode:characters_to_binary(W) of
-                NormW when is_binary(NormW) -> NormW;
-                _ -> error({bad_unicode, W})
-              end;
-            Other ->
-              error({bad_token, Other})
-          end
-        end,
-        List
-      )
+      [
+        case Item of
+          C when is_integer(C) -> to_nfkd_binary([C]);
+          Other -> to_nfkd_binary(Other)
+        end
+       || Item <- List
+      ]
   end.
 
 -spec to_nfkd_binary(unicode:chardata()) -> binary().
@@ -367,11 +340,13 @@ lookup_indices([], _LookupFun) ->
   {ok, []};
 lookup_indices([W | Rest], LookupFun) ->
   case LookupFun(W) of
-    Idx when is_integer(Idx) ->
+    Idx when is_integer(Idx), Idx >= 0, Idx =< 2047 ->
       case lookup_indices(Rest, LookupFun) of
         {ok, Tail} -> {ok, [Idx | Tail]};
         {error, _} = Err -> Err
       end;
     undefined ->
-      {error, {unknown_word, W}}
+      {error, {unknown_word, W}};
+    _ ->
+      {error, bad_wordlist}
   end.

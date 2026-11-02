@@ -528,7 +528,13 @@ serialize(public, #{curve := secp256k1} = Key) ->
   Child = maps:get(child_num, Key),
   CC = maps:get(chain_code, Key),
   KeyBytes = ensure_compressed_secp256k1_pub(Key),
-  <<Vsn:4/binary, Depth:8, FP:4/binary, Child:32/unsigned-big, CC:32/binary, KeyBytes:33/binary>>.
+  <<Vsn:4/binary, Depth:8, FP:4/binary, Child:32/unsigned-big, CC:32/binary, KeyBytes:33/binary>>;
+serialize(_Type, #{curve := ed25519}) ->
+  error({unsupported_curve_serialization, ed25519});
+serialize(private, #{curve := secp256k1, priv_key := undefined}) ->
+  error(missing_private_key);
+serialize(_Type, _Key) ->
+  error(badarg).
 
 -spec deserialize(binary()) -> {ok, extended_key()} | {error, term()}.
 deserialize(

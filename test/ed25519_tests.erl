@@ -228,4 +228,8 @@ argon04_scalar_window_truncation_test() ->
   ResExpected = ecu_ed25519:scalar_mul_noclamp(LargeK rem ?N, Pt),
   ?assert(ecu_ed25519:pt_eq(ResLarge, ResExpected)).
 
+on_curve_bounds_test() ->
+  ?assertEqual(false, ecu_ed25519:on_curve({ecu_ed25519:p() + 1, 0})),
+  ?assertEqual(false, ecu_ed25519:on_curve({-1, 0})).
+
 id(X) -> X.
