@@ -140,7 +140,21 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 10. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
+## 10. Post-Quantum Cryptography: ML-KEM (FIPS 203) & Hybrid Key Exchange `[Completed]`
+
+- **Standard**: [NIST FIPS 203](https://doi.org/10.6028/NIST.FIPS.203) (Module-Lattice-Based Key-Encapsulation Mechanism Standard).
+- **Goal**: Provide quantum-resistant key encapsulation and hybrid key exchange on the BEAM with zero native dependencies.
+- **Features `[Completed]`**:
+  - Full implementation of all three NIST security parameter sets: `ml_kem_512` (Category 1), `ml_kem_768` (Category 3), and `ml_kem_1024` (Category 5).
+  - In-place Number Theoretic Transform (NTT), inverse NTT, and Barrett-reduced modular arithmetic modulo $q = 3329$.
+  - Centered Binomial Distribution sampling ($\eta_1, \eta_2 \in \{2, 3\}$) and matrix sampling from SHAKE128/SHAKE256 sponge primitives.
+  - Fujisaki-Okamoto transform with implicit rejection: corrupted or tampered ciphertexts return a pseudorandom key $J(z \parallel c)$ preventing chosen-ciphertext timing leaks.
+  - Hybrid post-quantum key agreement (`x25519_mlkem768` in `ecu_ecdh`) combining classical X25519 ECDH and ML-KEM-768 into a 256-bit dual-secure shared secret.
+  - 100% verified against official NIST ACVP intermediate test vectors and differentially tested against OTP 29 `crypto`.
+
+---
+
+## 11. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
 
 - **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Ethereum / Filecoin / Zcash zk-SNARK primitives.
 - **Goal**: Support pairing-based cryptography, short aggregate signatures, and zero-knowledge proof verification.
@@ -152,7 +166,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 11. Algorithmic Performance Optimizations (Deferred)
+## 12. Algorithmic Performance Optimizations (Deferred)
 
 - **GLV Endomorphism Decomposition (secp256k1)**: Decomposing 256-bit scalars into 128-bit halves ($k \cdot P = k_1 \cdot P + k_2 \cdot \phi(P)$) to halve doubling chains.
 - **wNAF Variable Scalar Multiplication**: Windowed Non-Adjacent Form ($w=4, 5$) to reduce point additions by 33–50%.
@@ -160,7 +174,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 12. Packaging & Release Readiness
+## 13. Packaging & Release Readiness
 
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.

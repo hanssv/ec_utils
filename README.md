@@ -4,9 +4,10 @@ ec_utils
 A pure Erlang cryptographic library implementing elliptic curve arithmetic
 (**Ed25519**, **Ed448**, **secp256k1**), digital signatures (ECDSA, EdDSA,
 BIP-340 Schnorr), threshold signatures (FROST RFC 9591), multi-signatures
-(MuSig2 BIP-327), key exchange (X25519, X448), Hash-to-Curve (RFC 9380),
-hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10), mnemonics (BIP-39),
-and address encodings (Base58, Base58Check, Bech32, Bech32m).
+(MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
+(ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
+Hash-to-Curve (RFC 9380), hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
+mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
 
 This library has **zero external C or third-party dependencies** in production
 and runs completely self-contained on the BEAM. Reference NIFs in `crates/`
@@ -237,6 +238,27 @@ Pt448 = ecu_h2c:hash_to_curve(edwards448_xof_shake256_ell2_ro, <<"high-security-
 true = ecu_ed448:on_curve(Pt448).
 ```
 
+### Quantum-Resistant Key Encapsulation (ML-KEM / FIPS 203) & Hybrid Key Exchange
+
+Pure-Erlang implementation of the NIST Post-Quantum Cryptography Standard FIPS 203 (ML-KEM-512, ML-KEM-768, ML-KEM-1024), plus hybrid classical/post-quantum key exchange combining X25519 with ML-KEM-768:
+
+```erlang
+%% ML-KEM-768 keypair generation, encapsulation, and decapsulation
+{PublicKey, SecretKey} = ecu_ml_kem:keypair(ml_kem_768),
+{SharedSecret, Ciphertext} = ecu_ml_kem:encaps(PublicKey),
+SharedSecret = ecu_ml_kem:decaps(SecretKey, Ciphertext).
+
+%% Deterministic derivation from NIST test vector seeds (d, z) and message seed m
+{PK, SK} = ecu_ml_kem:keypair_from_seed(ml_kem_512, SeedD, SeedZ),
+{SS, CT} = ecu_ml_kem:encaps(PK, SeedM),
+SS = ecu_ml_kem:decaps(SK, CT).
+
+%% Hybrid X25519 + ML-KEM-768 post-quantum key exchange (dual security)
+{HybridPub, HybridPriv} = ecu_ecdh:hybrid_keypair(x25519_mlkem768),
+{SharedKey, HybridCT} = ecu_ecdh:hybrid_encaps(HybridPub),
+SharedKey = ecu_ecdh:hybrid_decaps(HybridPriv, HybridCT).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -416,6 +438,19 @@ Supported Curves & API
   - `map_to_curve/2`: Direct field-to-curve point mapping.
   - `clear_cofactor/2`: Curve-specific cofactor clearing ($h_{\text{eff}}$ scalar multiplication).
 
+### ML-KEM (FIPS 203) & Hybrid Post-Quantum Key Exchange
+
+- `ecu_ml_kem`: Pure-Erlang implementation of the NIST Module-Lattice-Based Key-Encapsulation Mechanism Standard (FIPS 203):
+  - `keypair/1`: Generate fresh public/secret keypair for `ml_kem_512`, `ml_kem_768`, or `ml_kem_1024`.
+  - `keypair_from_seed/3`: Deterministically derive keypair from seeds `d` and `z` ($32$ bytes each) per FIPS 203 Algorithm 19.
+  - `encaps/1,2`: Encapsulate a shared secret against a public key (using strong random seed or explicit $32$-byte message seed `m`).
+  - `decaps/2`: Decapsulate ciphertext with secret key. Features implicit rejection: invalid or tampered ciphertexts return a pseudorandom key $J(z \ || \ c)$ rather than failing.
+  - `parameter_set/1`: Determine parameter set from public key length ($800$, $1184$, or $1568$ bytes).
+- `ecu_ecdh` (Hybrid Extension):
+  - `hybrid_keypair(x25519_mlkem768)`: Generate composite public key ($32 + 1184 = 1216$ bytes) and private key ($32 + 2400 = 2432$ bytes).
+  - `hybrid_encaps/1`: Produce combined dual-layer shared secret and hybrid ciphertext ($32 + 1088 = 1120$ bytes).
+  - `hybrid_decaps/2`: Decapsulate and combine X25519 ECDH and ML-KEM-768 shared secrets via SHA3-256.
+
 Performance & Benchmarks
 ------------------------
 
@@ -500,6 +535,15 @@ the library incorporates key algorithmic optimizations:
 | **edwards25519 encode_to_curve (NU)** | — | **285 µs** | — | — | — |
 | **edwards448 hash_to_curve (RO)** | — | **1.05 ms** | — | — | — |
 | **edwards448 encode_to_curve (NU)** | — | **760 µs** | — | — | — |
+| **ml_kem_512 keypair** | — | **1.11 ms** | — | — | — |
+| **ml_kem_512 encaps** | — | **1.30 ms** | — | — | — |
+| **ml_kem_512 decaps** | — | **1.91 ms** | — | — | — |
+| **ml_kem_768 keypair** | — | **1.87 ms** | — | 42.1 µs (crypto / OpenSSL) | 44.4× |
+| **ml_kem_768 encaps** | — | **1.95 ms** | — | 36.8 µs (crypto / OpenSSL) | 53.0× |
+| **ml_kem_768 decaps** | — | **2.76 ms** | — | 108 µs (crypto / OpenSSL) | 25.5× |
+| **x25519_mlkem768 hybrid keypair** | — | **2.45 ms** | — | — | — |
+| **x25519_mlkem768 hybrid encaps** | — | **3.20 ms** | — | — | — |
+| **x25519_mlkem768 hybrid decaps** | — | **3.28 ms** | — | — | — |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*

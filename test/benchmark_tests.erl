@@ -699,6 +699,86 @@ bench_hash_to_curve_test() ->
   end,
   ok.
 
+bench_ml_kem_test() ->
+  Iters = 20,
+  {TimeKeygen512, _} = timer:tc(fun() ->
+    [ecu_ml_kem:keypair(ml_kem_512) || _ <- lists:seq(1, Iters)]
+  end),
+  {PK512, SK512} = ecu_ml_kem:keypair(ml_kem_512),
+  {TimeEncaps512, _} = timer:tc(fun() ->
+    [ecu_ml_kem:encaps(PK512) || _ <- lists:seq(1, Iters)]
+  end),
+  {_, CT512} = ecu_ml_kem:encaps(PK512),
+  {TimeDecaps512, _} = timer:tc(fun() ->
+    [ecu_ml_kem:decaps(SK512, CT512) || _ <- lists:seq(1, Iters)]
+  end),
+
+  {TimeKeygen768, _} = timer:tc(fun() ->
+    [ecu_ml_kem:keypair(ml_kem_768) || _ <- lists:seq(1, Iters)]
+  end),
+  {PK768, SK768} = ecu_ml_kem:keypair(ml_kem_768),
+  {TimeEncaps768, _} = timer:tc(fun() ->
+    [ecu_ml_kem:encaps(PK768) || _ <- lists:seq(1, Iters)]
+  end),
+  {_, CT768} = ecu_ml_kem:encaps(PK768),
+  {TimeDecaps768, _} = timer:tc(fun() ->
+    [ecu_ml_kem:decaps(SK768, CT768) || _ <- lists:seq(1, Iters)]
+  end),
+
+  ?debugFmt("", []),
+  stats("ML-KEM-512 keypair", "ecu_ml_kem   ", Iters, TimeKeygen512),
+  stats("ML-KEM-512 encaps ", "ecu_ml_kem   ", Iters, TimeEncaps512),
+  stats("ML-KEM-512 decaps ", "ecu_ml_kem   ", Iters, TimeDecaps512),
+  stats("ML-KEM-768 keypair", "ecu_ml_kem   ", Iters, TimeKeygen768),
+  stats("ML-KEM-768 encaps ", "ecu_ml_kem   ", Iters, TimeEncaps768),
+  stats("ML-KEM-768 decaps ", "ecu_ml_kem   ", Iters, TimeDecaps768),
+
+  try
+    crypto:generate_key(mlkem768, []),
+    ItersRef = 100,
+    {TimeOtpKeygen, _} = timer:tc(fun() ->
+      [crypto:generate_key(mlkem768, []) || _ <- lists:seq(1, ItersRef)]
+    end),
+    case crypto:generate_key(mlkem768, []) of
+      {OtpPK, OtpSK} when is_binary(OtpPK), is_binary(OtpSK) ->
+        {TimeOtpEncaps, _} = timer:tc(fun() ->
+          [crypto:encapsulate_key(mlkem768, OtpPK) || _ <- lists:seq(1, ItersRef)]
+        end),
+        {_, OtpCT} = crypto:encapsulate_key(mlkem768, OtpPK),
+        {TimeOtpDecaps, _} = timer:tc(fun() ->
+          [crypto:decapsulate_key(mlkem768, OtpSK, OtpCT) || _ <- lists:seq(1, ItersRef)]
+        end),
+        stats("ML-KEM-768 keypair", "crypto (OpenSSL)", ItersRef, TimeOtpKeygen),
+        diff(TimeKeygen768 / Iters, TimeOtpKeygen / ItersRef),
+        stats("ML-KEM-768 encaps ", "crypto (OpenSSL)", ItersRef, TimeOtpEncaps),
+        diff(TimeEncaps768 / Iters, TimeOtpEncaps / ItersRef),
+        stats("ML-KEM-768 decaps ", "crypto (OpenSSL)", ItersRef, TimeOtpDecaps),
+        diff(TimeDecaps768 / Iters, TimeOtpDecaps / ItersRef)
+    end
+  catch
+    _:_ -> ok
+  end,
+  ok.
+
+bench_hybrid_ecdh_test() ->
+  Iters = 20,
+  {TimeHPK, _} = timer:tc(fun() ->
+    [ecu_ecdh:hybrid_keypair(x25519_mlkem768) || _ <- lists:seq(1, Iters)]
+  end),
+  {HPK, HSK} = ecu_ecdh:hybrid_keypair(x25519_mlkem768),
+  {TimeHEncaps, _} = timer:tc(fun() ->
+    [ecu_ecdh:hybrid_encaps(HPK) || _ <- lists:seq(1, Iters)]
+  end),
+  {_, HCT} = ecu_ecdh:hybrid_encaps(HPK),
+  {TimeHDecaps, _} = timer:tc(fun() ->
+    [ecu_ecdh:hybrid_decaps(HSK, HCT) || _ <- lists:seq(1, Iters)]
+  end),
+  ?debugFmt("", []),
+  stats("X25519+ML-KEM-768 keypair", "ecu_ecdh     ", Iters, TimeHPK),
+  stats("X25519+ML-KEM-768 encaps ", "ecu_ecdh     ", Iters, TimeHEncaps),
+  stats("X25519+ML-KEM-768 decaps ", "ecu_ecdh     ", Iters, TimeHDecaps),
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

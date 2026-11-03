@@ -14,6 +14,9 @@
   keypair/1,
   keypair_from_seed/2,
   compute_key/3,
+  hybrid_keypair/1,
+  hybrid_encaps/1,
+  hybrid_decaps/2,
   x25519/2,
   x448/2,
   clamp/2,
@@ -36,7 +39,9 @@
 -type pubkey() ::
   <<_:256>> | <<_:448>> | <<_:520>> | ecu_secp256k1:pt_compressed() | ecu_secp256k1:pt_affine().
 
--export_type([curve/0, privkey/0, pubkey/0]).
+-type hybrid_scheme() :: x25519_mlkem768.
+
+-export_type([curve/0, hybrid_scheme/0, privkey/0, pubkey/0]).
 
 %% @doc Generates a fresh keypair {PublicKey, PrivateKey} for the given curve.
 -spec keypair
@@ -117,6 +122,34 @@ compute_key(secp256k1, PeerPub, <<PrivInt:256>>) when PrivInt >= 1, PrivInt < ?N
     {SX, _SY} -> <<SX:256>>
   end;
 compute_key(_, _, _) ->
+  error(badarg).
+
+%% @doc Generates a hybrid post-quantum keypair combining X25519 with ML-KEM-768.
+-spec hybrid_keypair(x25519_mlkem768) -> {<<_:9728>>, <<_:19456>>}.
+hybrid_keypair(x25519_mlkem768) ->
+  {XPub, XPriv} = keypair(x25519),
+  {KemPub, KemPriv} = ecu_ml_kem:keypair(ml_kem_768),
+  {<<XPub/binary, KemPub/binary>>, <<XPriv/binary, KemPriv/binary>>}.
+
+%% @doc Encapsulates a shared secret using a hybrid post-quantum public key.
+-spec hybrid_encaps(<<_:9728>>) -> {<<_:256>>, <<_:8960>>}.
+hybrid_encaps(<<XPub:32/binary, KemPub:1184/binary>>) ->
+  {EphPub, EphPriv} = keypair(x25519),
+  {SS_kem, CT_kem} = ecu_ml_kem:encaps(KemPub),
+  SS_ecdh = compute_key(x25519, XPub, EphPriv),
+  SharedSecret = crypto:hash(sha3_256, <<SS_kem/binary, SS_ecdh/binary>>),
+  Ciphertext = <<EphPub/binary, CT_kem/binary>>,
+  {SharedSecret, Ciphertext};
+hybrid_encaps(_) ->
+  error(badarg).
+
+%% @doc Decapsulates a hybrid ciphertext using a hybrid private key.
+-spec hybrid_decaps(<<_:19456>>, <<_:8960>>) -> <<_:256>>.
+hybrid_decaps(<<XPriv:32/binary, KemPriv:2400/binary>>, <<EphPub:32/binary, CT_kem:1088/binary>>) ->
+  SS_ecdh = compute_key(x25519, EphPub, XPriv),
+  SS_kem = ecu_ml_kem:decaps(KemPriv, CT_kem),
+  crypto:hash(sha3_256, <<SS_kem/binary, SS_ecdh/binary>>);
+hybrid_decaps(_, _) ->
   error(badarg).
 
 %% @doc RFC 7748 Section 5: The X25519 function.
