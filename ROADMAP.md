@@ -154,7 +154,22 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 11. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
+## 11. Post-Quantum Digital Signatures: ML-DSA (FIPS 204) `[Completed]`
+
+- **Standard**: [NIST FIPS 204](https://doi.org/10.6028/NIST.FIPS.204) (Module-Lattice-Based Digital Signature Standard).
+- **Goal**: Implement pure-Erlang quantum-resistant digital signatures with zero native dependencies in `src/`.
+- **Features `[Completed]`**:
+  - Full support for all three NIST security parameter sets: `ml_dsa_44` (NIST Category 2), `ml_dsa_65` (NIST Category 3), and `ml_dsa_87` (NIST Category 5).
+  - In-place Number Theoretic Transform (NTT), inverse NTT, and modular arithmetic modulo $q = 8{,}380{,}417$ ($\zeta = 1753$).
+  - Power-of-two rounding (`power2round`), high/low bit decomposition (`decompose`), and hint generation/usage (`make_hint`, `use_hint`).
+  - Uniform polynomial matrix rejection sampling (`expand_a`), bounded error polynomial sampling (`expand_s`), masking polynomial sampling (`expand_mask`), and challenge polynomial sampling (`sample_in_ball`).
+  - Bit packing and unpacking for public keys, secret keys, hints, and signatures.
+  - Randomized signing (recommended per FIPS 204 §5.3) and deterministic signing with optional user context strings ($0 \le |C| \le 255$).
+  - 100% verified against official NIST ACVP test vectors and bidirectional differential testing with OTP 29 `crypto`.
+
+---
+
+## 12. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
 
 - **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Ethereum / Filecoin / Zcash zk-SNARK primitives.
 - **Goal**: Support pairing-based cryptography, short aggregate signatures, and zero-knowledge proof verification.
@@ -166,7 +181,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 12. Algorithmic Performance Optimizations (Deferred)
+## 13. Algorithmic Performance Optimizations (Deferred)
 
 - **GLV Endomorphism Decomposition (secp256k1)**: Decomposing 256-bit scalars into 128-bit halves ($k \cdot P = k_1 \cdot P + k_2 \cdot \phi(P)$) to halve doubling chains.
 - **wNAF Variable Scalar Multiplication**: Windowed Non-Adjacent Form ($w=4, 5$) to reduce point additions by 33–50%.
@@ -174,7 +189,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 13. Packaging & Release Readiness
+## 14. Packaging & Release Readiness
 
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.

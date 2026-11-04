@@ -3,7 +3,7 @@ ec_utils
 
 A pure Erlang cryptographic library implementing elliptic curve arithmetic
 (**Ed25519**, **Ed448**, **secp256k1**), digital signatures (ECDSA, EdDSA,
-BIP-340 Schnorr), threshold signatures (FROST RFC 9591), multi-signatures
+BIP-340 Schnorr, **ML-DSA / FIPS 204**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
 Hash-to-Curve (RFC 9380), hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
@@ -259,6 +259,26 @@ SS = ecu_ml_kem:decaps(SK, CT).
 SharedKey = ecu_ecdh:hybrid_decaps(HybridPriv, HybridCT).
 ```
 
+### Quantum-Resistant Digital Signatures (ML-DSA / FIPS 204)
+
+Pure-Erlang implementation of the NIST Module-Lattice-Based Digital Signature Standard FIPS 204 (ML-DSA-44, ML-DSA-65, ML-DSA-87):
+
+```erlang
+%% Keypair generation, signing, and verification
+#{public := PublicKey, secret := SecretKey} = ecu_ml_dsa:keypair(ml_dsa_65),
+Msg = <<"Quantum-resistant signed payload">>,
+Signature = ecu_ml_dsa:sign(Msg, SecretKey),
+true = ecu_ml_dsa:verify(Msg, Signature, PublicKey).
+
+%% Deterministic signing with optional context string (0 to 255 bytes)
+Context = <<"custom-context">>,
+DetSig = ecu_ml_dsa:sign_deterministic(Msg, SecretKey, Context),
+true = ecu_ml_dsa:verify(Msg, DetSig, PublicKey, Context).
+
+%% Deterministic keypair derivation from 32-byte seed
+#{public := PK, secret := SK} = ecu_ml_dsa:keypair_from_seed(ml_dsa_44, Seed32).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -451,6 +471,17 @@ Supported Curves & API
   - `hybrid_encaps/1`: Produce combined dual-layer shared secret and hybrid ciphertext ($32 + 1088 = 1120$ bytes).
   - `hybrid_decaps/2`: Decapsulate and combine X25519 ECDH and ML-KEM-768 shared secrets via SHA3-256.
 
+### ML-DSA (FIPS 204) Digital Signatures
+
+- `ecu_ml_dsa`: Pure-Erlang implementation of the NIST Module-Lattice-Based Digital Signature Standard (FIPS 204):
+  - Full support for `ml_dsa_44` (NIST Category 2), `ml_dsa_65` (NIST Category 3), and `ml_dsa_87` (NIST Category 5).
+  - `keypair/1`: Fresh `#{public => PK, secret => SK}` keypair generation using strong random bytes.
+  - `keypair_from_seed/2`: Deterministic keypair generation from a 32-byte seed $\xi$ per FIPS 204 Algorithm 1.
+  - `sign/2,3`: Randomized digital signature generation (recommended per FIPS 204 §5.3) with optional context string ($0 \le |C| \le 255$).
+  - `sign_deterministic/2,3`: Deterministic digital signature generation with optional context string.
+  - `verify/3,4`: Signature verification with optional context string.
+  - `parameter_set/1`: Identify parameter set (`ml_dsa_44 | ml_dsa_65 | ml_dsa_87`) from public key, secret key, or signature binary size.
+
 Performance & Benchmarks
 ------------------------
 
@@ -544,6 +575,12 @@ the library incorporates key algorithmic optimizations:
 | **x25519_mlkem768 hybrid keypair** | — | **2.45 ms** | — | — | — |
 | **x25519_mlkem768 hybrid encaps** | — | **3.20 ms** | — | — | — |
 | **x25519_mlkem768 hybrid decaps** | — | **3.28 ms** | — | — | — |
+| **ml_dsa_44 keypair** | — | **3.84 ms** | — | — | — |
+| **ml_dsa_44 sign** | — | **26.95 ms** | — | — | — |
+| **ml_dsa_44 verify** | — | **3.65 ms** | — | — | — |
+| **ml_dsa_65 keypair** | — | **5.68 ms** | — | 244 µs (crypto / OpenSSL) | 23.3× |
+| **ml_dsa_65 sign** | — | **45.21 ms** | — | 2.32 ms (crypto / OpenSSL) | 19.5× |
+| **ml_dsa_65 verify** | — | **5.28 ms** | — | 449 µs (crypto / OpenSSL) | 11.8× |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*

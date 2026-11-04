@@ -25,7 +25,8 @@
     ecu_bip39,
     ecu_bech32,
     ecu_h2c,
-    ecu_ml_kem
+    ecu_ml_kem,
+    ecu_ml_dsa
   ]},
   {licenses, ["MIT"]},
   {links, []}

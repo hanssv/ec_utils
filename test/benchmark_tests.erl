@@ -779,6 +779,68 @@ bench_hybrid_ecdh_test() ->
   stats("X25519+ML-KEM-768 decaps ", "ecu_ecdh     ", Iters, TimeHDecaps),
   ok.
 
+bench_ml_dsa_test() ->
+  Iters = 20,
+  Msg = <<"ML-DSA signature benchmark payload 2026">>,
+  {TimeKeygen44, _} = timer:tc(fun() ->
+    [ecu_ml_dsa:keypair(ml_dsa_44) || _ <- lists:seq(1, Iters)]
+  end),
+  #{public := PK44, secret := SK44} = ecu_ml_dsa:keypair(ml_dsa_44),
+  {TimeSign44, _} = timer:tc(fun() ->
+    [ecu_ml_dsa:sign(Msg, SK44) || _ <- lists:seq(1, Iters)]
+  end),
+  Sig44 = ecu_ml_dsa:sign(Msg, SK44),
+  {TimeVerify44, _} = timer:tc(fun() ->
+    [ecu_ml_dsa:verify(Msg, Sig44, PK44) || _ <- lists:seq(1, Iters)]
+  end),
+
+  {TimeKeygen65, _} = timer:tc(fun() ->
+    [ecu_ml_dsa:keypair(ml_dsa_65) || _ <- lists:seq(1, Iters)]
+  end),
+  #{public := PK65, secret := SK65} = ecu_ml_dsa:keypair(ml_dsa_65),
+  {TimeSign65, _} = timer:tc(fun() ->
+    [ecu_ml_dsa:sign(Msg, SK65) || _ <- lists:seq(1, Iters)]
+  end),
+  Sig65 = ecu_ml_dsa:sign(Msg, SK65),
+  {TimeVerify65, _} = timer:tc(fun() ->
+    [ecu_ml_dsa:verify(Msg, Sig65, PK65) || _ <- lists:seq(1, Iters)]
+  end),
+
+  ?debugFmt("", []),
+  stats("ML-DSA-44 keypair", "ecu_ml_dsa   ", Iters, TimeKeygen44),
+  stats("ML-DSA-44 sign   ", "ecu_ml_dsa   ", Iters, TimeSign44),
+  stats("ML-DSA-44 verify ", "ecu_ml_dsa   ", Iters, TimeVerify44),
+  stats("ML-DSA-65 keypair", "ecu_ml_dsa   ", Iters, TimeKeygen65),
+  stats("ML-DSA-65 sign   ", "ecu_ml_dsa   ", Iters, TimeSign65),
+  stats("ML-DSA-65 verify ", "ecu_ml_dsa   ", Iters, TimeVerify65),
+
+  try
+    crypto:generate_key(mldsa65, []),
+    ItersRef = 100,
+    {TimeOtpKeygen, _} = timer:tc(fun() ->
+      [crypto:generate_key(mldsa65, []) || _ <- lists:seq(1, ItersRef)]
+    end),
+    case crypto:generate_key(mldsa65, []) of
+      {OtpPK, OtpSK} when is_binary(OtpPK), is_binary(OtpSK) ->
+        {TimeOtpSign, _} = timer:tc(fun() ->
+          [crypto:sign(mldsa65, none, Msg, OtpSK) || _ <- lists:seq(1, ItersRef)]
+        end),
+        OtpSig = crypto:sign(mldsa65, none, Msg, OtpSK),
+        {TimeOtpVerify, _} = timer:tc(fun() ->
+          [crypto:verify(mldsa65, none, Msg, OtpSig, OtpPK) || _ <- lists:seq(1, ItersRef)]
+        end),
+        stats("ML-DSA-65 keypair", "crypto (OpenSSL)", ItersRef, TimeOtpKeygen),
+        diff(TimeKeygen65 / Iters, TimeOtpKeygen / ItersRef),
+        stats("ML-DSA-65 sign   ", "crypto (OpenSSL)", ItersRef, TimeOtpSign),
+        diff(TimeSign65 / Iters, TimeOtpSign / ItersRef),
+        stats("ML-DSA-65 verify ", "crypto (OpenSSL)", ItersRef, TimeOtpVerify),
+        diff(TimeVerify65 / Iters, TimeOtpVerify / ItersRef)
+    end
+  catch
+    _:_ -> ok
+  end,
+  ok.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

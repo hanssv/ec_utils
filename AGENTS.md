@@ -44,6 +44,8 @@ Detailed style rules are defined in [`STYLE.md`](STYLE.md). Key points:
   - Body: Wrap explanatory body text at **72 characters**, separated from subject by a blank line.
 - **Direct Responses**:
   Never use terminal `echo` commands to announce task completion; provide direct, concise markdown responses instead.
+- **Tooling & Command Transparency**:
+  Avoid ad-hoc inline host scripts (e.g. `python3 -c '...'` or multi-line `-eval` blobs) in approval dialogs. Use standard, transparent CLI tools (`jq`, `grep`, `sed`), committed named scripts, Erlang project tools (`rebar3`, `escript`), or differential testing with OTP 29 `crypto` instead.
 
 ---
 
