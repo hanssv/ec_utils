@@ -11,6 +11,7 @@ jobs:
     name: OTP ${{ matrix.otp }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         otp: ['28', '29']
 
@@ -27,6 +28,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libsodium-dev
+
+      - name: Cache erlfmt
+        id: cache-erlfmt
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/erlfmt
+          key: erlfmt-${{ runner.os }}-otp-${{ matrix.otp }}-v1
+
+      - name: Install erlfmt
+        if: steps.cache-erlfmt.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/bin
+          git clone --depth 1 https://github.com/Quviq/erlfmt.git /tmp/erlfmt
+          cd /tmp/erlfmt
+          rebar3 as release escriptize
+          cp _build/release/bin/erlfmt ~/.local/bin/erlfmt
+          rm -rf /tmp/erlfmt
+
+      - name: Check code formatting
+        run: PATH="$HOME/.local/bin:$PATH" make fmt-check
 
       - name: Compile
         run: rebar3 compile
@@ -48,6 +69,16 @@ jobs:
 
       - name: Run eqWAlizer
         run: elp eqwalize-all --as default
+
+      - name: Cache Dialyzer PLTs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3/rebar3_*_plt
+            _build/default/rebar3_*_plt
+          key: dialyzer-plt-${{ runner.os }}-otp-${{ matrix.otp }}-${{ hashFiles('rebar.config', 'src/ec_utils.app.src') }}
+          restore-keys: |
+            dialyzer-plt-${{ runner.os }}-otp-${{ matrix.otp }}-
 
       - name: Run Dialyzer
         run: rebar3 dialyzer

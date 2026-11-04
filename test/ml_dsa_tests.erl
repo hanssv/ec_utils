@@ -29,10 +29,13 @@ acvp_mldsa44_keygen_test() ->
   ),
   <<Rho:32/binary, _/binary>> = PK,
   ?assertEqual(ExpectedRho, Rho),
-  %% Cross-verify with OTP 29 crypto
+  %% Cross-verify with OTP 29 crypto if available
   Msg = <<"ML-DSA-44 ACVP KeyGen verification message">>,
   Sig = ecu_ml_dsa:sign(Msg, SK),
-  ?assert(crypto:verify(mldsa44, none, Msg, Sig, PK)).
+  case is_otp_mldsa_available(mldsa44) of
+    true -> ?assert(crypto:verify(mldsa44, none, Msg, Sig, PK));
+    false -> ?assert(ecu_ml_dsa:verify(Msg, Sig, PK))
+  end.
 
 acvp_mldsa65_keygen_test() ->
   Seed = binary:decode_hex(<<"A991FD42B071D49C48AE3E75C647459E0DAAD1E1BA356A04801912D3294BCFF8">>),
@@ -46,7 +49,10 @@ acvp_mldsa65_keygen_test() ->
   ?assertEqual(ExpectedRho, Rho),
   Msg = <<"ML-DSA-65 ACVP KeyGen verification message">>,
   Sig = ecu_ml_dsa:sign(Msg, SK),
-  ?assert(crypto:verify(mldsa65, none, Msg, Sig, PK)).
+  case is_otp_mldsa_available(mldsa65) of
+    true -> ?assert(crypto:verify(mldsa65, none, Msg, Sig, PK));
+    false -> ?assert(ecu_ml_dsa:verify(Msg, Sig, PK))
+  end.
 
 acvp_mldsa87_keygen_test() ->
   Seed = binary:decode_hex(<<"A16F5B0796703E2D1A0140A35CBF36EFABE70E752BA59B6A9A0E9C4B05302F73">>),
@@ -60,7 +66,10 @@ acvp_mldsa87_keygen_test() ->
   ?assertEqual(ExpectedRho, Rho),
   Msg = <<"ML-DSA-87 ACVP KeyGen verification message">>,
   Sig = ecu_ml_dsa:sign(Msg, SK),
-  ?assert(crypto:verify(mldsa87, none, Msg, Sig, PK)).
+  case is_otp_mldsa_available(mldsa87) of
+    true -> ?assert(crypto:verify(mldsa87, none, Msg, Sig, PK));
+    false -> ?assert(ecu_ml_dsa:verify(Msg, Sig, PK))
+  end.
 
 %% ===================================================================
 %% Sign & Verify Roundtrips & Differential Testing with OTP 29
@@ -81,19 +90,23 @@ test_roundtrip_and_differential(ParamSet, CryptoSet) ->
   %% 1. Pure-Erlang sign and verify
   Sig = ecu_ml_dsa:sign(Msg, SK),
   ?assert(ecu_ml_dsa:verify(Msg, Sig, PK)),
-  %% 2. OTP crypto verifies pure-Erlang signature
-  ?assert(crypto:verify(CryptoSet, none, Msg, Sig, PK)),
-  %% 3. OTP crypto signs, pure-Erlang verifies
-  CryptoSig = crypto:sign(CryptoSet, none, Msg, SK),
-  ?assert(ecu_ml_dsa:verify(Msg, CryptoSig, PK)),
-  %% 4. Deterministic signing test
+  %% 2. Deterministic signing test
   DetSig1 = ecu_ml_dsa:sign_deterministic(Msg, SK),
   DetSig2 = ecu_ml_dsa:sign_deterministic(Msg, SK),
   ?assertEqual(DetSig1, DetSig2),
   ?assert(ecu_ml_dsa:verify(Msg, DetSig1, PK)),
-  ?assert(crypto:verify(CryptoSet, none, Msg, DetSig1, PK)),
-  %% 5. Explicit parameter set overload
-  ?assert(ecu_ml_dsa:verify(ParamSet, Msg, Sig, PK)).
+  %% 3. Explicit parameter set overload
+  ?assert(ecu_ml_dsa:verify(ParamSet, Msg, Sig, PK)),
+  %% 4. Bidirectional differential testing with OTP crypto when available (OTP 29+)
+  case is_otp_mldsa_available(CryptoSet) of
+    true ->
+      ?assert(crypto:verify(CryptoSet, none, Msg, Sig, PK)),
+      ?assert(crypto:verify(CryptoSet, none, Msg, DetSig1, PK)),
+      CryptoSig = crypto:sign(CryptoSet, none, Msg, SK),
+      ?assert(ecu_ml_dsa:verify(Msg, CryptoSig, PK));
+    false ->
+      ok
+  end.
 
 %% ===================================================================
 %% Context String Handling (FIPS 204 Section 5.2 / Algorithm 2 & 3)
@@ -172,3 +185,11 @@ parameter_set_discovery_test() ->
   ?assertEqual(ml_dsa_44, ecu_ml_dsa:parameter_set(mldsa44)),
   ?assertEqual(ml_dsa_65, ecu_ml_dsa:parameter_set(mldsa65)),
   ?assertEqual(ml_dsa_87, ecu_ml_dsa:parameter_set(mldsa87)).
+
+is_otp_mldsa_available(Alg) ->
+  try
+    crypto:generate_key(Alg, []),
+    true
+  catch
+    _:_ -> false
+  end.
