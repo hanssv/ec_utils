@@ -16,13 +16,29 @@
 
 -export([
   parameter_set/1,
+  sign/2,
+  sign/3,
+  sign/4,
+  sign_deterministic/2,
+  sign_deterministic/3,
   verify/3,
-  verify/4
+  verify/4,
+  decode_secret_key/1,
+  encode_secret_key/4,
+  decode_public_key/1,
+  encode_public_key/2,
+  comp_encode/2,
+  decode_s2/2,
+  mod_inv/2,
+  ntt/2,
+  inv_ntt/2
 ]).
 
 -export_type([
   parameter_set/0,
   public_key/0,
+  secret_key/0,
+  decoded_secret_key/0,
   signature/0
 ]).
 
@@ -35,6 +51,9 @@
 
 -type parameter_set() :: fn_dsa_512 | fn_dsa_1024.
 -type public_key() :: binary().
+-type secret_key() :: binary().
+-type decoded_secret_key() ::
+  {parameter_set(), [integer()], [integer()], [integer()], [integer()]}.
 -type signature() :: binary().
 
 %% ===================================================================
@@ -42,7 +61,8 @@
 %% ===================================================================
 
 %% @doc Identifies the canonical parameter set from an atom, key, or signature binary.
--spec parameter_set(parameter_set() | public_key() | signature() | atom()) -> parameter_set().
+-spec parameter_set(parameter_set() | public_key() | secret_key() | signature() | atom()) ->
+  parameter_set().
 parameter_set(fn_dsa_512) ->
   fn_dsa_512;
 parameter_set(falcon512) ->
@@ -55,6 +75,10 @@ parameter_set(<<9:8, Rest/binary>>) when byte_size(Rest) =:= 896 ->
   fn_dsa_512;
 parameter_set(<<10:8, Rest/binary>>) when byte_size(Rest) =:= 1792 ->
   fn_dsa_1024;
+parameter_set(<<16#59:8, Rest/binary>>) when byte_size(Rest) =:= 1280 ->
+  fn_dsa_512;
+parameter_set(<<16#5A:8, Rest/binary>>) when byte_size(Rest) =:= 2304 ->
+  fn_dsa_1024;
 parameter_set(<<16#39:8, _:40/binary, _/binary>>) ->
   fn_dsa_512;
 parameter_set(<<16#3A:8, _:40/binary, _/binary>>) ->
@@ -63,6 +87,8 @@ parameter_set(Bin) when is_binary(Bin) ->
   case byte_size(Bin) of
     897 -> fn_dsa_512;
     1793 -> fn_dsa_1024;
+    1281 -> fn_dsa_512;
+    2305 -> fn_dsa_1024;
     _ -> error(badarg)
   end;
 parameter_set(_) ->
@@ -110,7 +136,8 @@ verify(_, _, _, _) ->
 -spec verify_with_set(parameter_set(), binary(), signature(), public_key(), binary()) ->
   boolean().
 verify_with_set(Set, Msg, Signature, PublicKey, Context) ->
-  {N, LogN, ExpectedPKHead, ExpectedSigHead, MaxSigLen, Bound} = params(Set),
+  {N, LogN, ExpectedPKHead, ExpectedSigHead, MaxSigLen, Bound, _FGBits, _FBits, _SKHead, _SKLen} =
+    params(Set),
   case byte_size(Signature) =< MaxSigLen andalso byte_size(Context) =< 255 of
     false ->
       false;
@@ -173,6 +200,545 @@ verify_norm(H, S2, C0, N, LogN, Bound) ->
   NormSq =< Bound.
 
 %% ===================================================================
+%% Signature Generation
+%% ===================================================================
+
+%% @doc Signs a message with a secret key.
+-spec sign(binary(), secret_key()) -> {ok, signature()} | {error, term()}.
+sign(Msg, SecretKey) when is_binary(Msg), is_binary(SecretKey) ->
+  sign(Msg, SecretKey, #{});
+sign(_, _) ->
+  {error, badarg}.
+
+%% @doc Signs a message with a secret key and context binary or options map.
+-spec sign(binary(), secret_key(), binary() | map()) -> {ok, signature()} | {error, term()}.
+sign(Msg, SecretKey, Context) when is_binary(Msg), is_binary(SecretKey), is_binary(Context) ->
+  sign(Msg, SecretKey, #{context => Context});
+sign(Msg, SecretKey, Opts) when is_binary(Msg), is_binary(SecretKey), is_map(Opts) ->
+  try parameter_set(SecretKey) of
+    Set ->
+      sign(Set, Msg, SecretKey, Opts)
+  catch
+    _:_ -> {error, invalid_key}
+  end;
+sign(_, _, _) ->
+  {error, badarg}.
+
+%% @doc Signs a message with an explicit parameter set and context or options map.
+-spec sign(parameter_set() | atom(), binary(), secret_key(), binary() | map()) ->
+  {ok, signature()} | {error, term()}.
+sign(Set0, Msg, SecretKey, Context) when is_binary(Context) ->
+  sign(Set0, Msg, SecretKey, #{context => Context});
+sign(Set0, Msg, SecretKey, Opts) when is_binary(Msg), is_binary(SecretKey), is_map(Opts) ->
+  try canonical_set(Set0) of
+    Set ->
+      Context = maps:get(context, Opts, <<>>),
+      case is_binary(Context) andalso byte_size(Context) =< 255 of
+        true ->
+          do_sign(Set, Msg, SecretKey, Context, Opts);
+        false ->
+          {error, context_too_long}
+      end
+  catch
+    _:_ -> {error, badarg}
+  end;
+sign(_, _, _, _) ->
+  {error, badarg}.
+
+%% @doc Signs a message deterministically without system randomness.
+-spec sign_deterministic(binary(), secret_key()) -> {ok, signature()} | {error, term()}.
+sign_deterministic(Msg, SecretKey) when is_binary(Msg), is_binary(SecretKey) ->
+  sign_deterministic(Msg, SecretKey, <<>>);
+sign_deterministic(_, _) ->
+  {error, badarg}.
+
+%% @doc Signs a message deterministically with an optional context string.
+-spec sign_deterministic(binary(), secret_key(), binary()) -> {ok, signature()} | {error, term()}.
+sign_deterministic(Msg, SecretKey, Context) when
+  is_binary(Msg), is_binary(SecretKey), is_binary(Context)
+->
+  sign(Msg, SecretKey, #{context => Context, deterministic => true});
+sign_deterministic(_, _, _) ->
+  {error, badarg}.
+
+-spec do_sign(parameter_set(), binary(), secret_key(), binary(), map()) ->
+  {ok, signature()} | {error, term()}.
+do_sign(Set, Msg, SecretKey, Context, Opts) ->
+  case decode_secret_key(SecretKey) of
+    {ok, {Set, F, GSmall, FBig, GBig}} ->
+      {N, LogN, _PKHead, SigHead, MaxSigLen, Bound, _FGBits, _FBits, _SKHead, _SKLen} =
+        params(Set),
+      Deterministic = maps:get(deterministic, Opts, false),
+      Salt =
+        case maps:get(salt, Opts, undefined) of
+          CustomSalt when is_binary(CustomSalt), byte_size(CustomSalt) =:= 40 ->
+            CustomSalt;
+          _ when Deterministic ->
+            derive_deterministic_salt(SecretKey, Msg, Context);
+          _ ->
+            crypto:strong_rand_bytes(40)
+        end,
+      ChallengeInput =
+        case Context of
+          <<>> ->
+            <<Salt:40/binary, Msg/binary>>;
+          _ ->
+            <<0:8, (byte_size(Context)):8, Context/binary, Salt:40/binary, Msg/binary>>
+        end,
+      C0 = hash_to_point(ChallengeInput, N),
+      F_Real = list_to_tuple([float(X) || X <- F]),
+      G_Real = list_to_tuple([float(X) || X <- GSmall]),
+      FBig_Real = list_to_tuple([float(X) || X <- FBig]),
+      GBig_Real = list_to_tuple([float(X) || X <- GBig]),
+      B01 = ecu_fn_dsa_fft:poly_neg_fft(ecu_fn_dsa_fft:fft(F_Real, LogN)),
+      B00 = ecu_fn_dsa_fft:fft(G_Real, LogN),
+      B11 = ecu_fn_dsa_fft:poly_neg_fft(ecu_fn_dsa_fft:fft(FBig_Real, LogN)),
+      B10 = ecu_fn_dsa_fft:fft(GBig_Real, LogN),
+      G00 = ecu_fn_dsa_fft:poly_add_fft(
+        ecu_fn_dsa_fft:poly_mulselfadj_fft(B00),
+        ecu_fn_dsa_fft:poly_mulselfadj_fft(B01)
+      ),
+      G01 = ecu_fn_dsa_fft:poly_add_fft(
+        ecu_fn_dsa_fft:poly_muladj_fft(B00, B10),
+        ecu_fn_dsa_fft:poly_muladj_fft(B01, B11)
+      ),
+      G11 = ecu_fn_dsa_fft:poly_add_fft(
+        ecu_fn_dsa_fft:poly_mulselfadj_fft(B10),
+        ecu_fn_dsa_fft:poly_mulselfadj_fft(B11)
+      ),
+      C0_Real = list_to_tuple([float(X) || X <- C0]),
+      HM_FFT = ecu_fn_dsa_fft:fft(C0_Real, LogN),
+      InvQ = 1.0 / 12289.0,
+      T0 = ecu_fn_dsa_fft:poly_mul_const_fft(ecu_fn_dsa_fft:poly_mul_fft(HM_FFT, B11), InvQ),
+      T1 = ecu_fn_dsa_fft:poly_mul_const_fft(ecu_fn_dsa_fft:poly_mul_fft(HM_FFT, B01), -InvQ),
+      Seed0 =
+        case maps:get(seed, Opts, undefined) of
+          CustomSeed when is_binary(CustomSeed), byte_size(CustomSeed) =:= 48 ->
+            CustomSeed;
+          _ when Deterministic ->
+            derive_deterministic_seed(SecretKey, Msg, Salt);
+          _ ->
+            crypto:strong_rand_bytes(48)
+        end,
+      sign_sampler_loop(
+        Seed0,
+        0,
+        T0,
+        T1,
+        G00,
+        G01,
+        G11,
+        B00,
+        B01,
+        B10,
+        B11,
+        C0,
+        N,
+        LogN,
+        Bound,
+        Salt,
+        SigHead,
+        MaxSigLen - 41
+      );
+    error ->
+      {error, invalid_key}
+  end.
+
+-spec sign_sampler_loop(
+  binary(),
+  non_neg_integer(),
+  ecu_fn_dsa_fft:c_poly(),
+  ecu_fn_dsa_fft:c_poly(),
+  ecu_fn_dsa_fft:c_poly(),
+  ecu_fn_dsa_fft:c_poly(),
+  ecu_fn_dsa_fft:c_poly(),
+  ecu_fn_dsa_fft:c_poly(),
+  ecu_fn_dsa_fft:c_poly(),
+  ecu_fn_dsa_fft:c_poly(),
+  ecu_fn_dsa_fft:c_poly(),
+  [non_neg_integer()],
+  pos_integer(),
+  pos_integer(),
+  pos_integer(),
+  binary(),
+  byte(),
+  pos_integer()
+) -> {ok, signature()} | {error, term()}.
+sign_sampler_loop(
+  _Seed,
+  50,
+  _T0,
+  _T1,
+  _G00,
+  _G01,
+  _G11,
+  _B00,
+  _B01,
+  _B10,
+  _B11,
+  _C0,
+  _N,
+  _LogN,
+  _Bound,
+  _Salt,
+  _SigHead,
+  _MaxCompLen
+) ->
+  {error, max_rejections_exceeded};
+sign_sampler_loop(
+  Seed,
+  Iter,
+  T0,
+  T1,
+  G00,
+  G01,
+  G11,
+  B00,
+  B01,
+  B10,
+  B11,
+  C0,
+  N,
+  LogN,
+  Bound,
+  Salt,
+  SigHead,
+  MaxCompLen
+) ->
+  Rng0 = ecu_fn_dsa_fft:prng_init(<<Seed/binary, Iter:32/big>>),
+  {{Z0, Z1}, _Rng1} =
+    ecu_fn_dsa_fft:ff_sampling_dyntree(Rng0, T0, T1, G00, G01, G11, LogN, LogN),
+  TX = ecu_fn_dsa_fft:poly_add_fft(
+    ecu_fn_dsa_fft:poly_mul_fft(Z0, B00),
+    ecu_fn_dsa_fft:poly_mul_fft(Z1, B10)
+  ),
+  TY = ecu_fn_dsa_fft:poly_add_fft(
+    ecu_fn_dsa_fft:poly_mul_fft(Z0, B01),
+    ecu_fn_dsa_fft:poly_mul_fft(Z1, B11)
+  ),
+  Pt0 = ecu_fn_dsa_fft:inv_fft(TX, LogN),
+  Pt1 = ecu_fn_dsa_fft:inv_fft(TY, LogN),
+  S1 = [C - round(real_poly_get(I, Pt0)) || {I, C} <- lists:zip(lists:seq(1, N), C0)],
+  S2 = [-round(real_poly_get(I, Pt1)) || I <- lists:seq(1, N)],
+  NormSq = lists:sum([S * S || S <- S1]) + lists:sum([S * S || S <- S2]),
+  case NormSq =< Bound of
+    true ->
+      case comp_encode(S2, MaxCompLen) of
+        {ok, CompS2} ->
+          Sig = <<SigHead:8, Salt:40/binary, CompS2/binary>>,
+          {ok, Sig};
+        error ->
+          sign_sampler_loop(
+            Seed,
+            Iter + 1,
+            T0,
+            T1,
+            G00,
+            G01,
+            G11,
+            B00,
+            B01,
+            B10,
+            B11,
+            C0,
+            N,
+            LogN,
+            Bound,
+            Salt,
+            SigHead,
+            MaxCompLen
+          )
+      end;
+    false ->
+      sign_sampler_loop(
+        Seed,
+        Iter + 1,
+        T0,
+        T1,
+        G00,
+        G01,
+        G11,
+        B00,
+        B01,
+        B10,
+        B11,
+        C0,
+        N,
+        LogN,
+        Bound,
+        Salt,
+        SigHead,
+        MaxCompLen
+      )
+  end.
+
+-spec derive_deterministic_salt(secret_key(), binary(), binary()) -> binary().
+derive_deterministic_salt(SK, Msg, Context) ->
+  Input = <<SK/binary, (byte_size(Context)):16/big, Context/binary, Msg/binary, "fn-dsa-salt">>,
+  try
+    crypto:hash_xof(shake256, Input, 40 * 8)
+  catch
+    _:_ ->
+      ecu_keccak:shake256(Input, 40 * 8)
+  end.
+
+-spec derive_deterministic_seed(secret_key(), binary(), binary()) -> binary().
+derive_deterministic_seed(SK, Msg, Salt) ->
+  Input = <<SK/binary, Salt:40/binary, Msg/binary, "fn-dsa-seed">>,
+  try
+    crypto:hash_xof(shake256, Input, 48 * 8)
+  catch
+    _:_ ->
+      ecu_keccak:shake256(Input, 48 * 8)
+  end.
+
+%% ===================================================================
+%% Key & Signature Codecs
+%% ===================================================================
+
+%% @doc Encodes signed polynomial s2 into unary-extended bitstream.
+-spec comp_encode([integer()], pos_integer()) -> {ok, binary()} | error.
+comp_encode(S2, MaxLen) when is_list(S2), is_integer(MaxLen), MaxLen > 0 ->
+  case comp_encode_loop(S2, <<>>) of
+    error ->
+      error;
+    Comp when byte_size(Comp) =< MaxLen ->
+      {ok, Comp};
+    _ ->
+      error
+  end;
+comp_encode(_, _) ->
+  error.
+
+-spec comp_encode_loop([integer()], bitstring()) -> binary() | error.
+comp_encode_loop([], Acc) ->
+  PadLen = (8 - (bit_size(Acc) rem 8)) rem 8,
+  <<Acc/bitstring, 0:PadLen>>;
+comp_encode_loop([X | Rest], Acc) when X >= -2047, X =< 2047 ->
+  Sign =
+    if
+      X < 0 -> 1;
+      true -> 0
+    end,
+  AbsX = abs(X),
+  Low7 = AbsX band 127,
+  High = AbsX bsr 7,
+  comp_encode_loop(Rest, <<Acc/bitstring, Sign:1, Low7:7, 0:High, 1:1>>);
+comp_encode_loop(_, _) ->
+  error.
+
+%% @doc Decodes binary secret key into its parameter set and polynomials {f, g, F, G}.
+-spec decode_secret_key(secret_key()) -> {ok, decoded_secret_key()} | error.
+decode_secret_key(SK) when is_binary(SK) ->
+  try parameter_set(SK) of
+    Set ->
+      {N, LogN, _PKHead, _SigHead, _MaxSigLen, _Bound, FGBits, FBits, ExpectedSKHead, ExpectedSKLen} =
+        params(Set),
+      case SK of
+        <<ExpectedSKHead:8, Payload/binary>> when byte_size(SK) =:= ExpectedSKLen ->
+          case trim_i8_decode(Payload, N, FGBits) of
+            {ok, F, Rest1} ->
+              case trim_i8_decode(Rest1, N, FGBits) of
+                {ok, GSmall, Rest2} ->
+                  case trim_i8_decode(Rest2, N, FBits) of
+                    {ok, FBig, <<>>} ->
+                      case complete_private(F, GSmall, FBig, N, LogN) of
+                        {ok, GBig} ->
+                          {ok, {Set, F, GSmall, FBig, GBig}};
+                        error ->
+                          error
+                      end;
+                    _ ->
+                      error
+                  end;
+                _ ->
+                  error
+              end;
+            _ ->
+              error
+          end;
+        _ ->
+          error
+      end
+  catch
+    _:_ -> error
+  end;
+decode_secret_key(_) ->
+  error.
+
+%% @doc Encodes secret polynomials into binary secret key.
+-spec encode_secret_key(parameter_set() | atom(), [integer()], [integer()], [integer()]) ->
+  secret_key().
+encode_secret_key(Set0, F, GSmall, FBig) when is_list(F), is_list(GSmall), is_list(FBig) ->
+  Set = canonical_set(Set0),
+  {N, _LogN, _PKHead, _SigHead, _MaxSigLen, _Bound, FGBits, FBits, ExpectedSKHead, _ExpectedSKLen} =
+    params(Set),
+  case length(F) =:= N andalso length(GSmall) =:= N andalso length(FBig) =:= N of
+    true ->
+      FBin = trim_i8_encode(F, FGBits),
+      GBin = trim_i8_encode(GSmall, FGBits),
+      FBigBin = trim_i8_encode(FBig, FBits),
+      <<ExpectedSKHead:8, FBin/binary, GBin/binary, FBigBin/binary>>;
+    false ->
+      error(badarg)
+  end.
+
+%% @doc Decodes binary public key into parameter set and polynomial h.
+-spec decode_public_key(public_key()) -> {ok, {parameter_set(), [non_neg_integer()]}} | error.
+decode_public_key(PK) when is_binary(PK) ->
+  try parameter_set(PK) of
+    Set ->
+      {N, _LogN, ExpectedPKHead, _SigHead, _MaxSigLen, _Bound, _FGBits, _FBits, _SKHead, _SKLen} =
+        params(Set),
+      ExpectedByteLen = (N * 14) div 8,
+      case PK of
+        <<ExpectedPKHead:8, PackedModQ:ExpectedByteLen/binary>> ->
+          case decode_modq(PackedModQ, N) of
+            {ok, H} -> {ok, {Set, H}};
+            error -> error
+          end;
+        _ ->
+          error
+      end
+  catch
+    _:_ -> error
+  end;
+decode_public_key(_) ->
+  error.
+
+%% @doc Encodes public key polynomial h into binary public key.
+-spec encode_public_key(parameter_set() | atom(), [non_neg_integer()]) -> public_key().
+encode_public_key(Set0, H) when is_list(H) ->
+  Set = canonical_set(Set0),
+  {N, _LogN, ExpectedPKHead, _SigHead, _MaxSigLen, _Bound, _FGBits, _FBits, _SKHead, _SKLen} =
+    params(Set),
+  case length(H) =:= N andalso lists:all(fun(W) -> W >= 0 andalso W < ?FN_DSA_Q end, H) of
+    true ->
+      Packed = <<<<W:14>> || W <- H>>,
+      <<ExpectedPKHead:8, Packed/binary>>;
+    false ->
+      error(badarg)
+  end.
+
+-spec complete_private([integer()], [integer()], [integer()], pos_integer(), pos_integer()) ->
+  {ok, [integer()]} | error.
+complete_private(F, GSmall, FBig, N, LogN) ->
+  FTuple = list_to_tuple([(X rem ?FN_DSA_Q + ?FN_DSA_Q) rem ?FN_DSA_Q || X <- F]),
+  GTuple = list_to_tuple([(X rem ?FN_DSA_Q + ?FN_DSA_Q) rem ?FN_DSA_Q || X <- GSmall]),
+  FBigTuple = list_to_tuple([(X rem ?FN_DSA_Q + ?FN_DSA_Q) rem ?FN_DSA_Q || X <- FBig]),
+  F_Hat = ntt(FTuple, LogN),
+  G_Hat = ntt(GTuple, LogN),
+  FBig_Hat = ntt(FBigTuple, LogN),
+  try
+    GBig_Hat = list_to_tuple([
+      begin
+        FVal = poly_get(I, F_Hat),
+        case FVal of
+          0 ->
+            throw(not_invertible);
+          _ ->
+            InvF = mod_inv(FVal, ?FN_DSA_Q),
+            (poly_get(I, G_Hat) * poly_get(I, FBig_Hat) rem ?FN_DSA_Q * InvF) rem ?FN_DSA_Q
+        end
+      end
+     || I <- lists:seq(1, N)
+    ]),
+    GBig_Poly = inv_ntt(GBig_Hat, LogN),
+    GBig = [
+      begin
+        W = poly_get(I, GBig_Poly),
+        Val =
+          if
+            W > (?FN_DSA_Q bsr 1) -> W - ?FN_DSA_Q;
+            true -> W
+          end,
+        if
+          Val < -127 orelse Val > 127 -> throw(out_of_range);
+          true -> Val
+        end
+      end
+     || I <- lists:seq(1, N)
+    ],
+    {ok, GBig}
+  catch
+    throw:_ -> error
+  end.
+
+%% @doc Computes modular inverse using extended Euclidean algorithm.
+-spec mod_inv(integer(), pos_integer()) -> non_neg_integer().
+mod_inv(A, M) ->
+  {G, X, _} = egcd((A rem M + M) rem M, M),
+  case G of
+    1 -> (X rem M + M) rem M;
+    _ -> error({no_inverse, A, M})
+  end.
+
+-spec egcd(integer(), integer()) -> {integer(), integer(), integer()}.
+egcd(0, B) ->
+  {B, 0, 1};
+egcd(A, B) ->
+  {G, X1, Y1} = egcd(B rem A, A),
+  {G, Y1 - (B div A) * X1, X1}.
+
+-spec trim_i8_decode(binary(), pos_integer(), pos_integer()) ->
+  {ok, [integer()], binary()} | error.
+trim_i8_decode(Bin, N, Bits) ->
+  ByteLen = (N * Bits) div 8,
+  case Bin of
+    <<Payload:ByteLen/binary, Rest/binary>> ->
+      try trim_i8_decode_loop(Payload, N, Bits, 1 bsl (Bits - 1), 1 bsl Bits, []) of
+        Coeffs -> {ok, Coeffs, Rest}
+      catch
+        throw:invalid -> error
+      end;
+    _ ->
+      error
+  end.
+
+-spec trim_i8_decode_loop(
+  bitstring(), non_neg_integer(), pos_integer(), pos_integer(), pos_integer(), [integer()]
+) -> [integer()].
+trim_i8_decode_loop(_Rest, 0, _Bits, _Forbidden, _Mod, Acc) ->
+  lists:reverse(Acc);
+trim_i8_decode_loop(Bin, Count, Bits, Forbidden, Mod, Acc) when Count > 0 ->
+  case Bin of
+    <<Raw:Bits, Rest/bitstring>> ->
+      if
+        Raw =:= Forbidden ->
+          throw(invalid);
+        Raw >= Forbidden ->
+          trim_i8_decode_loop(Rest, Count - 1, Bits, Forbidden, Mod, [Raw - Mod | Acc]);
+        true ->
+          trim_i8_decode_loop(Rest, Count - 1, Bits, Forbidden, Mod, [Raw | Acc])
+      end;
+    _ ->
+      throw(invalid)
+  end;
+trim_i8_decode_loop(_, _, _, _, _, _) ->
+  throw(invalid).
+
+-spec trim_i8_encode([integer()], pos_integer()) -> binary().
+trim_i8_encode(Coeffs, Bits) ->
+  Forbidden = 1 bsl (Bits - 1),
+  Mod = 1 bsl Bits,
+  trim_i8_encode_loop(Coeffs, Bits, Forbidden, Mod, <<>>).
+
+-spec trim_i8_encode_loop([integer()], pos_integer(), pos_integer(), pos_integer(), bitstring()) ->
+  binary().
+trim_i8_encode_loop([], _Bits, _Forbidden, _Mod, Acc) ->
+  Acc;
+trim_i8_encode_loop([X | Rest], Bits, Forbidden, Mod, Acc) ->
+  if
+    X =< -Forbidden orelse X >= Forbidden ->
+      error(badarg);
+    X < 0 ->
+      Raw = X + Mod,
+      trim_i8_encode_loop(Rest, Bits, Forbidden, Mod, <<Acc/bitstring, Raw:Bits>>);
+    true ->
+      trim_i8_encode_loop(Rest, Bits, Forbidden, Mod, <<Acc/bitstring, X:Bits>>)
+  end.
+
+%% ===================================================================
 %% Internal Helpers: Parameters & Decoding
 %% ===================================================================
 
@@ -184,11 +750,22 @@ canonical_set(falcon1024) -> fn_dsa_1024;
 canonical_set(_) -> error(badarg).
 
 -spec params(parameter_set()) ->
-  {pos_integer(), pos_integer(), byte(), byte(), pos_integer(), pos_integer()}.
+  {
+    pos_integer(),
+    pos_integer(),
+    byte(),
+    byte(),
+    pos_integer(),
+    pos_integer(),
+    pos_integer(),
+    pos_integer(),
+    byte(),
+    pos_integer()
+  }.
 params(fn_dsa_512) ->
-  {512, 9, 16#09, 16#39, 666, ?BOUND_512};
+  {512, 9, 16#09, 16#39, 666, ?BOUND_512, 6, 8, 16#59, 1281};
 params(fn_dsa_1024) ->
-  {1024, 10, 16#0A, 16#3A, 1280, ?BOUND_1024}.
+  {1024, 10, 16#0A, 16#3A, 1280, ?BOUND_1024, 5, 8, 16#5A, 2305}.
 
 -spec decode_modq(binary(), pos_integer()) -> {ok, [non_neg_integer()]} | error.
 decode_modq(Bin, N) ->
@@ -328,6 +905,12 @@ poly_get(Idx, Tuple) ->
     V when is_integer(V) -> V
   end.
 
+-spec real_poly_get(pos_integer(), tuple()) -> float().
+real_poly_get(Idx, Tuple) ->
+  case element(Idx, Tuple) of
+    V when is_float(V) -> V
+  end.
+
 -spec ntt_j_loop(non_neg_integer(), non_neg_integer(), pos_integer(), integer(), tuple()) -> tuple().
 ntt_j_loop(J, J2, HT, S, A) when J < J2 ->
   U = poly_get(J + 1, A),
@@ -389,7 +972,7 @@ inv_ntt_j_loop(_J, _J2, _T, _S, A) ->
 %% Roots of Unity Tables (Bit-Reversed over 10 bits)
 %% ===================================================================
 
--compile({inline, [zeta/1, inv_zeta/1, poly_get/2]}).
+-compile({inline, [zeta/1, inv_zeta/1, poly_get/2, real_poly_get/2]}).
 
 -spec zeta(non_neg_integer()) -> integer().
 zeta(Idx) ->

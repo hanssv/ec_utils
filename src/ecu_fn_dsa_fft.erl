@@ -32,18 +32,25 @@
   poly_muladj_fft/2,
   poly_mulselfadj_fft/1,
   poly_div_fft/2,
+  poly_mul_const_fft/2,
+  poly_neg_fft/1,
   poly_split_fft/2,
   poly_merge_fft/3,
   poly_ldl_fft/2,
   gaussian0_sampler/1,
   sample_z/4,
-  ff_sampling_dyntree/8
+  ff_sampling_dyntree/8,
+  prng_init/1,
+  prng_take_bits/2
 ]).
+
+-opaque prng_state() :: {binary(), non_neg_integer(), bitstring()}.
 
 -export_type([
   c_num/0,
   c_poly/0,
-  real_poly/0
+  real_poly/0,
+  prng_state/0
 ]).
 
 -type c_num() :: {float(), float()}.
@@ -229,6 +236,28 @@ poly_div_fft(A, B) ->
   Len = tuple_size(A),
   list_to_tuple([c_div(get_c(I, A), get_c(I, B)) || I <- lists:seq(1, Len)]).
 
+-spec poly_mul_const_fft(c_poly(), float()) -> c_poly().
+poly_mul_const_fft(A, C) ->
+  Len = tuple_size(A),
+  list_to_tuple([
+    begin
+      {R, I} = get_c(Idx, A),
+      {R * C, I * C}
+    end
+   || Idx <- lists:seq(1, Len)
+  ]).
+
+-spec poly_neg_fft(c_poly()) -> c_poly().
+poly_neg_fft(A) ->
+  Len = tuple_size(A),
+  list_to_tuple([
+    begin
+      {R, I} = get_c(Idx, A),
+      {-R, -I}
+    end
+   || Idx <- lists:seq(1, Len)
+  ]).
+
 %% ===================================================================
 %% Split & Merge in FFT Domain
 %% ===================================================================
@@ -239,7 +268,8 @@ poly_split_fft(F, LogN) ->
   QN = HN bsr 1,
   if
     LogN =:= 1 ->
-      {F, F};
+      {R, I} = get_c(1, F),
+      {{{R, 0.0}}, {{I, 0.0}}};
     true ->
       F0 = [
         begin
@@ -269,7 +299,9 @@ poly_merge_fft(F0, F1, LogN) ->
   QN = HN bsr 1,
   if
     LogN =:= 1 ->
-      {get_c(1, F0), get_c(1, F1)};
+      {R, _} = get_c(1, F0),
+      {I, _} = get_c(1, F1),
+      {{R, I}};
     true ->
       Pairs = [
         begin
@@ -304,13 +336,13 @@ poly_ldl_fft(G00, G01) ->
 -define(SIGMA_0, 1.8205).
 -define(INV_2_SQR_SIGMA0, 0.15086504887537272).
 
--spec gaussian0_sampler(binary()) -> {non_neg_integer(), binary()}.
+-spec gaussian0_sampler(prng_state()) -> {non_neg_integer(), prng_state()}.
 gaussian0_sampler(Rng) ->
   {V, NextRng} = prng_take_bits(Rng, 72),
   Z = count_thresholds(V, gaussian_thresholds()),
   {Z, NextRng}.
 
--spec sample_z(binary(), float(), float(), float()) -> {integer(), binary()}.
+-spec sample_z(prng_state(), float(), float(), float()) -> {integer(), prng_state()}.
 sample_z(Rng, Mu, InvSigma, SigmaMin) ->
   S = math:floor(Mu),
   R = Mu - S,
@@ -318,7 +350,7 @@ sample_z(Rng, Mu, InvSigma, SigmaMin) ->
   Ccs = InvSigma * SigmaMin,
   sample_z_loop(Rng, S, R, Dss, Ccs).
 
--spec sample_z_loop(binary(), float(), float(), float(), float()) -> {integer(), binary()}.
+-spec sample_z_loop(prng_state(), float(), float(), float(), float()) -> {integer(), prng_state()}.
 sample_z_loop(Rng0, S, R, Dss, Ccs) ->
   {Z0, Rng1} = gaussian0_sampler(Rng0),
   {BitB, Rng2} = prng_take_bits(Rng1, 1),
@@ -339,21 +371,26 @@ sample_z_loop(Rng0, S, R, Dss, Ccs) ->
       sample_z_loop(Rng3, S, R, Dss, Ccs)
   end.
 
--spec ber_exp(binary(), float(), float()) -> {boolean(), binary()}.
-ber_exp(Rng, X, _Ccs) when X =< 0.0 ->
-  {true, Rng};
-ber_exp(Rng, X, _Ccs) ->
-  P = math:exp(-X),
-  {Rand64, NextRng} = prng_take_bits(Rng, 64),
-  U = float(Rand64) / 18446744073709551616.0,
-  {U < P, NextRng}.
+-spec ber_exp(prng_state(), float(), float()) -> {boolean(), prng_state()}.
+ber_exp(Rng, X, Ccs) ->
+  P = Ccs * math:exp(-X),
+  if
+    P >= 1.0 ->
+      {true, Rng};
+    P =< 0.0 ->
+      {false, Rng};
+    true ->
+      {Rand64, NextRng} = prng_take_bits(Rng, 64),
+      U = float(Rand64) / 18446744073709551616.0,
+      {U < P, NextRng}
+  end.
 
 %% ===================================================================
 %% Fast Fourier Sampling (Dynamic Tree)
 %% ===================================================================
 
 -spec ff_sampling_dyntree(
-  binary(),
+  prng_state(),
   c_poly(),
   c_poly(),
   c_poly(),
@@ -361,7 +398,7 @@ ber_exp(Rng, X, _Ccs) ->
   c_poly(),
   pos_integer(),
   pos_integer()
-) -> {{c_poly(), c_poly()}, binary()}.
+) -> {{c_poly(), c_poly()}, prng_state()}.
 ff_sampling_dyntree(Rng0, T0, T1, G00, _G01, _G11, OrigLogN, LogN) when LogN =:= 0 ->
   {G00_R, _} = get_c(1, G00),
   InvSigma = inv_sigma(OrigLogN),
@@ -375,31 +412,27 @@ ff_sampling_dyntree(Rng0, T0, T1, G00, _G01, _G11, OrigLogN, LogN) when LogN =:=
   PolyZ1 = {{float(Z1), 0.0}},
   {{PolyZ0, PolyZ1}, Rng2};
 ff_sampling_dyntree(Rng0, T0, T1, G00, G01, G11, OrigLogN, LogN) ->
-  HN = 1 bsl (LogN - 1),
   %% 1. LDL decomposition: L10 = G01 / G00, D11 = G11 - L10 * adj(G01)
   L10 = poly_div_fft(G01, G00),
   L10_AdjG01 = poly_muladj_fft(L10, G01),
   D11 = poly_sub_fft(G11, L10_AdjG01),
+  L10_Adj = poly_adj_fft(L10),
   %% 2. Split D00 (which is G00) and D11
   {D00_0, D00_1} = poly_split_fft(G00, LogN),
   {D11_0, D11_1} = poly_split_fft(D11, LogN),
-  G01_Split = list_to_tuple(
-    [get_c(I, D00_0) || I <- lists:seq(1, HN bsr 1)] ++
-      [get_c(I, D11_0) || I <- lists:seq(1, HN bsr 1)]
-  ),
-  %% 3. Sample right child (on T1)
+  %% 3. Sample right child (on T1) using Gram matrix of D11: (D11_0, D11_1, D11_0)
   {T1_0, T1_1} = poly_split_fft(T1, LogN),
   {{Z1_0, Z1_1}, Rng1} =
-    ff_sampling_dyntree(Rng0, T1_0, T1_1, D11_0, G01_Split, D11_1, OrigLogN, LogN - 1),
+    ff_sampling_dyntree(Rng0, T1_0, T1_1, D11_0, D11_1, D11_0, OrigLogN, LogN - 1),
   Z1 = poly_merge_fft(Z1_0, Z1_1, LogN),
-  %% 4. Adjust T0: Tb0 = T0 + (T1 - Z1) * L10
+  %% 4. Adjust T0: Tb0 = T0 + (T1 - Z1) * L10_Adj
   T1_Sub_Z1 = poly_sub_fft(T1, Z1),
-  Adjustment = poly_mul_fft(T1_Sub_Z1, L10),
+  Adjustment = poly_mul_fft(T1_Sub_Z1, L10_Adj),
   Tb0 = poly_add_fft(T0, Adjustment),
-  %% 5. Sample left child (on adjusted Tb0)
+  %% 5. Sample left child (on adjusted Tb0) using Gram matrix of D00: (D00_0, D00_1, D00_0)
   {Tb0_0, Tb0_1} = poly_split_fft(Tb0, LogN),
   {{Z0_0, Z0_1}, Rng2} =
-    ff_sampling_dyntree(Rng1, Tb0_0, Tb0_1, D00_0, G01_Split, D00_1, OrigLogN, LogN - 1),
+    ff_sampling_dyntree(Rng1, Tb0_0, Tb0_1, D00_0, D00_1, D00_0, OrigLogN, LogN - 1),
   Z0 = poly_merge_fft(Z0_0, Z0_1, LogN),
   {{Z0, Z1}, Rng2}.
 
@@ -456,8 +489,8 @@ inv_sigma(9) -> 0.006033669668157724;
 inv_sigma(10) -> 0.005938645309533116.
 
 -spec sigma_min(pos_integer()) -> float().
-sigma_min(9) -> 1.2570554504008196;
-sigma_min(10) -> 1.2778255530750011.
+sigma_min(9) -> 1.2778336969128337;
+sigma_min(10) -> 1.298280334344292.
 
 -spec gaussian_thresholds() -> [non_neg_integer()].
 gaussian_thresholds() ->
@@ -495,10 +528,21 @@ count_thresholds(V, Thresholds) ->
     Thresholds
   ).
 
--spec prng_take_bits(binary(), pos_integer()) -> {non_neg_integer(), binary()}.
-prng_take_bits(Stream, Bits) when bit_size(Stream) >= Bits ->
-  <<Val:Bits, Rest/bitstring>> = Stream,
-  {Val, Rest};
-prng_take_bits(Stream, Bits) ->
-  More = ecu_keccak:shake256(Stream, 512 * 8),
-  prng_take_bits(<<Stream/binary, More/binary>>, Bits).
+-spec prng_init(binary()) -> prng_state().
+prng_init(Seed) when is_binary(Seed) ->
+  {Seed, 0, <<>>}.
+
+-spec prng_take_bits(prng_state(), pos_integer()) -> {non_neg_integer(), prng_state()}.
+prng_take_bits({Seed, Counter, Buf}, Bits) when bit_size(Buf) >= Bits ->
+  <<Val:Bits, RestBuf/bitstring>> = Buf,
+  {Val, {Seed, Counter, RestBuf}};
+prng_take_bits({Seed, Counter, Buf}, Bits) ->
+  NewBytes =
+    try
+      crypto:hash_xof(shake256, <<Seed/binary, Counter:32/big>>, 256 * 8)
+    catch
+      _:_ ->
+        ecu_keccak:shake256(<<Seed/binary, Counter:32/big>>, 256 * 8)
+    end,
+  NextBuf = <<Buf/bitstring, NewBytes/binary>>,
+  prng_take_bits({Seed, Counter + 1, NextBuf}, Bits).
