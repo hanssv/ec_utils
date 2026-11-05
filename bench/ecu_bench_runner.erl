@@ -14,7 +14,8 @@
   to_json/2,
   from_json/1,
   compare/3,
-  format_comparison_table/1
+  format_comparison_table/1,
+  format_comparison_markdown/1
 ]).
 
 -export_type([
@@ -361,5 +362,59 @@ format_comparison_table(#{items := Items, threshold_pct := Threshold}) ->
         io_lib:format("~nALERT: Regressions detected exceeding threshold (~.1f%)!~n", [Threshold]);
       false ->
         io_lib:format("~nAll benchmarks within acceptable threshold (~.1f%).~n", [Threshold])
+    end,
+  [Header, Sep, Rows, SummaryNote].
+
+-spec format_comparison_markdown(comparison_summary()) -> iolist().
+format_comparison_markdown(#{items := Items, threshold_pct := Threshold}) ->
+  Header = "| Benchmark | Group | Baseline (µs) | PR (µs) | Delta | Status |\n",
+  Sep = "|:---|:---|---:|---:|---:|:---|\n",
+  Rows = [
+    begin
+      StatusBadge =
+        case Status of
+          faster -> "**Faster**";
+          similar -> "Same";
+          slower -> "Slower";
+          regression -> "**REGRESSION**"
+        end,
+      DeltaStr =
+        case Delta >= 0.0 of
+          true -> io_lib:format("+~.1f%", [Delta]);
+          false -> io_lib:format("~.1f%", [Delta])
+        end,
+      io_lib:format(
+        "| ~s | ~s | ~s | ~s | ~s | ~s |\n",
+        [
+          Name,
+          Group,
+          format_num(BaseMean, 2),
+          format_num(CurMean, 2),
+          DeltaStr,
+          StatusBadge
+        ]
+      )
+    end
+   || #{
+      name := Name,
+      group := Group,
+      baseline_mean_us := BaseMean,
+      current_mean_us := CurMean,
+      delta_pct := Delta,
+      status := Status
+    } <- Items
+  ],
+  SummaryNote =
+    case lists:any(fun(#{status := S}) -> S =:= regression end, Items) of
+      true ->
+        io_lib:format(
+          "~n> [!WARNING]~n> Performance regression detected exceeding threshold (~.1f%)!~n",
+          [Threshold]
+        );
+      false ->
+        io_lib:format(
+          "~n> [!NOTE]~n> All benchmarks within acceptable threshold (~.1f%).~n",
+          [Threshold]
+        )
     end,
   [Header, Sep, Rows, SummaryNote].

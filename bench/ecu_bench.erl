@@ -45,22 +45,29 @@ run(Opts) ->
       ok
   end,
 
-  io:format(
-    "==> Running ~p benchmark(s) [duration: ~p ms/bench, filter: ~p]...~n~n",
-    [length(Benchmarks), DurationMs, Filter]
-  ),
+  case JsonOut orelse Markdown of
+    true ->
+      ok;
+    false ->
+      io:format(
+        "==> Running ~p benchmark(s) [duration: ~p ms/bench, filter: ~p]...~n~n",
+        [length(Benchmarks), DurationMs, Filter]
+      )
+  end,
 
   BenchOpts = #{duration_ms => DurationMs},
   Results = ecu_bench_runner:run_all(Benchmarks, BenchOpts),
 
-  %% Print results
-  case {JsonOut, Markdown} of
-    {true, _} ->
+  %% Print results (when not comparing with markdown)
+  case {JsonOut, Markdown, ComparePath} of
+    {true, _, _} ->
       ok;
-    {false, true} ->
+    {false, true, undefined} ->
       io:format("~s~n", [ecu_bench_runner:format_markdown(Results)]);
-    {false, false} ->
-      io:format("~s~n", [ecu_bench_runner:format_table(Results)])
+    {false, false, _} ->
+      io:format("~s~n", [ecu_bench_runner:format_table(Results)]);
+    _ ->
+      ok
   end,
 
   %% Handle JSON output / saving
@@ -72,7 +79,10 @@ run(Opts) ->
       JsonBin = ecu_bench_runner:to_json(Results, Metadata),
       case file:write_file(FilePath, JsonBin) of
         ok ->
-          io:format("==> Saved benchmark baseline to: ~s~n~n", [FilePath]);
+          case JsonOut orelse Markdown of
+            true -> ok;
+            false -> io:format("==> Saved benchmark baseline to: ~s~n~n", [FilePath])
+          end;
         {error, WriteErr} ->
           io:format(standard_error, "Failed to write baseline file: ~p~n", [WriteErr])
       end
@@ -96,8 +106,13 @@ run(Opts) ->
             {ok, BaselineResults, _BaseMeta} ->
               Comparison =
                 ecu_bench_runner:compare(Results, BaselineResults, ThresholdPct),
-              io:format("~n==> Regression Comparison against ~s:~n~n", [BaselineFile]),
-              io:format("~s~n", [ecu_bench_runner:format_comparison_table(Comparison)]),
+              case Markdown of
+                true ->
+                  io:format("~s~n", [ecu_bench_runner:format_comparison_markdown(Comparison)]);
+                false ->
+                  io:format("~n==> Regression Comparison against ~s:~n~n", [BaselineFile]),
+                  io:format("~s~n", [ecu_bench_runner:format_comparison_table(Comparison)])
+              end,
               case {maps:get(has_regression, Comparison), FailOnRegression} of
                 {true, true} ->
                   io:format(standard_error, "ERROR: Performance regression detected!~n", []),
