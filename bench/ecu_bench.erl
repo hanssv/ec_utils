@@ -55,7 +55,8 @@ run(Opts) ->
       )
   end,
 
-  BenchOpts = #{duration_ms => DurationMs},
+  MinIterations = maps:get(min_iterations, Opts, auto),
+  BenchOpts = #{duration_ms => DurationMs, min_iterations => MinIterations},
   Results = ecu_bench_runner:run_all(Benchmarks, BenchOpts),
 
   %% Print results (when not comparing with markdown)
@@ -174,6 +175,13 @@ parse_args(["-d", DurationStr | Rest], Acc) ->
   end;
 parse_args(["--duration", DurationStr | Rest], Acc) ->
   parse_args(["-d", DurationStr | Rest], Acc);
+parse_args(["--min-iterations", MinStr | Rest], Acc) ->
+  try list_to_integer(MinStr) of
+    M when M > 0 -> parse_args(Rest, Acc#{min_iterations => M});
+    _ -> {error, "Min iterations must be positive"}
+  catch
+    _:_ -> {error, "Invalid min-iterations integer: " ++ MinStr}
+  end;
 parse_args(["-s", Path | Rest], Acc) ->
   parse_args(Rest, Acc#{save_path => Path});
 parse_args(["--save", Path | Rest], Acc) ->
