@@ -55,6 +55,12 @@ jobs:
       - name: Run EUnit & Benchmarks
         run: rebar3 eunit
 
+      - name: Run Performance Benchmarks
+        run: |
+          echo "## Cryptographic Performance Benchmarks (OTP ${{ matrix.otp }})" >> $GITHUB_STEP_SUMMARY
+          rebar3 as bench compile
+          ./bin/bench --markdown -d 100 all >> $GITHUB_STEP_SUMMARY
+
       - name: Install ELP
         # Pinned ELP release 2026-10-14; keep in sync with mise.toml
         run: |
