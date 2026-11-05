@@ -114,7 +114,11 @@ bench_compare_regression_test() ->
   ?assertEqual(regression, maps:get(status, Item2)),
   TableBin = iolist_to_binary(ecu_bench_runner:format_comparison_table(Comparison)),
   ?assert(binary:match(TableBin, <<"[FASTER]">>) =/= nomatch),
-  ?assert(binary:match(TableBin, <<"[REGRESSION!]">>) =/= nomatch).
+  ?assert(binary:match(TableBin, <<"[REGRESSION!]">>) =/= nomatch),
+
+  MdBin = iolist_to_binary(ecu_bench_runner:format_comparison_markdown(Comparison)),
+  ?assert(binary:match(MdBin, <<"| Bench 1 |">>) =/= nomatch),
+  ?assert(binary:match(MdBin, <<"**REGRESSION**">>) =/= nomatch).
 
 bench_suites_registry_test() ->
   Suites = ecu_bench_suites:list_suites(),

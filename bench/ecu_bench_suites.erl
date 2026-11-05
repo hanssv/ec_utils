@@ -291,14 +291,16 @@ ecdh_benchmarks() ->
 %% ===================================================================
 
 ml_kem_benchmarks() ->
-  {PK512, SK512} = ecu_ml_kem:keypair(ml_kem_512),
-  {_SS512, CT512} = ecu_ml_kem:encaps(PK512),
+  SeedD = <<1:256>>,
+  SeedZ = <<2:256>>,
+  {PK512, SK512} = ecu_ml_kem:keypair_from_seed(ml_kem_512, SeedD, SeedZ),
+  {_SS512, CT512} = ecu_ml_kem:encaps(PK512, SeedD),
 
-  {PK768, SK768} = ecu_ml_kem:keypair(ml_kem_768),
-  {_SS768, CT768} = ecu_ml_kem:encaps(PK768),
+  {PK768, SK768} = ecu_ml_kem:keypair_from_seed(ml_kem_768, SeedD, SeedZ),
+  {_SS768, CT768} = ecu_ml_kem:encaps(PK768, SeedD),
 
-  {PK1024, SK1024} = ecu_ml_kem:keypair(ml_kem_1024),
-  {_SS1024, CT1024} = ecu_ml_kem:encaps(PK1024),
+  {PK1024, SK1024} = ecu_ml_kem:keypair_from_seed(ml_kem_1024, SeedD, SeedZ),
+  {_SS1024, CT1024} = ecu_ml_kem:encaps(PK1024, SeedD),
 
   [
     #{
@@ -362,15 +364,18 @@ ml_kem_benchmarks() ->
 %% ===================================================================
 
 ml_dsa_benchmarks() ->
-  Msg = crypto:strong_rand_bytes(32),
-  #{public := PK44, secret := SK44} = ecu_ml_dsa:keypair(ml_dsa_44),
-  Sig44 = ecu_ml_dsa:sign(Msg, SK44),
+  Msg = <<"ec_utils ML-DSA benchmark message">>,
+  Seed44 = <<1:256>>,
+  #{public := PK44, secret := SK44} = ecu_ml_dsa:keypair_from_seed(ml_dsa_44, Seed44),
+  Sig44 = ecu_ml_dsa:sign_deterministic(Msg, SK44),
 
-  #{public := PK65, secret := SK65} = ecu_ml_dsa:keypair(ml_dsa_65),
-  Sig65 = ecu_ml_dsa:sign(Msg, SK65),
+  Seed65 = <<2:256>>,
+  #{public := PK65, secret := SK65} = ecu_ml_dsa:keypair_from_seed(ml_dsa_65, Seed65),
+  Sig65 = ecu_ml_dsa:sign_deterministic(Msg, SK65),
 
-  #{public := PK87, secret := SK87} = ecu_ml_dsa:keypair(ml_dsa_87),
-  Sig87 = ecu_ml_dsa:sign(Msg, SK87),
+  Seed87 = <<3:256>>,
+  #{public := PK87, secret := SK87} = ecu_ml_dsa:keypair_from_seed(ml_dsa_87, Seed87),
+  Sig87 = ecu_ml_dsa:sign_deterministic(Msg, SK87),
 
   [
     #{
@@ -383,7 +388,7 @@ ml_dsa_benchmarks() ->
       id => ml_dsa_44_sign,
       name => <<"ML-DSA-44 Sign">>,
       group => ml_dsa,
-      run => {fun({M, SK}) -> ecu_ml_dsa:sign(M, SK) end, {Msg, SK44}}
+      run => {fun({M, SK}) -> ecu_ml_dsa:sign_deterministic(M, SK) end, {Msg, SK44}}
     },
     #{
       id => ml_dsa_44_verify,
@@ -401,7 +406,7 @@ ml_dsa_benchmarks() ->
       id => ml_dsa_65_sign,
       name => <<"ML-DSA-65 Sign">>,
       group => ml_dsa,
-      run => {fun({M, SK}) -> ecu_ml_dsa:sign(M, SK) end, {Msg, SK65}}
+      run => {fun({M, SK}) -> ecu_ml_dsa:sign_deterministic(M, SK) end, {Msg, SK65}}
     },
     #{
       id => ml_dsa_65_verify,
@@ -419,7 +424,7 @@ ml_dsa_benchmarks() ->
       id => ml_dsa_87_sign,
       name => <<"ML-DSA-87 Sign">>,
       group => ml_dsa,
-      run => {fun({M, SK}) -> ecu_ml_dsa:sign(M, SK) end, {Msg, SK87}}
+      run => {fun({M, SK}) -> ecu_ml_dsa:sign_deterministic(M, SK) end, {Msg, SK87}}
     },
     #{
       id => ml_dsa_87_verify,

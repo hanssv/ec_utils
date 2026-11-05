@@ -14,7 +14,8 @@
   to_json/2,
   from_json/1,
   compare/3,
-  format_comparison_table/1
+  format_comparison_table/1,
+  format_comparison_markdown/1
 ]).
 
 -export_type([
@@ -107,6 +108,20 @@ run_bench(#{id := Id, name := Name, group := Group, run := RunSpec}, Opts) ->
       true -> 1
     end,
 
+  %% Minimum iterations floor to guarantee statistical stability for slow ops
+  MinOps =
+    case maps:get(min_iterations, Opts, auto) of
+      auto ->
+        if
+          SingleOpUs > 20000 -> 15;
+          SingleOpUs > 5000 -> 25;
+          SingleOpUs > 1000 -> 50;
+          true -> 100
+        end;
+      CustomMin when is_integer(CustomMin), CustomMin > 0 ->
+        CustomMin
+    end,
+
   %% Quick warmup (at least 3 batches or 10ms worth)
   WarmupBatches = max(3, min(20, 10000 div max(1, SingleOpUs * BatchSize))),
   run_batches(WarmupBatches, BatchSize, Fun, State),
@@ -114,7 +129,7 @@ run_bench(#{id := Id, name := Name, group := Group, run := RunSpec}, Opts) ->
   %% Step 2: Timed execution collecting batch timings
   StartTime = erlang:monotonic_time(microsecond),
   {TotalOps, BatchTimings} =
-    collect_samples(StartTime, TargetDurationUs, BatchSize, Fun, State, 0, []),
+    collect_samples(StartTime, TargetDurationUs, BatchSize, Fun, State, 0, [], MinOps),
   EndTime = erlang:monotonic_time(microsecond),
   TotalTimeUs = max(1, EndTime - StartTime),
 
@@ -145,7 +160,7 @@ run_bench(#{id := Id, name := Name, group := Group, run := RunSpec}, Opts) ->
     max_us => MaxUs
   }.
 
-collect_samples(StartTime, TargetUs, BatchSize, Fun, State, AccOps, AccTimes) ->
+collect_samples(StartTime, TargetUs, BatchSize, Fun, State, AccOps, AccTimes, MinOps) ->
   T0 = erlang:monotonic_time(microsecond),
   run_batch(BatchSize, Fun, State),
   T1 = erlang:monotonic_time(microsecond),
@@ -154,10 +169,19 @@ collect_samples(StartTime, TargetUs, BatchSize, Fun, State, AccOps, AccTimes) ->
   NewAccTimes = [ElapsedBatch | AccTimes],
   TotalElapsed = T1 - StartTime,
   if
-    TotalElapsed >= TargetUs andalso NewAccOps >= 5 ->
+    TotalElapsed >= TargetUs andalso NewAccOps >= MinOps ->
       {NewAccOps, lists:reverse(NewAccTimes)};
     true ->
-      collect_samples(StartTime, TargetUs, BatchSize, Fun, State, NewAccOps, NewAccTimes)
+      collect_samples(
+        StartTime,
+        TargetUs,
+        BatchSize,
+        Fun,
+        State,
+        NewAccOps,
+        NewAccTimes,
+        MinOps
+      )
   end.
 
 run_batches(0, _BatchSize, _Fun, _State) ->
@@ -361,5 +385,59 @@ format_comparison_table(#{items := Items, threshold_pct := Threshold}) ->
         io_lib:format("~nALERT: Regressions detected exceeding threshold (~.1f%)!~n", [Threshold]);
       false ->
         io_lib:format("~nAll benchmarks within acceptable threshold (~.1f%).~n", [Threshold])
+    end,
+  [Header, Sep, Rows, SummaryNote].
+
+-spec format_comparison_markdown(comparison_summary()) -> iolist().
+format_comparison_markdown(#{items := Items, threshold_pct := Threshold}) ->
+  Header = "| Benchmark | Group | Baseline (µs) | PR (µs) | Delta | Status |\n",
+  Sep = "|:---|:---|---:|---:|---:|:---|\n",
+  Rows = [
+    begin
+      StatusBadge =
+        case Status of
+          faster -> "**Faster**";
+          similar -> "Same";
+          slower -> "Slower";
+          regression -> "**REGRESSION**"
+        end,
+      DeltaStr =
+        case Delta >= 0.0 of
+          true -> io_lib:format("+~.1f%", [Delta]);
+          false -> io_lib:format("~.1f%", [Delta])
+        end,
+      io_lib:format(
+        "| ~s | ~s | ~s | ~s | ~s | ~s |\n",
+        [
+          Name,
+          Group,
+          format_num(BaseMean, 2),
+          format_num(CurMean, 2),
+          DeltaStr,
+          StatusBadge
+        ]
+      )
+    end
+   || #{
+      name := Name,
+      group := Group,
+      baseline_mean_us := BaseMean,
+      current_mean_us := CurMean,
+      delta_pct := Delta,
+      status := Status
+    } <- Items
+  ],
+  SummaryNote =
+    case lists:any(fun(#{status := S}) -> S =:= regression end, Items) of
+      true ->
+        io_lib:format(
+          "~n> [!WARNING]~n> Performance regression detected exceeding threshold (~.1f%)!~n",
+          [Threshold]
+        );
+      false ->
+        io_lib:format(
+          "~n> [!NOTE]~n> All benchmarks within acceptable threshold (~.1f%).~n",
+          [Threshold]
+        )
     end,
   [Header, Sep, Rows, SummaryNote].
