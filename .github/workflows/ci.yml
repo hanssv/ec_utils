@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ master ]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
   test:
     name: OTP ${{ matrix.otp }}
@@ -60,6 +65,27 @@ jobs:
           echo "## Cryptographic Performance Benchmarks (OTP ${{ matrix.otp }})" >> $GITHUB_STEP_SUMMARY
           rebar3 as bench compile
           ./bin/bench --markdown -d 100 all >> $GITHUB_STEP_SUMMARY
+
+      - name: Publish Benchmark Results to PR
+        if: github.event_name == 'pull_request' && matrix.otp == '29'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY_FILE="/tmp/bench.md"
+          MARKER="<!-- ec_utils-benchmark -->"
+          echo "$MARKER" > "$BODY_FILE"
+          echo "## Cryptographic Performance Benchmarks (OTP ${{ matrix.otp }})" >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          ./bin/bench --markdown -d 100 all >> "$BODY_FILE"
+
+          COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n 1)
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -F body=@"$BODY_FILE"
+          else
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file "$BODY_FILE"
+          fi
 
       - name: Install ELP
         # Pinned ELP release 2026-10-14; keep in sync with mise.toml
