@@ -841,6 +841,82 @@ bench_ml_dsa_test() ->
   end,
   ok.
 
+bench_fn_dsa_test_() ->
+  {timeout, 120, fun() ->
+    Msg = <<"FN-DSA signature benchmark payload 2026">>,
+
+    %% FN-DSA-512 benchmarks
+    ItersKeygen = 3,
+    {TimeKeygen512, _} = timer:tc(fun() ->
+      [ecu_fn_dsa:keypair(fn_dsa_512) || _ <- lists:seq(1, ItersKeygen)]
+    end),
+    #{public := PK512, secret := SK512} = ecu_fn_dsa:keypair(fn_dsa_512),
+    ItersSign = 5,
+    {TimeSign512, _} = timer:tc(fun() ->
+      [ecu_fn_dsa:sign(Msg, SK512) || _ <- lists:seq(1, ItersSign)]
+    end),
+    {TimeSignDet512, _} = timer:tc(fun() ->
+      [ecu_fn_dsa:sign_deterministic(Msg, SK512) || _ <- lists:seq(1, ItersSign)]
+    end),
+    {ok, Sig512} = ecu_fn_dsa:sign(Msg, SK512),
+    ItersVerify = 10,
+    {TimeVerify512, _} = timer:tc(fun() ->
+      [ecu_fn_dsa:verify(Msg, Sig512, PK512) || _ <- lists:seq(1, ItersVerify)]
+    end),
+
+    %% FN-DSA-1024 benchmarks
+    ItersKeygen1024 = 2,
+    {TimeKeygen1024, _} = timer:tc(fun() ->
+      [ecu_fn_dsa:keypair(fn_dsa_1024) || _ <- lists:seq(1, ItersKeygen1024)]
+    end),
+    #{public := PK1024, secret := SK1024} = ecu_fn_dsa:keypair(fn_dsa_1024),
+    {TimeSign1024, _} = timer:tc(fun() ->
+      [ecu_fn_dsa:sign(Msg, SK1024) || _ <- lists:seq(1, ItersSign)]
+    end),
+    {TimeSignDet1024, _} = timer:tc(fun() ->
+      [ecu_fn_dsa:sign_deterministic(Msg, SK1024) || _ <- lists:seq(1, ItersSign)]
+    end),
+    {ok, Sig1024} = ecu_fn_dsa:sign(Msg, SK1024),
+    {TimeVerify1024, _} = timer:tc(fun() ->
+      [ecu_fn_dsa:verify(Msg, Sig1024, PK1024) || _ <- lists:seq(1, ItersVerify)]
+    end),
+
+    ?debugFmt("", []),
+    stats("FN-DSA-512 keypair ", "ecu_fn_dsa        ", ItersKeygen, TimeKeygen512),
+    stats("FN-DSA-512 sign    ", "ecu_fn_dsa        ", ItersSign, TimeSign512),
+    stats("FN-DSA-512 sign_det", "ecu_fn_dsa        ", ItersSign, TimeSignDet512),
+    stats("FN-DSA-512 verify  ", "ecu_fn_dsa        ", ItersVerify, TimeVerify512),
+    stats("FN-DSA-1024 keypair", "ecu_fn_dsa        ", ItersKeygen1024, TimeKeygen1024),
+    stats("FN-DSA-1024 sign   ", "ecu_fn_dsa        ", ItersSign, TimeSign1024),
+    stats("FN-DSA-1024 sign_dt", "ecu_fn_dsa        ", ItersSign, TimeSignDet1024),
+    stats("FN-DSA-1024 verify ", "ecu_fn_dsa        ", ItersVerify, TimeVerify1024),
+
+    case ecu_fn_dsa_nif:is_available() of
+      true ->
+        ItersNif = 50,
+        {TimeNifKeygen512, _} = timer:tc(fun() ->
+          [ecu_fn_dsa_nif:falcon512_keypair() || _ <- lists:seq(1, ItersNif)]
+        end),
+        {ok, {NifPK512, NifSK512}} = ecu_fn_dsa_nif:falcon512_keypair(),
+        {TimeNifSign512, _} = timer:tc(fun() ->
+          [ecu_fn_dsa_nif:falcon512_sign(NifSK512, Msg) || _ <- lists:seq(1, ItersNif)]
+        end),
+        {ok, NifSig512} = ecu_fn_dsa_nif:falcon512_sign(NifSK512, Msg),
+        {TimeNifVerify512, _} = timer:tc(fun() ->
+          [ecu_fn_dsa_nif:falcon512_verify(NifPK512, Msg, NifSig512) || _ <- lists:seq(1, ItersNif)]
+        end),
+        stats("FN-DSA-512 keypair ", "Rust (pqcrypto)   ", ItersNif, TimeNifKeygen512),
+        diff(TimeKeygen512 / ItersKeygen, TimeNifKeygen512 / ItersNif),
+        stats("FN-DSA-512 sign    ", "Rust (pqcrypto)   ", ItersNif, TimeNifSign512),
+        diff(TimeSign512 / ItersSign, TimeNifSign512 / ItersNif),
+        stats("FN-DSA-512 verify  ", "Rust (pqcrypto)   ", ItersNif, TimeNifVerify512),
+        diff(TimeVerify512 / ItersVerify, TimeNifVerify512 / ItersNif);
+      false ->
+        ok
+    end,
+    ok
+  end}.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

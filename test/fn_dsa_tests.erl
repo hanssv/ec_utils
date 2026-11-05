@@ -251,3 +251,40 @@ differential_keypair_nif_sign_erlang_test() ->
     false ->
       ok
   end.
+
+pure_erlang_keypair_test_() ->
+  {timeout, 60, fun() ->
+    %% 1. Generate Falcon-512 keypair in pure Erlang
+    #{public := PK512, secret := SK512} = ecu_fn_dsa:keypair(fn_dsa_512),
+    ?assertEqual(897, byte_size(PK512)),
+    ?assertEqual(1281, byte_size(SK512)),
+    Msg512 = <<"Test message for pure Erlang keypair 512">>,
+    {ok, Sig512} = ecu_fn_dsa:sign(Msg512, SK512),
+    ?assert(ecu_fn_dsa:verify(Msg512, Sig512, PK512)),
+    case ecu_fn_dsa_nif:is_available() of
+      true ->
+        ?assert(ecu_fn_dsa_nif:falcon512_verify(PK512, Msg512, Sig512));
+      false ->
+        ok
+    end,
+
+    %% 2. Generate Falcon-1024 keypair in pure Erlang
+    #{public := PK1024, secret := SK1024} = ecu_fn_dsa:keypair(fn_dsa_1024),
+    ?assertEqual(1793, byte_size(PK1024)),
+    ?assertEqual(2305, byte_size(SK1024)),
+    Msg1024 = <<"Test message for pure Erlang keypair 1024">>,
+    {ok, Sig1024} = ecu_fn_dsa:sign(Msg1024, SK1024),
+    ?assert(ecu_fn_dsa:verify(Msg1024, Sig1024, PK1024)),
+    case ecu_fn_dsa_nif:is_available() of
+      true ->
+        ?assert(ecu_fn_dsa_nif:falcon1024_verify(PK1024, Msg1024, Sig1024));
+      false ->
+        ok
+    end
+  end}.
+
+keypair_from_seed_reproducibility_test() ->
+  Seed = crypto:strong_rand_bytes(32),
+  KP1 = ecu_fn_dsa:keypair_from_seed(fn_dsa_512, Seed),
+  KP2 = ecu_fn_dsa:keypair_from_seed(fn_dsa_512, Seed),
+  ?assertEqual(KP1, KP2).

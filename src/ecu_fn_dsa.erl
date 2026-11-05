@@ -15,6 +15,8 @@
 -typing([eqwalizer]).
 
 -export([
+  keypair/1,
+  keypair_from_seed/2,
   parameter_set/1,
   sign/2,
   sign/3,
@@ -35,6 +37,7 @@
 ]).
 
 -export_type([
+  keypair/0,
   parameter_set/0,
   public_key/0,
   secret_key/0,
@@ -49,6 +52,7 @@
 -define(BOUND_512, 34034726).
 -define(BOUND_1024, 70265242).
 
+-type keypair() :: #{public := public_key(), secret := secret_key()}.
 -type parameter_set() :: fn_dsa_512 | fn_dsa_1024.
 -type public_key() :: binary().
 -type secret_key() :: binary().
@@ -93,6 +97,311 @@ parameter_set(Bin) when is_binary(Bin) ->
   end;
 parameter_set(_) ->
   error(badarg).
+
+%% ===================================================================
+%% Key Generation
+%% ===================================================================
+
+%% @doc Generates a fresh FN-DSA keypair from system entropy.
+-spec keypair(parameter_set() | atom()) -> keypair().
+keypair(Set) ->
+  Seed = crypto:strong_rand_bytes(32),
+  keypair_from_seed(Set, Seed).
+
+%% @doc Generates an FN-DSA keypair deterministically from a seed binary.
+-spec keypair_from_seed(parameter_set() | atom(), binary()) -> keypair().
+keypair_from_seed(Set0, Seed) when is_binary(Seed), byte_size(Seed) >= 32 ->
+  Set = canonical_set(Set0),
+  {N, LogN, _PKHead, _SigHead, _MaxSigLen, _Bound, FGBits, FBits, _SKHead, _SKLen} =
+    params(Set),
+  SigmaFG = 1.17 * math:sqrt(?FN_DSA_Q / (2 * N)),
+  InvSigma = 1.0 / SigmaFG,
+  SigmaMin =
+    case Set of
+      fn_dsa_512 -> 1.2778336969128337;
+      fn_dsa_1024 -> 1.298280334344292
+    end,
+  SeedStream = shake256(Seed, 64 * 8),
+  Rng0 = ecu_fn_dsa_fft:prng_init(SeedStream),
+  keypair_loop(Set, N, LogN, FGBits, FBits, InvSigma, SigmaMin, Rng0);
+keypair_from_seed(_, _) ->
+  error(badarg).
+
+-spec keypair_loop(
+  parameter_set(),
+  pos_integer(),
+  pos_integer(),
+  pos_integer(),
+  pos_integer(),
+  float(),
+  float(),
+  ecu_fn_dsa_fft:prng_state()
+) -> keypair().
+keypair_loop(Set, N, LogN, FGBits, FBits, InvSigma, SigmaMin, Rng0) ->
+  {F, Rng1} = sample_fg(Rng0, N, InvSigma, SigmaMin),
+  {G, Rng2} = sample_fg(Rng1, N, InvSigma, SigmaMin),
+  MinFG = -(1 bsl (FGBits - 1)) + 1,
+  MaxFG = (1 bsl (FGBits - 1)) - 1,
+  ValidFG =
+    lists:all(fun(X) -> X >= MinFG andalso X =< MaxFG end, F) andalso
+      lists:all(fun(X) -> X >= MinFG andalso X =< MaxFG end, G),
+  case ValidFG of
+    false ->
+      keypair_loop(Set, N, LogN, FGBits, FBits, InvSigma, SigmaMin, Rng2);
+    true ->
+      F_mod = list_to_tuple([((X rem ?FN_DSA_Q) + ?FN_DSA_Q) rem ?FN_DSA_Q || X <- F]),
+      F_ntt = ntt(F_mod, LogN),
+      case lists:any(fun(X) -> X =:= 0 end, tuple_to_list(F_ntt)) of
+        true ->
+          keypair_loop(Set, N, LogN, FGBits, FBits, InvSigma, SigmaMin, Rng2);
+        false ->
+          case
+            (try
+              ntru_solve(F, G)
+            catch
+              _:_ -> not_coprime
+            end)
+          of
+            not_coprime ->
+              keypair_loop(Set, N, LogN, FGBits, FBits, InvSigma, SigmaMin, Rng2);
+            {SolF, SolG} ->
+              MinF = -(1 bsl (FBits - 1)) + 1,
+              MaxF = (1 bsl (FBits - 1)) - 1,
+              ValidSolF = lists:all(fun(X) -> X >= MinF andalso X =< MaxF end, SolF),
+              ValidSolG = lists:all(fun(X) -> X >= -127 andalso X =< 127 end, SolG),
+              case ValidSolF andalso ValidSolG of
+                false ->
+                  keypair_loop(Set, N, LogN, FGBits, FBits, InvSigma, SigmaMin, Rng2);
+                true ->
+                  G_mod = list_to_tuple([((X rem ?FN_DSA_Q) + ?FN_DSA_Q) rem ?FN_DSA_Q || X <- G]),
+                  G_ntt = ntt(G_mod, LogN),
+                  H_ntt = list_to_tuple([
+                    (G_i * mod_inv(F_i, ?FN_DSA_Q)) rem ?FN_DSA_Q
+                   || {G_i, F_i} <- lists:zip(tuple_to_list(G_ntt), tuple_to_list(F_ntt))
+                  ]),
+                  H = tuple_to_list(inv_ntt(H_ntt, LogN)),
+                  PK = encode_public_key(Set, H),
+                  SK = encode_secret_key(Set, F, G, SolF),
+                  #{public => PK, secret => SK}
+              end
+          end
+      end
+  end.
+
+-spec sample_fg(ecu_fn_dsa_fft:prng_state(), pos_integer(), float(), float()) ->
+  {[integer()], ecu_fn_dsa_fft:prng_state()}.
+sample_fg(Rng, N, InvSigma, SigmaMin) ->
+  sample_fg_loop(Rng, N, InvSigma, SigmaMin, []).
+
+-spec sample_fg_loop(
+  ecu_fn_dsa_fft:prng_state(),
+  non_neg_integer(),
+  float(),
+  float(),
+  [integer()]
+) -> {[integer()], ecu_fn_dsa_fft:prng_state()}.
+sample_fg_loop(Rng, 0, _InvSigma, _SigmaMin, Acc) ->
+  {lists:reverse(Acc), Rng};
+sample_fg_loop(Rng0, Count, InvSigma, SigmaMin, Acc) ->
+  {Z, Rng1} = ecu_fn_dsa_fft:sample_z(Rng0, 0.0, InvSigma, SigmaMin),
+  sample_fg_loop(Rng1, Count - 1, InvSigma, SigmaMin, [Z | Acc]).
+
+-spec ntru_solve([integer()], [integer()]) -> {[integer()], [integer()]}.
+ntru_solve(F, G) ->
+  N = length(F),
+  if
+    N =:= 1 ->
+      F0 = hd(F),
+      G0 = hd(G),
+      {D, U, V} = xgcd(F0, G0),
+      case D of
+        1 ->
+          {[-?FN_DSA_Q * V], [?FN_DSA_Q * U]};
+        _ ->
+          throw({error, not_coprime})
+      end;
+    true ->
+      Fp = field_norm(F),
+      Gp = field_norm(G),
+      {Fp_sol, Gp_sol} = ntru_solve(Fp, Gp),
+      LiftFp = lift(Fp_sol),
+      LiftGp = lift(Gp_sol),
+      F_init = negacyclic_mul(LiftFp, galois_conj(G)),
+      G_init = negacyclic_mul(LiftGp, galois_conj(F)),
+      reduce(F, G, F_init, G_init)
+  end.
+
+-spec reduce([integer()], [integer()], [integer()], [integer()]) -> {[integer()], [integer()]}.
+reduce(F_poly, G_poly, F, G) ->
+  N = length(F_poly),
+  LogN = trunc(math:log2(N)),
+  Size_fg = lists:max([53, max_bitsize(F_poly), max_bitsize(G_poly)]),
+  Shift_fg = max(0, Size_fg - 53),
+  F_adj = [float(X bsr Shift_fg) || X <- F_poly],
+  G_adj = [float(X bsr Shift_fg) || X <- G_poly],
+  Fa_fft = ecu_fn_dsa_fft:fft(list_to_tuple(F_adj), LogN),
+  Ga_fft = ecu_fn_dsa_fft:fft(list_to_tuple(G_adj), LogN),
+  Den_fft = ecu_fn_dsa_fft:poly_add_fft(
+    ecu_fn_dsa_fft:poly_mulselfadj_fft(Fa_fft),
+    ecu_fn_dsa_fft:poly_mulselfadj_fft(Ga_fft)
+  ),
+  reduce_loop(F_poly, G_poly, F, G, Fa_fft, Ga_fft, Den_fft, Size_fg, LogN).
+
+-spec reduce_loop(
+  [integer()],
+  [integer()],
+  [integer()],
+  [integer()],
+  tuple(),
+  tuple(),
+  tuple(),
+  non_neg_integer(),
+  non_neg_integer()
+) -> {[integer()], [integer()]}.
+reduce_loop(F_poly, G_poly, F, G, Fa_fft, Ga_fft, Den_fft, Size_fg, LogN) ->
+  Size_FG = lists:max([53, max_bitsize(F), max_bitsize(G)]),
+  if
+    Size_FG < Size_fg ->
+      {F, G};
+    true ->
+      Shift_FG = max(0, Size_FG - 53),
+      F_adj = [float(X bsr Shift_FG) || X <- F],
+      G_adj = [float(X bsr Shift_FG) || X <- G],
+      FA_fft = ecu_fn_dsa_fft:fft(list_to_tuple(F_adj), LogN),
+      GA_fft = ecu_fn_dsa_fft:fft(list_to_tuple(G_adj), LogN),
+      Num_fft = ecu_fn_dsa_fft:poly_add_fft(
+        ecu_fn_dsa_fft:poly_muladj_fft(FA_fft, Fa_fft),
+        ecu_fn_dsa_fft:poly_muladj_fft(GA_fft, Ga_fft)
+      ),
+      K_fft = ecu_fn_dsa_fft:poly_div_fft(Num_fft, Den_fft),
+      K_real = tuple_to_list(ecu_fn_dsa_fft:inv_fft(K_fft, LogN)),
+      K = [
+        case X of
+          Flt when is_float(Flt) -> round(Flt);
+          Int when is_integer(Int) -> Int
+        end
+       || X <- K_real
+      ],
+      AllZero = lists:all(fun(X) -> X =:= 0 end, K),
+      case AllZero of
+        true ->
+          {F, G};
+        false ->
+          Shift = Size_FG - Size_fg,
+          Fk = negacyclic_mul(F_poly, K),
+          Gk = negacyclic_mul(G_poly, K),
+          NewF = [F_i - (Fk_i bsl Shift) || {F_i, Fk_i} <- lists:zip(F, Fk)],
+          NewG = [G_i - (Gk_i bsl Shift) || {G_i, Gk_i} <- lists:zip(G, Gk)],
+          reduce_loop(F_poly, G_poly, NewF, NewG, Fa_fft, Ga_fft, Den_fft, Size_fg, LogN)
+      end
+  end.
+
+-spec field_norm([integer()]) -> [integer()].
+field_norm(A) ->
+  N2 = length(A) div 2,
+  Arr = list_to_tuple(A),
+  Ae = [
+    case element(2 * I + 1, Arr) of
+      V when is_integer(V) -> V
+    end
+   || I <- lists:seq(0, N2 - 1)
+  ],
+  Ao = [
+    case element(2 * I + 2, Arr) of
+      V when is_integer(V) -> V
+    end
+   || I <- lists:seq(0, N2 - 1)
+  ],
+  Ae2 = negacyclic_mul(Ae, Ae),
+  Ao2 = negacyclic_mul(Ao, Ao),
+  Res0 = hd(Ae2) + lists:last(Ao2),
+  ResRest = [
+    lists:nth(I + 2, Ae2) - lists:nth(I + 1, Ao2)
+   || I <- lists:seq(0, N2 - 2)
+  ],
+  [Res0 | ResRest].
+
+-spec lift([integer()]) -> [integer()].
+lift(A) ->
+  lists:flatten([[X, 0] || X <- A]).
+
+-spec galois_conj([integer()]) -> [integer()].
+galois_conj(A) ->
+  [
+    case I rem 2 of
+      0 -> X;
+      1 -> -X
+    end
+   || {X, I} <- lists:zip(A, lists:seq(0, length(A) - 1))
+  ].
+
+-spec xgcd(integer(), integer()) -> {integer(), integer(), integer()}.
+xgcd(A, 0) when A >= 0 -> {A, 1, 0};
+xgcd(A, 0) ->
+  {-A, -1, 0};
+xgcd(A, B) ->
+  {D, U1, V1} = xgcd(B, A rem B),
+  {D, V1, U1 - (A div B) * V1}.
+
+-spec negacyclic_mul([integer()], [integer()]) -> [integer()].
+negacyclic_mul(A, B) ->
+  N = length(A),
+  ArrA = list_to_tuple(A),
+  ArrB = list_to_tuple(B),
+  [conv_coeff(I, N, ArrA, ArrB) || I <- lists:seq(0, N - 1)].
+
+-spec conv_coeff(non_neg_integer(), pos_integer(), tuple(), tuple()) -> integer().
+conv_coeff(I, N, ArrA, ArrB) ->
+  Sum1 = conv_sum_loop(0, I, I, ArrA, ArrB, 0),
+  Sum2 = conv_sum_loop(I + 1, N - 1, I + N, ArrA, ArrB, 0),
+  Sum1 - Sum2.
+
+-spec conv_sum_loop(
+  non_neg_integer(),
+  integer(),
+  non_neg_integer(),
+  tuple(),
+  tuple(),
+  integer()
+) -> integer().
+conv_sum_loop(J, End, _Target, _ArrA, _ArrB, Acc) when J > End ->
+  Acc;
+conv_sum_loop(J, End, Target, ArrA, ArrB, Acc) ->
+  AJ =
+    case element(J + 1, ArrA) of
+      V1 when is_integer(V1) -> V1
+    end,
+  BI =
+    case element(Target - J + 1, ArrB) of
+      V2 when is_integer(V2) -> V2
+    end,
+  conv_sum_loop(J + 1, End, Target, ArrA, ArrB, Acc + AJ * BI).
+
+-spec max_bitsize([integer()]) -> non_neg_integer().
+max_bitsize(L) ->
+  lists:max([bit_length(X) || X <- L]).
+
+-spec bit_length(integer()) -> non_neg_integer().
+bit_length(0) ->
+  0;
+bit_length(X) when X < 0 -> bit_length(-X);
+bit_length(X) ->
+  Bin = binary:encode_unsigned(X),
+  case Bin of
+    <<HighByte, _/binary>> ->
+      (byte_size(Bin) - 1) * 8 + high_bit(HighByte)
+  end.
+
+-spec high_bit(non_neg_integer()) -> non_neg_integer().
+high_bit(B) when B >= 128 -> 8;
+high_bit(B) when B >= 64 -> 7;
+high_bit(B) when B >= 32 -> 6;
+high_bit(B) when B >= 16 -> 5;
+high_bit(B) when B >= 8 -> 4;
+high_bit(B) when B >= 4 -> 3;
+high_bit(B) when B >= 2 -> 2;
+high_bit(B) when B >= 1 -> 1;
+high_bit(0) -> 0.
 
 %% ===================================================================
 %% Signature Verification
