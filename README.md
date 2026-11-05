@@ -590,6 +590,26 @@ the library incorporates key algorithmic optimizations:
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
 - *All reference NIFs can be built together using `make reference_nifs`.*
 
+### Automated Benchmarking CLI
+
+`ec_utils` includes a dedicated benchmarking tool (`bin/bench` / `make bench`) for performance profiling and regression detection:
+
+```bash
+# Run all benchmarks with default duration (250 ms/op)
+make bench
+
+# Filter by cryptographic group or pattern
+./bin/bench ed25519
+./bin/bench ml_dsa
+./bin/bench secp256k1
+
+# Save baseline snapshot
+make bench-save        # writes baseline.json
+
+# Compare current performance against baseline
+make bench-compare     # compares against baseline.json with regression alerts
+```
+
 
 Roadmap
 -------

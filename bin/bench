@@ -1,0 +1,28 @@
+#!/usr/bin/env escript
+%%! -noshell
+
+main(Args) ->
+  ScriptPath = escript:script_name(),
+  RepoDir = filename:dirname(filename:dirname(filename:absname(ScriptPath))),
+  BenchEbin = filename:join([RepoDir, "_build", "bench", "lib", "ec_utils", "ebin"]),
+  DefaultEbin = filename:join([RepoDir, "_build", "default", "lib", "ec_utils", "ebin"]),
+  code:add_pathz(DefaultEbin),
+  code:add_pathz(BenchEbin),
+
+  case code:which(ecu_bench) of
+    non_existing ->
+      io:format("Compiling ec_utils benchmark suite...~n"),
+      os:cmd("cd " ++ RepoDir ++ " && rebar3 as bench compile"),
+      code:add_pathz(DefaultEbin),
+      code:add_pathz(BenchEbin);
+    _ ->
+      ok
+  end,
+
+  case code:which(ecu_bench) of
+    non_existing ->
+      io:format(standard_error, "Error: Could not locate compiled benchmark modules.~n", []),
+      halt(1);
+    _ ->
+      ecu_bench:main(Args)
+  end.

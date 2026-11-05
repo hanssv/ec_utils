@@ -130,12 +130,12 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 9. Hash-to-Curve (RFC 9380) & Verifiable Random Functions (VRF / RFC 9381)
+## 9. Hash-to-Curve (RFC 9380) `[Completed]` & Verifiable Random Functions (VRF / RFC 9381)
 
 - **Standard**: [RFC 9380](https://datatracker.ietf.org/doc/html/rfc9380) (Hashing to Elliptic Curves) and [RFC 9381](https://datatracker.ietf.org/doc/html/rfc9381) (Verifiable Random Functions).
 - **Goal**: Map arbitrary byte strings deterministically to curve points and evaluate verifiable pseudorandom proofs.
 - **Features**:
-  - Simplified SWU (Shallue-van de Woestijne-Ulas) and Elligator2 point mapping.
+  - `ecu_h2c` `[Completed]`: Simplified SWU on 3-isogenous curve with rational map (secp256k1), Elligator 2 on Montgomery Curve25519 with cofactor clearing (edwards25519), and Elligator 2 on Montgomery Curve448 with degree-4 isogeny (edwards448).
   - ECVRF-EDWARDS25519-SHA512-ELL2 and ECVRF-SECP256K1-SHA256 evaluation and verification.
 
 ---
@@ -193,4 +193,4 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.
-- **Benchmarking CLI**: A lightweight escript or task for running and reporting automated performance regressions.
+- **Benchmarking CLI `[Completed]`**: Standalone escript (`bin/bench`) and Makefile targets (`make bench`, `make bench-save`, `make bench-compare`) supporting calibrated execution, statistical percentiles (mean, median, p95), JSON export, Markdown tables, and automated regression detection.

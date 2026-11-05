@@ -1,15 +1,27 @@
-.PHONY: all compile test eqc dialyzer fmt fmt-check rustcrypto_reference schnorr_reference frost_reference reference_nifs clean
+.PHONY: all compile test eqc dialyzer fmt fmt-check bench bench-save bench-compare rustcrypto_reference schnorr_reference frost_reference reference_nifs clean
 
 all: compile
 
 fmt:
-	erlfmt -w {src,include,test,eqc}/*.{erl,hrl,app.src} rebar.config
+	erlfmt -w {src,include,test,eqc,bench}/*.{erl,hrl,app.src} rebar.config
 
 fmt-check:
-	erlfmt -c {src,include,test,eqc}/*.{erl,hrl,app.src} rebar.config
+	erlfmt -c {src,include,test,eqc,bench}/*.{erl,hrl,app.src} rebar.config
 
 compile:
 	rebar3 compile
+
+bench:
+	rebar3 as bench compile
+	./bin/bench $(ARGS)
+
+bench-save:
+	rebar3 as bench compile
+	./bin/bench --save baseline.json $(ARGS)
+
+bench-compare:
+	rebar3 as bench compile
+	./bin/bench --compare baseline.json $(ARGS)
 
 test:
 	rebar3 eunit
