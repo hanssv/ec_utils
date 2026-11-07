@@ -1,0 +1,13 @@
+[package]
+name = "ecu_fn_dsa_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ecu_fn_dsa_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+pqcrypto-falcon = "0.4.1"
+pqcrypto-traits = "0.3.5"
+rustler = "0.39.0"
