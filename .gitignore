@@ -25,4 +25,5 @@ priv/ecu_rustcrypto_nif.*
 priv/ecu_frost_nif.*
 priv/ecu_musig2_nif.*
 priv/ecu_fn_dsa_nif.*
+priv/ecu_bls12_381_nif.*
 doc/
