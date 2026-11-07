@@ -194,3 +194,14 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.
 - **Benchmarking CLI `[Completed]`**: Standalone escript (`bin/bench`) and Makefile targets (`make bench`, `make bench-save`, `make bench-compare`) supporting calibrated execution, statistical percentiles (mean, median, p95), JSON export, Markdown tables, and automated regression detection.
+
+---
+
+## 15. Native Cryptographic Independence (Replacing `crypto`)
+
+- **Goal**: Enable running `ec_utils` in environments without OpenSSL or OTP `crypto` application, providing a 100% self-contained pure-Erlang cryptographic stack.
+- **Features**:
+  - High-performance entropy source: native CSPRNG fallback (reading `/dev/urandom` / `getrandom(2)` via pure-Erlang port or minimal standalone NIF) to replace `crypto:strong_rand_bytes/1`.
+  - Native hash primitives: complete coverage of hash algorithms used in signatures and key derivations (SHA-2, SHA-3/SHAKE already pure-Erlang; extend to RIPEMD-160 and BLAKE2 as needed).
+  - Configurable backend selection allowing seamless switching between OTP `crypto` acceleration and pure-Erlang standalone operation.
+
