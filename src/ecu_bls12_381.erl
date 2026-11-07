@@ -102,6 +102,13 @@
   g2_j_double/1
 ]).
 
+%% Pairing Operations
+-export([
+  pairing/2,
+  pairing_check/1,
+  pairing_check/4
+]).
+
 %%%-------------------------------------------------------------------
 %%% G1 Operations (over Fp)
 %%%-------------------------------------------------------------------
@@ -745,3 +752,19 @@ integer_to_bits(N) ->
 -spec integer_to_bits(non_neg_integer(), [0 | 1]) -> [0 | 1].
 integer_to_bits(0, Acc) -> Acc;
 integer_to_bits(N, Acc) -> integer_to_bits(N bsr 1, [(N band 1) | Acc]).
+
+%%%-------------------------------------------------------------------
+%%% Pairing Operations
+%%%-------------------------------------------------------------------
+
+-spec pairing(g1_affine(), g2_affine()) -> ?FP:fp12().
+pairing(P, Q) ->
+  ecu_bls12_381_pairing:pairing(P, Q).
+
+-spec pairing_check([{g1_affine(), g2_affine()}]) -> boolean().
+pairing_check(Pairs) ->
+  ecu_bls12_381_pairing:pairing_check(Pairs).
+
+-spec pairing_check(g1_affine(), g2_affine(), g1_affine(), g2_affine()) -> boolean().
+pairing_check(P1, Q1, P2, Q2) ->
+  ecu_bls12_381_pairing:pairing_check(P1, Q1, P2, Q2).
