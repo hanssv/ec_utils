@@ -38,6 +38,8 @@ Detailed style rules are defined in [`STYLE.md`](STYLE.md). Key points:
   When the user asks for an opinion or discusses an idea, **stop immediately after answering**. Do not proceed to implementation until the user explicitly instructs you to do so.
 - **Plans & Confirmation**:
   Always wait for explicit user confirmation after proposing a plan, especially when previous actions were corrected or clarified. Do not assume approval.
+- **PR Creation & CI Follow-up**:
+  When creating a pull request, always actively monitor and follow up on CI results (`gh pr checks`) until all jobs pass cleanly. Never consider the PR task complete while checks are pending or failing.
 - **Git Commit Messages**:
   - Subject line: strictly **≤ 50 characters** (hard ceiling 72 characters).
   - Format: Imperative mood (e.g. `Add ...`, `Fix ...`, `Document ...`), capitalized, no trailing period.
