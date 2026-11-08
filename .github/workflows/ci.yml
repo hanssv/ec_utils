@@ -50,8 +50,10 @@ jobs:
         if: steps.cache-rebar3.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/.local/bin
-          curl -fsSL https://github.com/erlang/rebar3/releases/download/3.27.3/rebar3 -o ~/.local/bin/rebar3
+          gh release download 3.27.3 --repo erlang/rebar3 --pattern "rebar3" --output ~/.local/bin/rebar3
           chmod +x ~/.local/bin/rebar3
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Add local bin to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
