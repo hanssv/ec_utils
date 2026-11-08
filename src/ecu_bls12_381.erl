@@ -125,6 +125,34 @@
   g2_encode_to_curve/3
 ]).
 
+%% IETF BLS Signature Operations
+-export([
+  min_pk_keygen/1,
+  min_pk_keygen/2,
+  min_pk_sign/2,
+  min_pk_sign/3,
+  min_pk_verify/3,
+  min_pk_verify/4,
+  min_pk_aggregate_signatures/1,
+  min_pk_aggregate_public_keys/1,
+  min_pk_fast_aggregate_verify/3,
+  min_pk_fast_aggregate_verify/4,
+  min_pk_aggregate_verify/2,
+  min_pk_aggregate_verify/3,
+  min_sig_keygen/1,
+  min_sig_keygen/2,
+  min_sig_sign/2,
+  min_sig_sign/3,
+  min_sig_verify/3,
+  min_sig_verify/4,
+  min_sig_aggregate_signatures/1,
+  min_sig_aggregate_public_keys/1,
+  min_sig_fast_aggregate_verify/3,
+  min_sig_fast_aggregate_verify/4,
+  min_sig_aggregate_verify/2,
+  min_sig_aggregate_verify/3
+]).
+
 %%%-------------------------------------------------------------------
 %%% G1 Operations (over Fp)
 %%%-------------------------------------------------------------------
@@ -836,3 +864,153 @@ g2_encode_to_curve(Msg, DST) ->
 -spec g2_encode_to_curve(binary(), binary(), binary()) -> g2_affine().
 g2_encode_to_curve(Msg, DST, Aug) ->
   ecu_bls12_381_h2c:encode_to_curve_g2(Msg, DST, Aug).
+
+%%%-------------------------------------------------------------------
+%%% IETF BLS Signature Operations
+%%%-------------------------------------------------------------------
+
+-spec min_pk_keygen(binary()) -> {ok, {g1_compressed(), <<_:256>>}} | {error, term()}.
+min_pk_keygen(IKM) ->
+  ecu_bls12_381_sig:min_pk_keygen(IKM).
+
+-spec min_pk_keygen(binary(), [ecu_bls12_381_sig:keygen_opt()]) ->
+  {ok, {g1_compressed(), <<_:256>>}} | {error, term()}.
+min_pk_keygen(IKM, Opts) ->
+  ecu_bls12_381_sig:min_pk_keygen(IKM, Opts).
+
+-spec min_pk_sign(ecu_bls12_381_sig:privkey(), binary()) -> g2_compressed().
+min_pk_sign(SK, Msg) ->
+  ecu_bls12_381_sig:min_pk_sign(SK, Msg).
+
+-spec min_pk_sign(ecu_bls12_381_sig:privkey(), binary(), binary()) -> g2_compressed().
+min_pk_sign(SK, Msg, DST) ->
+  ecu_bls12_381_sig:min_pk_sign(SK, Msg, DST).
+
+-spec min_pk_verify(ecu_bls12_381_sig:min_pk_pubkey(), binary(), ecu_bls12_381_sig:min_pk_sig()) ->
+  boolean().
+min_pk_verify(PK, Msg, Sig) ->
+  ecu_bls12_381_sig:min_pk_verify(PK, Msg, Sig).
+
+-spec min_pk_verify(
+  ecu_bls12_381_sig:min_pk_pubkey(),
+  binary(),
+  ecu_bls12_381_sig:min_pk_sig(),
+  binary()
+) -> boolean().
+min_pk_verify(PK, Msg, Sig, DST) ->
+  ecu_bls12_381_sig:min_pk_verify(PK, Msg, Sig, DST).
+
+-spec min_pk_aggregate_signatures([ecu_bls12_381_sig:min_pk_sig()]) ->
+  {ok, g2_compressed()} | {error, term()}.
+min_pk_aggregate_signatures(Sigs) ->
+  ecu_bls12_381_sig:min_pk_aggregate_signatures(Sigs).
+
+-spec min_pk_aggregate_public_keys([ecu_bls12_381_sig:min_pk_pubkey()]) ->
+  {ok, g1_compressed()} | {error, term()}.
+min_pk_aggregate_public_keys(PKs) ->
+  ecu_bls12_381_sig:min_pk_aggregate_public_keys(PKs).
+
+-spec min_pk_fast_aggregate_verify(
+  [ecu_bls12_381_sig:min_pk_pubkey()],
+  binary(),
+  ecu_bls12_381_sig:min_pk_sig()
+) -> boolean().
+min_pk_fast_aggregate_verify(PKs, Msg, SigAgg) ->
+  ecu_bls12_381_sig:min_pk_fast_aggregate_verify(PKs, Msg, SigAgg).
+
+-spec min_pk_fast_aggregate_verify(
+  [ecu_bls12_381_sig:min_pk_pubkey()],
+  binary(),
+  ecu_bls12_381_sig:min_pk_sig(),
+  binary()
+) -> boolean().
+min_pk_fast_aggregate_verify(PKs, Msg, SigAgg, DST) ->
+  ecu_bls12_381_sig:min_pk_fast_aggregate_verify(PKs, Msg, SigAgg, DST).
+
+-spec min_pk_aggregate_verify(
+  [{ecu_bls12_381_sig:min_pk_pubkey(), binary()}],
+  ecu_bls12_381_sig:min_pk_sig()
+) -> boolean().
+min_pk_aggregate_verify(Pairs, SigAgg) ->
+  ecu_bls12_381_sig:min_pk_aggregate_verify(Pairs, SigAgg).
+
+-spec min_pk_aggregate_verify(
+  [{ecu_bls12_381_sig:min_pk_pubkey(), binary()}],
+  ecu_bls12_381_sig:min_pk_sig(),
+  binary()
+) -> boolean().
+min_pk_aggregate_verify(Pairs, SigAgg, DST) ->
+  ecu_bls12_381_sig:min_pk_aggregate_verify(Pairs, SigAgg, DST).
+
+-spec min_sig_keygen(binary()) -> {ok, {g2_compressed(), <<_:256>>}} | {error, term()}.
+min_sig_keygen(IKM) ->
+  ecu_bls12_381_sig:min_sig_keygen(IKM).
+
+-spec min_sig_keygen(binary(), [ecu_bls12_381_sig:keygen_opt()]) ->
+  {ok, {g2_compressed(), <<_:256>>}} | {error, term()}.
+min_sig_keygen(IKM, Opts) ->
+  ecu_bls12_381_sig:min_sig_keygen(IKM, Opts).
+
+-spec min_sig_sign(ecu_bls12_381_sig:privkey(), binary()) -> g1_compressed().
+min_sig_sign(SK, Msg) ->
+  ecu_bls12_381_sig:min_sig_sign(SK, Msg).
+
+-spec min_sig_sign(ecu_bls12_381_sig:privkey(), binary(), binary()) -> g1_compressed().
+min_sig_sign(SK, Msg, DST) ->
+  ecu_bls12_381_sig:min_sig_sign(SK, Msg, DST).
+
+-spec min_sig_verify(ecu_bls12_381_sig:min_sig_pubkey(), binary(), ecu_bls12_381_sig:min_sig_sig()) ->
+  boolean().
+min_sig_verify(PK, Msg, Sig) ->
+  ecu_bls12_381_sig:min_sig_verify(PK, Msg, Sig).
+
+-spec min_sig_verify(
+  ecu_bls12_381_sig:min_sig_pubkey(),
+  binary(),
+  ecu_bls12_381_sig:min_sig_sig(),
+  binary()
+) -> boolean().
+min_sig_verify(PK, Msg, Sig, DST) ->
+  ecu_bls12_381_sig:min_sig_verify(PK, Msg, Sig, DST).
+
+-spec min_sig_aggregate_signatures([ecu_bls12_381_sig:min_sig_sig()]) ->
+  {ok, g1_compressed()} | {error, term()}.
+min_sig_aggregate_signatures(Sigs) ->
+  ecu_bls12_381_sig:min_sig_aggregate_signatures(Sigs).
+
+-spec min_sig_aggregate_public_keys([ecu_bls12_381_sig:min_sig_pubkey()]) ->
+  {ok, g2_compressed()} | {error, term()}.
+min_sig_aggregate_public_keys(PKs) ->
+  ecu_bls12_381_sig:min_sig_aggregate_public_keys(PKs).
+
+-spec min_sig_fast_aggregate_verify(
+  [ecu_bls12_381_sig:min_sig_pubkey()],
+  binary(),
+  ecu_bls12_381_sig:min_sig_sig()
+) -> boolean().
+min_sig_fast_aggregate_verify(PKs, Msg, SigAgg) ->
+  ecu_bls12_381_sig:min_sig_fast_aggregate_verify(PKs, Msg, SigAgg).
+
+-spec min_sig_fast_aggregate_verify(
+  [ecu_bls12_381_sig:min_sig_pubkey()],
+  binary(),
+  ecu_bls12_381_sig:min_sig_sig(),
+  binary()
+) -> boolean().
+min_sig_fast_aggregate_verify(PKs, Msg, SigAgg, DST) ->
+  ecu_bls12_381_sig:min_sig_fast_aggregate_verify(PKs, Msg, SigAgg, DST).
+
+-spec min_sig_aggregate_verify(
+  [{ecu_bls12_381_sig:min_sig_pubkey(), binary()}],
+  ecu_bls12_381_sig:min_sig_sig()
+) -> boolean().
+min_sig_aggregate_verify(Pairs, SigAgg) ->
+  ecu_bls12_381_sig:min_sig_aggregate_verify(Pairs, SigAgg).
+
+-spec min_sig_aggregate_verify(
+  [{ecu_bls12_381_sig:min_sig_pubkey(), binary()}],
+  ecu_bls12_381_sig:min_sig_sig(),
+  binary()
+) -> boolean().
+min_sig_aggregate_verify(Pairs, SigAgg, DST) ->
+  ecu_bls12_381_sig:min_sig_aggregate_verify(Pairs, SigAgg, DST).
