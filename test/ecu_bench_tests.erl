@@ -87,6 +87,13 @@ bench_compare_regression_test() ->
       <<"group">> => <<"g1">>,
       <<"mean_us">> => 100.0,
       <<"ops_per_sec">> => 10000.0
+    },
+    #{
+      <<"id">> => <<"b3">>,
+      <<"name">> => <<"Bench 3">>,
+      <<"group">> => <<"g1">>,
+      <<"mean_us">> => 100.0,
+      <<"ops_per_sec">> => 10000.0
     }
   ],
   Current = [
@@ -101,17 +108,26 @@ bench_compare_regression_test() ->
       id => <<"b2">>,
       name => <<"Bench 2">>,
       group => <<"g1">>,
-      mean_us => 125.0,
-      ops_per_sec => 8000.0
+      mean_us => 160.0,
+      ops_per_sec => 6250.0
+    },
+    #{
+      id => <<"b3">>,
+      name => <<"Bench 3">>,
+      group => <<"g1">>,
+      mean_us => 120.0,
+      ops_per_sec => 8333.0
     }
   ],
   Comparison = ecu_bench_runner:compare(Current, Baseline, 10.0),
   ?assertEqual(true, maps:get(has_regression, Comparison)),
   Items = maps:get(items, Comparison),
-  ?assertEqual(2, length(Items)),
-  [Item1, Item2] = Items,
+  ?assertEqual(3, length(Items)),
+  [Item1, Item2, Item3] = Items,
   ?assertEqual(faster, maps:get(status, Item1)),
   ?assertEqual(regression, maps:get(status, Item2)),
+  %% Item 3 has +20% delta but +20us absolute delta (< 50us floor), so classified as slower:
+  ?assertEqual(slower, maps:get(status, Item3)),
   TableBin = iolist_to_binary(ecu_bench_runner:format_comparison_table(Comparison)),
   ?assert(binary:match(TableBin, <<"[FASTER]">>) =/= nomatch),
   ?assert(binary:match(TableBin, <<"[REGRESSION!]">>) =/= nomatch),
