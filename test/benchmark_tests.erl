@@ -917,6 +917,167 @@ bench_fn_dsa_test_() ->
     ok
   end}.
 
+bench_bls12_381_test_() ->
+  {timeout, 120, fun() ->
+    Msg = <<"BLS12-381 benchmark message 2026">>,
+    Scalar =
+      16#123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0 rem (ecu_bls12_381:r() - 1) +
+        1,
+    ScalarBin = <<Scalar:256/big>>,
+    G1Gen = ecu_bls12_381:g1_generator(),
+    G2Gen = ecu_bls12_381:g2_generator(),
+    G1Comp = ecu_bls12_381:g1_compress(G1Gen),
+    G2Comp = ecu_bls12_381:g2_compress(G2Gen),
+
+    ItersG1 = 20,
+    {TimeG1Mul, _} = timer:tc(fun() ->
+      [ecu_bls12_381:g1_scalar_mul(G1Gen, Scalar) || _ <- lists:seq(1, ItersG1)]
+    end),
+
+    ItersG2 = 20,
+    {TimeG2Mul, _} = timer:tc(fun() ->
+      [ecu_bls12_381:g2_scalar_mul(G2Gen, Scalar) || _ <- lists:seq(1, ItersG2)]
+    end),
+
+    ItersPair = 10,
+    {TimePair, _} = timer:tc(fun() ->
+      [ecu_bls12_381_pairing:pairing(G1Gen, G2Gen) || _ <- lists:seq(1, ItersPair)]
+    end),
+
+    ItersH2C = 10,
+    {TimeH2CG1, _} = timer:tc(fun() ->
+      [ecu_bls12_381:g1_hash_to_curve(Msg) || _ <- lists:seq(1, ItersH2C)]
+    end),
+    {TimeH2CG2, _} = timer:tc(fun() ->
+      [ecu_bls12_381:g2_hash_to_curve(Msg) || _ <- lists:seq(1, ItersH2C)]
+    end),
+
+    {ok, {MinPkPub, MinPkPriv}} = ecu_bls12_381_sig:min_pk_keygen(
+      <<"benchmark-ikm-32-bytes-minimum!!">>
+    ),
+    {TimeSignMinPk, _} = timer:tc(fun() ->
+      [ecu_bls12_381_sig:sign(min_pk, MinPkPriv, Msg) || _ <- lists:seq(1, ItersH2C)]
+    end),
+    MinPkSig = ecu_bls12_381_sig:sign(min_pk, MinPkPriv, Msg),
+    {TimeVerifyMinPk, _} = timer:tc(fun() ->
+      [ecu_bls12_381_sig:verify(min_pk, MinPkPub, Msg, MinPkSig) || _ <- lists:seq(1, ItersPair)]
+    end),
+
+    ?debugFmt("", []),
+    stats("BLS12-381 G1 mul   ", "ecu_bls12_381 ", ItersG1, TimeG1Mul),
+    stats("BLS12-381 G2 mul   ", "ecu_bls12_381 ", ItersG2, TimeG2Mul),
+    stats("BLS12-381 pairing  ", "ecu_bls12_381 ", ItersPair, TimePair),
+    stats("BLS12-381 H2C G1   ", "ecu_bls12_381 ", ItersH2C, TimeH2CG1),
+    stats("BLS12-381 H2C G2   ", "ecu_bls12_381 ", ItersH2C, TimeH2CG2),
+    stats("BLS min_pk sign    ", "ecu_bls12_381 ", ItersH2C, TimeSignMinPk),
+    stats("BLS min_pk verify  ", "ecu_bls12_381 ", ItersPair, TimeVerifyMinPk),
+
+    case ecu_bls12_381_nif:is_available() of
+      true ->
+        ItersNif = 100,
+        {TimeNifG1Mul, _} = timer:tc(fun() ->
+          [ecu_bls12_381_nif:g1_mult(G1Comp, ScalarBin) || _ <- lists:seq(1, ItersNif)]
+        end),
+        {TimeNifG2Mul, _} = timer:tc(fun() ->
+          [ecu_bls12_381_nif:g2_mult(G2Comp, ScalarBin) || _ <- lists:seq(1, ItersNif)]
+        end),
+        {TimeNifPair, _} = timer:tc(fun() ->
+          [ecu_bls12_381_nif:pairing(G1Comp, G2Comp) || _ <- lists:seq(1, ItersNif)]
+        end),
+        DSTG1 = ecu_bls12_381_h2c:default_dst_g1_ro(),
+        DSTG2 = ecu_bls12_381_h2c:default_dst_g2_ro(),
+        {TimeNifH2CG1, _} = timer:tc(fun() ->
+          [ecu_bls12_381_nif:g1_hash_to_curve(Msg, DSTG1) || _ <- lists:seq(1, ItersNif)]
+        end),
+        {TimeNifH2CG2, _} = timer:tc(fun() ->
+          [ecu_bls12_381_nif:g2_hash_to_curve(Msg, DSTG2) || _ <- lists:seq(1, ItersNif)]
+        end),
+        {ok, {NifMinPkPub, NifMinPkSK}} =
+          ecu_bls12_381_nif:min_pk_keygen(<<"benchmark-ikm-32-bytes-minimum!!">>),
+        {TimeNifSignMinPk, _} = timer:tc(fun() ->
+          [ecu_bls12_381_nif:min_pk_sign(NifMinPkSK, Msg, DSTG2) || _ <- lists:seq(1, ItersNif)]
+        end),
+        {ok, NifMinPkSig} = ecu_bls12_381_nif:min_pk_sign(NifMinPkSK, Msg, DSTG2),
+        {TimeNifVerifyMinPk, _} = timer:tc(fun() ->
+          [
+            ecu_bls12_381_nif:min_pk_verify(NifMinPkPub, Msg, NifMinPkSig, DSTG2)
+           || _ <- lists:seq(1, ItersNif)
+          ]
+        end),
+
+        stats("BLS12-381 G1 mul   ", "Rust (blst)   ", ItersNif, TimeNifG1Mul),
+        diff(TimeG1Mul / ItersG1, TimeNifG1Mul / ItersNif),
+        stats("BLS12-381 G2 mul   ", "Rust (blst)   ", ItersNif, TimeNifG2Mul),
+        diff(TimeG2Mul / ItersG2, TimeNifG2Mul / ItersNif),
+        stats("BLS12-381 pairing  ", "Rust (blst)   ", ItersNif, TimeNifPair),
+        diff(TimePair / ItersPair, TimeNifPair / ItersNif),
+        stats("BLS12-381 H2C G1   ", "Rust (blst)   ", ItersNif, TimeNifH2CG1),
+        diff(TimeH2CG1 / ItersH2C, TimeNifH2CG1 / ItersNif),
+        stats("BLS12-381 H2C G2   ", "Rust (blst)   ", ItersNif, TimeNifH2CG2),
+        diff(TimeH2CG2 / ItersH2C, TimeNifH2CG2 / ItersNif),
+        stats("BLS min_pk sign    ", "Rust (blst)   ", ItersNif, TimeNifSignMinPk),
+        diff(TimeSignMinPk / ItersH2C, TimeNifSignMinPk / ItersNif),
+        stats("BLS min_pk verify  ", "Rust (blst)   ", ItersNif, TimeNifVerifyMinPk),
+        diff(TimeVerifyMinPk / ItersPair, TimeNifVerifyMinPk / ItersNif);
+      false ->
+        ok
+    end,
+
+    EmclAvailable =
+      case code:which(emcl) of
+        non_existing ->
+          case file:get_cwd() of
+            {ok, Cwd} ->
+              EmclEbin =
+                filename:join([
+                  filename:dirname(Cwd),
+                  "emcl",
+                  "_build",
+                  "default",
+                  "lib",
+                  "emcl",
+                  "ebin"
+                ]),
+              case filelib:is_dir(EmclEbin) of
+                true ->
+                  code:add_pathz(EmclEbin),
+                  code:ensure_loaded(emcl) =:= {module, emcl};
+                false ->
+                  false
+              end;
+            _ ->
+              false
+          end;
+        _ ->
+          true
+      end,
+    case EmclAvailable of
+      true ->
+        ItersEmcl = 100,
+        {ok, EmclG1} = emcl:bnG1_hash_and_map_to(<<"g1">>),
+        {ok, EmclG2} = emcl:bnG2_hash_and_map_to(<<"g2">>),
+        EmclFr = emcl:mk_Fr(Scalar),
+        {TimeEmclG1Mul, _} = timer:tc(fun() ->
+          [emcl:bnG1_mul(EmclG1, EmclFr) || _ <- lists:seq(1, ItersEmcl)]
+        end),
+        {TimeEmclG2Mul, _} = timer:tc(fun() ->
+          [emcl:bnG2_mul(EmclG2, EmclFr) || _ <- lists:seq(1, ItersEmcl)]
+        end),
+        {TimeEmclPair, _} = timer:tc(fun() ->
+          [emcl:bn_pairing(EmclG1, EmclG2) || _ <- lists:seq(1, ItersEmcl)]
+        end),
+        stats("BLS12-381 G1 mul   ", "C++ (emcl/mcl)", ItersEmcl, TimeEmclG1Mul),
+        diff(TimeG1Mul / ItersG1, TimeEmclG1Mul / ItersEmcl),
+        stats("BLS12-381 G2 mul   ", "C++ (emcl/mcl)", ItersEmcl, TimeEmclG2Mul),
+        diff(TimeG2Mul / ItersG2, TimeEmclG2Mul / ItersEmcl),
+        stats("BLS12-381 pairing  ", "C++ (emcl/mcl)", ItersEmcl, TimeEmclPair),
+        diff(TimePair / ItersPair, TimeEmclPair / ItersEmcl);
+      false ->
+        ok
+    end,
+    ok
+  end}.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 

@@ -25,7 +25,8 @@ list_suites() ->
     musig2,
     h2c,
     keccak,
-    hd
+    hd,
+    bls12_381
   ].
 
 -spec get_benchmarks(atom() | string() | binary()) -> [ecu_bench_runner:bench_def()].
@@ -71,7 +72,8 @@ all_benchmarks() ->
     musig2_benchmarks(),
     h2c_benchmarks(),
     keccak_benchmarks(),
-    hd_benchmarks()
+    hd_benchmarks(),
+    bls12_381_benchmarks()
   ]).
 
 %% ===================================================================
@@ -689,5 +691,80 @@ hd_benchmarks() ->
       name => <<"SLIP-0010 CKDpriv (Ed25519)">>,
       group => hd,
       run => {fun(K) -> ecu_hd:ckd_priv(K, 16#80000001) end, MEd}
+    }
+  ].
+
+%% ===================================================================
+%% BLS12-381
+%% ===================================================================
+
+bls12_381_benchmarks() ->
+  Scalar =
+    16#123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0 rem (ecu_bls12_381:r() - 1) +
+      1,
+  G1Gen = ecu_bls12_381:g1_generator(),
+  G2Gen = ecu_bls12_381:g2_generator(),
+  G1Pt = ecu_bls12_381:g1_scalar_mul(G1Gen, 3),
+  G2Pt = ecu_bls12_381:g2_scalar_mul(G2Gen, 3),
+  Msg = <<"BLS12-381 benchmark payload">>,
+  {ok, {MinPkPub, MinPkPriv}} =
+    ecu_bls12_381_sig:min_pk_keygen(<<"benchmark-ikm-32-bytes-minimum!!">>),
+  MinPkSig = ecu_bls12_381_sig:sign(min_pk, MinPkPriv, Msg),
+
+  [
+    #{
+      id => bls12_381_g1_point_add,
+      name => <<"BLS12-381 G1 Point Add">>,
+      group => bls12_381,
+      run => {fun({A, B}) -> ecu_bls12_381:g1_add(A, B) end, {G1Gen, G1Pt}}
+    },
+    #{
+      id => bls12_381_g1_scalar_mul,
+      name => <<"BLS12-381 G1 ScalarMul">>,
+      group => bls12_381,
+      run => {fun({P, S}) -> ecu_bls12_381:g1_scalar_mul(P, S) end, {G1Gen, Scalar}}
+    },
+    #{
+      id => bls12_381_g2_point_add,
+      name => <<"BLS12-381 G2 Point Add">>,
+      group => bls12_381,
+      run => {fun({A, B}) -> ecu_bls12_381:g2_add(A, B) end, {G2Gen, G2Pt}}
+    },
+    #{
+      id => bls12_381_g2_scalar_mul,
+      name => <<"BLS12-381 G2 ScalarMul">>,
+      group => bls12_381,
+      run => {fun({P, S}) -> ecu_bls12_381:g2_scalar_mul(P, S) end, {G2Gen, Scalar}}
+    },
+    #{
+      id => bls12_381_pairing,
+      name => <<"BLS12-381 Optimal Ate Pairing">>,
+      group => bls12_381,
+      run => {fun({P, Q}) -> ecu_bls12_381_pairing:pairing(P, Q) end, {G1Gen, G2Gen}}
+    },
+    #{
+      id => bls12_381_g1_hash_to_curve,
+      name => <<"BLS12-381 G1 Hash to Curve">>,
+      group => bls12_381,
+      run => {fun(M) -> ecu_bls12_381:g1_hash_to_curve(M) end, Msg}
+    },
+    #{
+      id => bls12_381_g2_hash_to_curve,
+      name => <<"BLS12-381 G2 Hash to Curve">>,
+      group => bls12_381,
+      run => {fun(M) -> ecu_bls12_381:g2_hash_to_curve(M) end, Msg}
+    },
+    #{
+      id => bls_min_pk_sign,
+      name => <<"BLS min_pk Sign">>,
+      group => bls12_381,
+      run => {fun({SK, M}) -> ecu_bls12_381_sig:sign(min_pk, SK, M) end, {MinPkPriv, Msg}}
+    },
+    #{
+      id => bls_min_pk_verify,
+      name => <<"BLS min_pk Verify">>,
+      group => bls12_381,
+      run =>
+        {fun({PK, M, S}) -> ecu_bls12_381_sig:verify(min_pk, PK, M, S) end, {MinPkPub, Msg, MinPkSig}}
     }
   ].

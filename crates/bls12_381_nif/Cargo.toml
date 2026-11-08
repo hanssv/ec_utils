@@ -1,0 +1,12 @@
+[package]
+name = "ecu_bls12_381_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ecu_bls12_381_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+blst = "0.3.17"
+rustler = "0.39.0"

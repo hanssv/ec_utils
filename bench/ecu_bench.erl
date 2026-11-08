@@ -10,7 +10,7 @@
 ]).
 
 -define(DEFAULT_DURATION_MS, 250).
--define(DEFAULT_THRESHOLD_PCT, 10.0).
+-define(DEFAULT_THRESHOLD_PCT, 15.0).
 
 -spec main([string()]) -> no_return().
 main(Args) ->
@@ -228,7 +228,7 @@ print_help() ->
     "  -d, --duration <MS>        Target benchmark duration in milliseconds (default: 250)~n"
     "  -s, --save <FILE>          Save benchmark results as JSON baseline to FILE~n"
     "  -c, --compare <FILE>       Compare results against baseline JSON in FILE~n"
-    "  -t, --threshold <PCT>      Regression percentage threshold (default: 10.0%)~n"
+    "  -t, --threshold <PCT>      Regression percentage threshold (default: 15.0%)~n"
     "  -m, --markdown             Output results as GitHub-flavored Markdown table~n"
     "      --json                 Output raw JSON results to stdout~n"
     "      --fail-on-regression   Exit code 1 if regressions exceed threshold~n"

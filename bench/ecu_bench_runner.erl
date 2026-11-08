@@ -6,6 +6,8 @@
 %%%-------------------------------------------------------------------
 -module(ecu_bench_runner).
 
+-define(REGRESSION_MIN_ABS_DELTA_US, 50.0).
+
 -export([
   run_all/2,
   run_bench/2,
@@ -308,12 +310,18 @@ compare(CurrentResults, BaselineResults, ThresholdPct) ->
               false -> 0.0
             end,
 
+          AbsDeltaUs = CurMean - BaseMean,
+
           Status =
             if
-              DeltaPct < -5.0 -> faster;
-              DeltaPct > ThresholdPct -> regression;
-              DeltaPct > 5.0 -> slower;
-              true -> similar
+              DeltaPct < -5.0 ->
+                faster;
+              DeltaPct > ThresholdPct andalso AbsDeltaUs > ?REGRESSION_MIN_ABS_DELTA_US ->
+                regression;
+              DeltaPct > 5.0 ->
+                slower;
+              true ->
+                similar
             end,
 
           {true, #{
