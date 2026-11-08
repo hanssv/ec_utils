@@ -50,6 +50,13 @@
   scalar/0
 ]).
 
+%% Parameters
+-export([
+  p/0,
+  r/0,
+  x/0
+]).
+
 %% G1 Operations
 -export([
   g1_generator/0,
@@ -152,6 +159,22 @@
   min_sig_aggregate_verify/2,
   min_sig_aggregate_verify/3
 ]).
+
+%%%-------------------------------------------------------------------
+%%% Parameters
+%%%-------------------------------------------------------------------
+
+-spec p() -> pos_integer().
+p() ->
+  ?BLS12_381_P.
+
+-spec r() -> pos_integer().
+r() ->
+  ?BLS12_381_R.
+
+-spec x() -> integer().
+x() ->
+  ?BLS12_381_X.
 
 %%%-------------------------------------------------------------------
 %%% G1 Operations (over Fp)
