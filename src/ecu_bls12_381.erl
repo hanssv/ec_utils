@@ -109,6 +109,22 @@
   pairing_check/4
 ]).
 
+%% Hash-to-Curve Operations (RFC 9380)
+-export([
+  g1_hash_to_curve/1,
+  g1_hash_to_curve/2,
+  g1_hash_to_curve/3,
+  g1_encode_to_curve/1,
+  g1_encode_to_curve/2,
+  g1_encode_to_curve/3,
+  g2_hash_to_curve/1,
+  g2_hash_to_curve/2,
+  g2_hash_to_curve/3,
+  g2_encode_to_curve/1,
+  g2_encode_to_curve/2,
+  g2_encode_to_curve/3
+]).
+
 %%%-------------------------------------------------------------------
 %%% G1 Operations (over Fp)
 %%%-------------------------------------------------------------------
@@ -768,3 +784,55 @@ pairing_check(Pairs) ->
 -spec pairing_check(g1_affine(), g2_affine(), g1_affine(), g2_affine()) -> boolean().
 pairing_check(P1, Q1, P2, Q2) ->
   ecu_bls12_381_pairing:pairing_check(P1, Q1, P2, Q2).
+
+%%%-------------------------------------------------------------------
+%%% Hash-to-Curve Operations (RFC 9380)
+%%%-------------------------------------------------------------------
+
+-spec g1_hash_to_curve(binary()) -> g1_affine().
+g1_hash_to_curve(Msg) ->
+  ecu_bls12_381_h2c:hash_to_curve_g1(Msg).
+
+-spec g1_hash_to_curve(binary(), binary()) -> g1_affine().
+g1_hash_to_curve(Msg, DST) ->
+  ecu_bls12_381_h2c:hash_to_curve_g1(Msg, DST).
+
+-spec g1_hash_to_curve(binary(), binary(), binary()) -> g1_affine().
+g1_hash_to_curve(Msg, DST, Aug) ->
+  ecu_bls12_381_h2c:hash_to_curve_g1(Msg, DST, Aug).
+
+-spec g1_encode_to_curve(binary()) -> g1_affine().
+g1_encode_to_curve(Msg) ->
+  ecu_bls12_381_h2c:encode_to_curve_g1(Msg).
+
+-spec g1_encode_to_curve(binary(), binary()) -> g1_affine().
+g1_encode_to_curve(Msg, DST) ->
+  ecu_bls12_381_h2c:encode_to_curve_g1(Msg, DST).
+
+-spec g1_encode_to_curve(binary(), binary(), binary()) -> g1_affine().
+g1_encode_to_curve(Msg, DST, Aug) ->
+  ecu_bls12_381_h2c:encode_to_curve_g1(Msg, DST, Aug).
+
+-spec g2_hash_to_curve(binary()) -> g2_affine().
+g2_hash_to_curve(Msg) ->
+  ecu_bls12_381_h2c:hash_to_curve_g2(Msg).
+
+-spec g2_hash_to_curve(binary(), binary()) -> g2_affine().
+g2_hash_to_curve(Msg, DST) ->
+  ecu_bls12_381_h2c:hash_to_curve_g2(Msg, DST).
+
+-spec g2_hash_to_curve(binary(), binary(), binary()) -> g2_affine().
+g2_hash_to_curve(Msg, DST, Aug) ->
+  ecu_bls12_381_h2c:hash_to_curve_g2(Msg, DST, Aug).
+
+-spec g2_encode_to_curve(binary()) -> g2_affine().
+g2_encode_to_curve(Msg) ->
+  ecu_bls12_381_h2c:encode_to_curve_g2(Msg).
+
+-spec g2_encode_to_curve(binary(), binary()) -> g2_affine().
+g2_encode_to_curve(Msg, DST) ->
+  ecu_bls12_381_h2c:encode_to_curve_g2(Msg, DST).
+
+-spec g2_encode_to_curve(binary(), binary(), binary()) -> g2_affine().
+g2_encode_to_curve(Msg, DST, Aug) ->
+  ecu_bls12_381_h2c:encode_to_curve_g2(Msg, DST, Aug).

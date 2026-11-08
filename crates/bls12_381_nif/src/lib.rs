@@ -408,4 +408,132 @@ fn min_sig_verify(
     ) == BLST_ERROR::BLST_SUCCESS
 }
 
+/// G1 hash_to_curve (RFC 9380)
+#[rustler::nif]
+fn g1_hash_to_curve<'a>(
+    env: Env<'a>,
+    msg_bytes: Binary<'a>,
+    dst_bytes: Binary<'a>,
+    aug_bytes: Binary<'a>,
+) -> Binary<'a> {
+    let mut p = blst::blst_p1::default();
+    let msg = msg_bytes.as_slice();
+    let dst = dst_bytes.as_slice();
+    let aug = aug_bytes.as_slice();
+    unsafe {
+        blst::blst_hash_to_g1(
+            &mut p,
+            msg.as_ptr(),
+            msg.len(),
+            dst.as_ptr(),
+            dst.len(),
+            aug.as_ptr(),
+            aug.len(),
+        )
+    };
+    let mut aff = blst::blst_p1_affine::default();
+    unsafe { blst::blst_p1_to_affine(&mut aff, &p) };
+    let mut comp = [0u8; 48];
+    unsafe { blst::blst_p1_affine_compress(comp.as_mut_ptr(), &aff) };
+    let mut bin = NewBinary::new(env, 48);
+    bin.as_mut_slice().copy_from_slice(&comp);
+    bin.into()
+}
+
+/// G1 encode_to_curve (RFC 9380)
+#[rustler::nif]
+fn g1_encode_to_curve<'a>(
+    env: Env<'a>,
+    msg_bytes: Binary<'a>,
+    dst_bytes: Binary<'a>,
+    aug_bytes: Binary<'a>,
+) -> Binary<'a> {
+    let mut p = blst::blst_p1::default();
+    let msg = msg_bytes.as_slice();
+    let dst = dst_bytes.as_slice();
+    let aug = aug_bytes.as_slice();
+    unsafe {
+        blst::blst_encode_to_g1(
+            &mut p,
+            msg.as_ptr(),
+            msg.len(),
+            dst.as_ptr(),
+            dst.len(),
+            aug.as_ptr(),
+            aug.len(),
+        )
+    };
+    let mut aff = blst::blst_p1_affine::default();
+    unsafe { blst::blst_p1_to_affine(&mut aff, &p) };
+    let mut comp = [0u8; 48];
+    unsafe { blst::blst_p1_affine_compress(comp.as_mut_ptr(), &aff) };
+    let mut bin = NewBinary::new(env, 48);
+    bin.as_mut_slice().copy_from_slice(&comp);
+    bin.into()
+}
+
+/// G2 hash_to_curve (RFC 9380)
+#[rustler::nif]
+fn g2_hash_to_curve<'a>(
+    env: Env<'a>,
+    msg_bytes: Binary<'a>,
+    dst_bytes: Binary<'a>,
+    aug_bytes: Binary<'a>,
+) -> Binary<'a> {
+    let mut p = blst::blst_p2::default();
+    let msg = msg_bytes.as_slice();
+    let dst = dst_bytes.as_slice();
+    let aug = aug_bytes.as_slice();
+    unsafe {
+        blst::blst_hash_to_g2(
+            &mut p,
+            msg.as_ptr(),
+            msg.len(),
+            dst.as_ptr(),
+            dst.len(),
+            aug.as_ptr(),
+            aug.len(),
+        )
+    };
+    let mut aff = blst::blst_p2_affine::default();
+    unsafe { blst::blst_p2_to_affine(&mut aff, &p) };
+    let mut comp = [0u8; 96];
+    unsafe { blst::blst_p2_affine_compress(comp.as_mut_ptr(), &aff) };
+    let mut bin = NewBinary::new(env, 96);
+    bin.as_mut_slice().copy_from_slice(&comp);
+    bin.into()
+}
+
+/// G2 encode_to_curve (RFC 9380)
+#[rustler::nif]
+fn g2_encode_to_curve<'a>(
+    env: Env<'a>,
+    msg_bytes: Binary<'a>,
+    dst_bytes: Binary<'a>,
+    aug_bytes: Binary<'a>,
+) -> Binary<'a> {
+    let mut p = blst::blst_p2::default();
+    let msg = msg_bytes.as_slice();
+    let dst = dst_bytes.as_slice();
+    let aug = aug_bytes.as_slice();
+    unsafe {
+        blst::blst_encode_to_g2(
+            &mut p,
+            msg.as_ptr(),
+            msg.len(),
+            dst.as_ptr(),
+            dst.len(),
+            aug.as_ptr(),
+            aug.len(),
+        )
+    };
+    let mut aff = blst::blst_p2_affine::default();
+    unsafe { blst::blst_p2_to_affine(&mut aff, &p) };
+    let mut comp = [0u8; 96];
+    unsafe { blst::blst_p2_affine_compress(comp.as_mut_ptr(), &aff) };
+    let mut bin = NewBinary::new(env, 96);
+    bin.as_mut_slice().copy_from_slice(&comp);
+    bin.into()
+}
+
 rustler::init!("ecu_bls12_381_nif");

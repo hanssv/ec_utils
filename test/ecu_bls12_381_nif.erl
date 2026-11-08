@@ -24,7 +24,15 @@
   min_pk_fast_aggregate_verify/4,
   min_sig_keygen/1,
   min_sig_sign/3,
-  min_sig_verify/4
+  min_sig_verify/4,
+  g1_hash_to_curve/2,
+  g1_hash_to_curve/3,
+  g1_encode_to_curve/2,
+  g1_encode_to_curve/3,
+  g2_hash_to_curve/2,
+  g2_hash_to_curve/3,
+  g2_encode_to_curve/2,
+  g2_encode_to_curve/3
 ]).
 -export([init/0]).
 
@@ -109,4 +117,28 @@ min_sig_sign(_SK, _Msg, _DST) ->
   erlang:nif_error(not_loaded).
 
 min_sig_verify(_PK, _Msg, _Sig, _DST) ->
+  erlang:nif_error(not_loaded).
+
+g1_hash_to_curve(Msg, DST) ->
+  g1_hash_to_curve(Msg, DST, <<>>).
+
+g1_hash_to_curve(_Msg, _DST, _Aug) ->
+  erlang:nif_error(not_loaded).
+
+g1_encode_to_curve(Msg, DST) ->
+  g1_encode_to_curve(Msg, DST, <<>>).
+
+g1_encode_to_curve(_Msg, _DST, _Aug) ->
+  erlang:nif_error(not_loaded).
+
+g2_hash_to_curve(Msg, DST) ->
+  g2_hash_to_curve(Msg, DST, <<>>).
+
+g2_hash_to_curve(_Msg, _DST, _Aug) ->
+  erlang:nif_error(not_loaded).
+
+g2_encode_to_curve(Msg, DST) ->
+  g2_encode_to_curve(Msg, DST, <<>>).
+
+g2_encode_to_curve(_Msg, _DST, _Aug) ->
   erlang:nif_error(not_loaded).
