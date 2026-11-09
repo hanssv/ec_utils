@@ -46,7 +46,7 @@ public_to_short(bitcoin, PubKey = <<_:33/bytes>>) ->
   try ecu_secp256k1:decompress(PubKey) of
     Pt ->
       case ecu_secp256k1:on_curve(Pt) of
-        true -> crypto:hash(ripemd160, crypto:hash(sha256, PubKey));
+        true -> ecu_compat:hash(ripemd160, ecu_compat:hash(sha256, PubKey));
         false -> error(invalid_public_key)
       end
   catch
@@ -57,12 +57,12 @@ public_to_short(bitcoin, PubKey) ->
   case PubKey of
     <<4:8, X:256, Y:256>> ->
       case ecu_secp256k1:on_curve({X, Y}) of
-        true -> crypto:hash(ripemd160, crypto:hash(sha256, ecu_secp256k1:compress(PubKey)));
+        true -> ecu_compat:hash(ripemd160, ecu_compat:hash(sha256, ecu_secp256k1:compress(PubKey)));
         false -> error(invalid_public_key)
       end;
     {X, Y} ->
       case ecu_secp256k1:on_curve({X, Y}) of
-        true -> crypto:hash(ripemd160, crypto:hash(sha256, ecu_secp256k1:compress(PubKey)));
+        true -> ecu_compat:hash(ripemd160, ecu_compat:hash(sha256, ecu_secp256k1:compress(PubKey)));
         false -> error(invalid_public_key)
       end
   end;

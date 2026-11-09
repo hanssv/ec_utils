@@ -63,7 +63,7 @@ key_agg(Pubkeys) ->
 key_agg(bip340, Pubkeys) when is_list(Pubkeys), Pubkeys =/= [] ->
   try
     OrderedNormPks = [norm_secp_pubkey(PK) || PK <- Pubkeys],
-    L = crypto:hash(sha256, [tagged_hash_prefix(?TAG_KEYAGG_LIST) | OrderedNormPks]),
+    L = ecu_compat:hash(sha256, [tagged_hash_prefix(?TAG_KEYAGG_LIST) | OrderedNormPks]),
     Pk1 = hd(OrderedNormPks),
     Pk2 = find_second_unique_pk(OrderedNormPks, Pk1),
     Coeffs = [compute_secp_coeff(L, PK, Pk2) || PK <- OrderedNormPks],
@@ -185,8 +185,8 @@ nonce_gen(bip340) ->
   R2 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K2)),
   {<<K1:256, K2:256>>, <<R1/binary, R2/binary>>};
 nonce_gen(ed25519) ->
-  N1 = clamp_ed25519(crypto:strong_rand_bytes(32)),
-  N2 = clamp_ed25519(crypto:strong_rand_bytes(32)),
+  N1 = clamp_ed25519(ecu_compat:strong_rand_bytes(32)),
+  N2 = clamp_ed25519(ecu_compat:strong_rand_bytes(32)),
   R1 = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(N1)),
   R2 = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(N2)),
   {[N1, N2], [R1, R2]};
@@ -199,7 +199,7 @@ nonce_gen(bip340, SecKey) when is_binary(SecKey), byte_size(SecKey) =:= 32 ->
   N = ecu_secp256k1:n(),
   case SK > 0 andalso SK < N of
     true ->
-      Rand = crypto:strong_rand_bytes(32),
+      Rand = ecu_compat:strong_rand_bytes(32),
       K1 = rand_scalar_secp_aux(Rand, SecKey, 1),
       K2 = rand_scalar_secp_aux(Rand, SecKey, 2),
       R1 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K1)),
@@ -210,13 +210,13 @@ nonce_gen(bip340, SecKey) when is_binary(SecKey), byte_size(SecKey) =:= 32 ->
       error(badarg)
   end;
 nonce_gen(ed25519, SecKey) when is_binary(SecKey), byte_size(SecKey) =:= 32 ->
-  Rand1 = crypto:strong_rand_bytes(32),
-  Rand2 = crypto:strong_rand_bytes(32),
-  <<N1:256/little>> = clamp_ed25519(crypto:hash(sha512, <<Rand1/binary, SecKey/binary>>)),
-  <<N2:256/little>> = clamp_ed25519(crypto:hash(sha512, <<Rand2/binary, SecKey/binary>>)),
+  Rand1 = ecu_compat:strong_rand_bytes(32),
+  Rand2 = ecu_compat:strong_rand_bytes(32),
+  <<N1:256/little>> = clamp_ed25519(ecu_compat:hash(sha512, <<Rand1/binary, SecKey/binary>>)),
+  <<N2:256/little>> = clamp_ed25519(ecu_compat:hash(sha512, <<Rand2/binary, SecKey/binary>>)),
   R1 = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(N1)),
   R2 = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(N2)),
-  <<Seed0:32/bytes, _/binary>> = crypto:hash(sha512, SecKey),
+  <<Seed0:32/bytes, _/binary>> = ecu_compat:hash(sha512, SecKey),
   Seed = clamp_ed25519(Seed0),
   MyPK = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Seed)),
   {[N1, N2, MyPK], [R1, R2]};
@@ -384,7 +384,7 @@ sign_partial(
         <<_:256>> -> SecKey;
         _ when is_integer(SecKey) -> <<SecKey:256>>
       end,
-    <<Seed0:32/bytes, _/binary>> = crypto:hash(sha512, SecKeyBin),
+    <<Seed0:32/bytes, _/binary>> = ecu_compat:hash(sha512, SecKeyBin),
     Seed = clamp_ed25519(Seed0),
     MyPK = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Seed)),
     case StoredPKOpt of
@@ -396,7 +396,7 @@ sign_partial(
 
         Exp1 = <<1:256/little>>,
         Exp2 = ecu_ed25519:scalar_reduce(
-          crypto:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
+          ecu_compat:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
         ),
 
         AggN = ecu_ed25519:compress(
@@ -407,7 +407,7 @@ sign_partial(
         ),
 
         Challenge = ecu_ed25519:scalar_reduce(
-          crypto:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
+          ecu_compat:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
         ),
         N1Bin =
           case N1s of
@@ -532,7 +532,7 @@ verify_partial(
                 AggPK = Ctx#key_agg_ctx.agg_pk_bin,
                 Exp1 = <<1:256/little>>,
                 Exp2 = ecu_ed25519:scalar_reduce(
-                  crypto:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
+                  ecu_compat:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
                 ),
 
                 AggN = ecu_ed25519:compress(
@@ -543,7 +543,7 @@ verify_partial(
                 ),
 
                 Challenge = ecu_ed25519:scalar_reduce(
-                  crypto:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
+                  ecu_compat:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
                 ),
                 Reff = ecu_ed25519:p_add(
                   ecu_ed25519:scalar_mul_noclamp(Exp1, R1),
@@ -623,7 +623,7 @@ aggregate_partial(
   try
     Exp1 = <<1:256/little>>,
     Exp2 = ecu_ed25519:scalar_reduce(
-      crypto:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
+      ecu_compat:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
     ),
     AggN = ecu_ed25519:compress(
       ecu_ed25519:p_add(
@@ -669,30 +669,30 @@ find_second_unique_pk([PK | Rest], Pk1) ->
 compute_secp_coeff(_L, Pk2, Pk2) when Pk2 =/= undefined ->
   1;
 compute_secp_coeff(L, PK, _Pk2) ->
-  Hash = crypto:hash(sha256, [tagged_hash_prefix(?TAG_KEYAGG_COEFF), L, PK]),
+  Hash = ecu_compat:hash(sha256, [tagged_hash_prefix(?TAG_KEYAGG_COEFF), L, PK]),
   binary:decode_unsigned(Hash) rem ecu_secp256k1:n().
 
 -spec compute_secp_noncecoef(binary(), binary(), binary(), binary()) -> non_neg_integer().
 compute_secp_noncecoef(AggR1, AggR2, AggXonly, Msg) ->
-  Hash = crypto:hash(sha256, [tagged_hash_prefix(?TAG_NONCECOEF), AggR1, AggR2, AggXonly, Msg]),
+  Hash = ecu_compat:hash(sha256, [tagged_hash_prefix(?TAG_NONCECOEF), AggR1, AggR2, AggXonly, Msg]),
   binary:decode_unsigned(Hash) rem ecu_secp256k1:n().
 
 -spec compute_ed25519_coeff(binary(), pubkey()) -> non_neg_integer().
 compute_ed25519_coeff(AllPks, PK) ->
-  Hash = crypto:hash(sha512, <<AllPks/binary, PK/binary>>),
+  Hash = ecu_compat:hash(sha512, <<AllPks/binary, PK/binary>>),
   <<Val:256/little>> = ecu_ed25519:scalar_reduce(Hash),
   Val.
 
 -spec rand_scalar_secp() -> non_neg_integer().
 rand_scalar_secp() ->
   N = ecu_secp256k1:n(),
-  Bytes = crypto:strong_rand_bytes(32),
+  Bytes = ecu_compat:strong_rand_bytes(32),
   binary:decode_unsigned(Bytes) rem (N - 1) + 1.
 
 -spec rand_scalar_secp_aux(binary(), seckey(), non_neg_integer()) -> non_neg_integer().
 rand_scalar_secp_aux(Rand, SecKey, Index) ->
   N = ecu_secp256k1:n(),
-  TagAux = crypto:hash(sha256, [tagged_hash_prefix(<<"MuSig/aux">>), Rand, SecKey, <<Index:8>>]),
+  TagAux = ecu_compat:hash(sha256, [tagged_hash_prefix(<<"MuSig/aux">>), Rand, SecKey, <<Index:8>>]),
   binary:decode_unsigned(TagAux) rem (N - 1) + 1.
 
 -spec clamp_ed25519(binary()) -> binary().
@@ -701,7 +701,7 @@ clamp_ed25519(<<B0:8, B1_30:30/bytes, B31:8>>) ->
 
 -spec tagged_hash_prefix(binary()) -> binary().
 tagged_hash_prefix(Tag) ->
-  TagHash = crypto:hash(sha256, Tag),
+  TagHash = ecu_compat:hash(sha256, Tag),
   <<TagHash/binary, TagHash/binary>>.
 
 -spec encode_secp_pub_or_infinity({non_neg_integer(), non_neg_integer()}) -> binary().

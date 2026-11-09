@@ -11,7 +11,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 gen_scalar() ->
-  <<X:256>> = crypto:strong_rand_bytes(32),
+  <<X:256>> = ecu_compat:strong_rand_bytes(32),
   1 + X rem (ecu_ed25519:n() - 1).
 
 bench_point_add_test() ->
@@ -49,7 +49,7 @@ bench_scalar_mul_base_test() ->
   ScalarsSecpRef = lists:append(lists:duplicate(10, Scalars0)),
   ScalarsEnacl = lists:append(lists:duplicate(100, Scalars0)),
   ScalarsEd25519 = lists:append(lists:duplicate(30, Scalars0)),
-  Scalars448 = [crypto:strong_rand_bytes(57) || _ <- lists:seq(1, 50)],
+  Scalars448 = [ecu_compat:strong_rand_bytes(57) || _ <- lists:seq(1, 50)],
   ScalarsEd448 = Scalars448,
   ScalarsEd448Ref = lists:append(lists:duplicate(4, Scalars448)),
 
@@ -114,7 +114,7 @@ bench_scalar_mul_test() ->
 
 bench_sign_test() ->
   KeyPairs = [enacl:sign_keypair() || _ <- lists:seq(1, 10)],
-  Messages = [crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
+  Messages = [ecu_compat:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
 
   Data = [{K, Msg} || {Msg, K} <- lists:zip(Messages, lists:append(lists:duplicate(3, KeyPairs)))],
 
@@ -138,7 +138,7 @@ bench_sign_test() ->
 
 bench_verify_test() ->
   KeyPairs = [enacl:sign_keypair() || _ <- lists:seq(1, 10)],
-  Messages = [crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
+  Messages = [ecu_compat:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
 
   Data = [
     {K, Msg, enacl:sign_detached(Msg, maps:get(secret, K))}
@@ -168,7 +168,7 @@ bench_batch_verify_test() ->
   Batch = [
     begin
       K = ecu_eddsa:sign_keypair(),
-      Msg = crypto:strong_rand_bytes(32),
+      Msg = ecu_compat:strong_rand_bytes(32),
       Sig = ecu_eddsa:sign_detached(Msg, maps:get(secret, K)),
       {Sig, Msg, maps:get(public, K)}
     end
@@ -191,12 +191,12 @@ bench_batch_verify_test() ->
   ok.
 
 gen_ecdsa_secp256k1_privkey() ->
-  <<P0:256>> = crypto:strong_rand_bytes(32),
+  <<P0:256>> = ecu_compat:strong_rand_bytes(32),
   P = (P0 rem (ecu_secp256k1:n() - 1)) + 1,
   <<P:256>>.
 
 bench_ecverify_test() ->
-  Data0 = [{gen_ecdsa_secp256k1_privkey(), crypto:strong_rand_bytes(32)} || _ <- lists:seq(1, 10)],
+  Data0 = [{gen_ecdsa_secp256k1_privkey(), ecu_compat:strong_rand_bytes(32)} || _ <- lists:seq(1, 10)],
   Data1 = [
     {Pr, Msg, ecu_crypto:private_to_short(ethereum, Pr), ecu_crypto:eth_sign(Msg, Pr)}
    || {Pr, Msg} <- Data0
@@ -224,9 +224,9 @@ bench_ecverify_test() ->
   ok.
 
 bench_ed448_sign_verify_test() ->
-  Seeds = [crypto:strong_rand_bytes(57) || _ <- lists:seq(1, 10)],
+  Seeds = [ecu_compat:strong_rand_bytes(57) || _ <- lists:seq(1, 10)],
   KeyPairs = [ecu_eddsa448:sign_seed_keypair(S) || S <- Seeds],
-  Messages = [crypto:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
+  Messages = [ecu_compat:strong_rand_bytes(X) || X <- lists:seq(20, 49)],
   Data = [
     {maps:get(secret, K), maps:get(public, K), Seed, Msg}
    || {{K, Seed}, Msg} <- lists:zip(
@@ -416,15 +416,19 @@ bench_frost_test() ->
 
 bench_keccak_test() ->
   N = 500,
-  Msgs = [crypto:strong_rand_bytes(100) || _ <- lists:seq(1, N)],
+  Msgs = [ecu_compat:strong_rand_bytes(100) || _ <- lists:seq(1, N)],
   {TimeEcuKek, _} = timer:tc(fun() -> [ecu_keccak:keccak256(M) || M <- Msgs] end),
   {TimeEcuSha3, _} = timer:tc(fun() -> [ecu_keccak:sha3_256(M) || M <- Msgs] end),
-  {TimeCryptoSha3, _} = timer:tc(fun() -> [crypto:hash(sha3_256, M) || M <- Msgs] end),
-
   ?debugFmt("", []),
-  stats("NIST SHA3-256", "crypto (OpenSSL)", N, TimeCryptoSha3),
-  stats("NIST SHA3-256", "ecu_keccak      ", N, TimeEcuSha3),
-  diff(TimeCryptoSha3 / N, TimeEcuSha3 / N),
+  case ecu_compat:is_crypto_available() of
+    true ->
+      {TimeCryptoSha3, _} = timer:tc(fun() -> [crypto:hash(sha3_256, M) || M <- Msgs] end),
+      stats("NIST SHA3-256", "crypto (OpenSSL)", N, TimeCryptoSha3),
+      stats("NIST SHA3-256", "ecu_keccak      ", N, TimeEcuSha3),
+      diff(TimeCryptoSha3 / N, TimeEcuSha3 / N);
+    false ->
+      stats("NIST SHA3-256", "ecu_keccak      ", N, TimeEcuSha3)
+  end,
 
   case ecu_rustcrypto_nif:is_available() of
     true ->
@@ -439,7 +443,7 @@ bench_keccak_test() ->
 
 bench_musig2_test() ->
   Iters = 50,
-  SKs = [crypto:strong_rand_bytes(32) || _ <- lists:seq(1, 3)],
+  SKs = [ecu_compat:strong_rand_bytes(32) || _ <- lists:seq(1, 3)],
   PKs = [ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK)) || SK <- SKs],
   Msg = <<"Benchmark BIP-327">>,
 
@@ -539,83 +543,99 @@ bench_musig2_test() ->
   end,
   ok.
 
-bench_hd_and_base58_test() ->
-  Iters = 2000,
-  Payload = crypto:strong_rand_bytes(78),
-  B58Str = ecu_base58:encode_check(Payload),
+bench_hd_and_base58_test_() ->
+  {timeout, 60, fun() ->
+    Iters =
+      case ecu_compat:is_crypto_available() of
+        true -> 1000;
+        false -> 100
+      end,
+    Payload = ecu_compat:strong_rand_bytes(78),
+    B58Str = ecu_base58:encode_check(Payload),
 
-  {TimeB58Enc, _} = timer:tc(fun() ->
-    [ecu_base58:encode(Payload) || _ <- lists:seq(1, Iters)]
-  end),
-  {TimeB58Dec, _} = timer:tc(fun() ->
-    [ecu_base58:decode(B58Str) || _ <- lists:seq(1, Iters)]
-  end),
-  {TimeB58CheckEnc, _} = timer:tc(fun() ->
-    [ecu_base58:encode_check(Payload) || _ <- lists:seq(1, Iters)]
-  end),
-  {TimeB58CheckDec, _} = timer:tc(fun() ->
-    [ecu_base58:decode_check(B58Str) || _ <- lists:seq(1, Iters)]
-  end),
+    {TimeB58Enc, _} = timer:tc(fun() ->
+      [ecu_base58:encode(Payload) || _ <- lists:seq(1, Iters)]
+    end),
+    {TimeB58Dec, _} = timer:tc(fun() ->
+      [ecu_base58:decode(B58Str) || _ <- lists:seq(1, Iters)]
+    end),
+    {TimeB58CheckEnc, _} = timer:tc(fun() ->
+      [ecu_base58:encode_check(Payload) || _ <- lists:seq(1, Iters)]
+    end),
+    {TimeB58CheckDec, _} = timer:tc(fun() ->
+      [ecu_base58:decode_check(B58Str) || _ <- lists:seq(1, Iters)]
+    end),
 
-  Seed = crypto:strong_rand_bytes(32),
-  {ok, MSecp} = ecu_hd:master_key(secp256k1, Seed),
-  MSecpPub = ecu_hd:to_public(MSecp),
-  {ok, MEd} = ecu_hd:master_key(ed25519, Seed),
+    Seed = ecu_compat:strong_rand_bytes(32),
+    {ok, MSecp} = ecu_hd:master_key(secp256k1, Seed),
+    MSecpPub = ecu_hd:to_public(MSecp),
+    {ok, MEd} = ecu_hd:master_key(ed25519, Seed),
 
-  {TimeSecpPriv, _} = timer:tc(fun() ->
-    [ecu_hd:ckd_priv(MSecp, 1) || _ <- lists:seq(1, Iters)]
-  end),
-  {TimeSecpPub, _} = timer:tc(fun() ->
-    [ecu_hd:ckd_pub(MSecpPub, 1) || _ <- lists:seq(1, Iters)]
-  end),
-  {TimeEdPriv, _} = timer:tc(fun() ->
-    [ecu_hd:ckd_priv(MEd, 16#80000001) || _ <- lists:seq(1, Iters)]
-  end),
+    {TimeSecpPriv, _} = timer:tc(fun() ->
+      [ecu_hd:ckd_priv(MSecp, 1) || _ <- lists:seq(1, Iters)]
+    end),
+    {TimeSecpPub, _} = timer:tc(fun() ->
+      [ecu_hd:ckd_pub(MSecpPub, 1) || _ <- lists:seq(1, Iters)]
+    end),
+    {TimeEdPriv, _} = timer:tc(fun() ->
+      [ecu_hd:ckd_priv(MEd, 16#80000001) || _ <- lists:seq(1, Iters)]
+    end),
 
-  ?debugFmt("", []),
-  stats("Base58 encode (78B)", "ecu_base58   ", Iters, TimeB58Enc),
-  stats("Base58 decode (78B)", "ecu_base58   ", Iters, TimeB58Dec),
-  stats("Base58Check encode (78B)", "ecu_base58   ", Iters, TimeB58CheckEnc),
-  stats("Base58Check decode (78B)", "ecu_base58   ", Iters, TimeB58CheckDec),
-  stats("BIP-32 CKDpriv (secp256k1)", "ecu_hd       ", Iters, TimeSecpPriv),
-  stats("BIP-32 CKDpub (secp256k1)", "ecu_hd       ", Iters, TimeSecpPub),
-  stats("SLIP-0010 CKDpriv (Ed25519)", "ecu_hd       ", Iters, TimeEdPriv),
-  ok.
+    ?debugFmt("", []),
+    stats("Base58 encode (78B)", "ecu_base58   ", Iters, TimeB58Enc),
+    stats("Base58 decode (78B)", "ecu_base58   ", Iters, TimeB58Dec),
+    stats("Base58Check encode (78B)", "ecu_base58   ", Iters, TimeB58CheckEnc),
+    stats("Base58Check decode (78B)", "ecu_base58   ", Iters, TimeB58CheckDec),
+    stats("BIP-32 CKDpriv (secp256k1)", "ecu_hd       ", Iters, TimeSecpPriv),
+    stats("BIP-32 CKDpub (secp256k1)", "ecu_hd       ", Iters, TimeSecpPub),
+    stats("SLIP-0010 CKDpriv (Ed25519)", "ecu_hd       ", Iters, TimeEdPriv),
+    ok
+  end}.
 
-bench_bip39_test() ->
-  Iters = 2000,
-  Entropy16 = crypto:strong_rand_bytes(16),
-  {ok, Mnemonic12} = ecu_bip39:entropy_to_mnemonic(Entropy16),
+bench_bip39_test_() ->
+  {timeout, 60, fun() ->
+    Iters =
+      case ecu_compat:is_crypto_available() of
+        true -> 1000;
+        false -> 100
+      end,
+    Entropy16 = ecu_compat:strong_rand_bytes(16),
+    {ok, Mnemonic12} = ecu_bip39:entropy_to_mnemonic(Entropy16),
 
-  {TimeGenMnemonic, _} = timer:tc(fun() ->
-    [ecu_bip39:generate_mnemonic(128) || _ <- lists:seq(1, Iters)]
-  end),
-  {TimeEntropyToMnemonic, _} = timer:tc(fun() ->
-    [ecu_bip39:entropy_to_mnemonic(Entropy16) || _ <- lists:seq(1, Iters)]
-  end),
-  {TimeMnemonicToEntropy, _} = timer:tc(fun() ->
-    [ecu_bip39:mnemonic_to_entropy(Mnemonic12) || _ <- lists:seq(1, Iters)]
-  end),
-  {TimeValidateMnemonic, _} = timer:tc(fun() ->
-    [ecu_bip39:validate_mnemonic(Mnemonic12) || _ <- lists:seq(1, Iters)]
-  end),
+    {TimeGenMnemonic, _} = timer:tc(fun() ->
+      [ecu_bip39:generate_mnemonic(128) || _ <- lists:seq(1, Iters)]
+    end),
+    {TimeEntropyToMnemonic, _} = timer:tc(fun() ->
+      [ecu_bip39:entropy_to_mnemonic(Entropy16) || _ <- lists:seq(1, Iters)]
+    end),
+    {TimeMnemonicToEntropy, _} = timer:tc(fun() ->
+      [ecu_bip39:mnemonic_to_entropy(Mnemonic12) || _ <- lists:seq(1, Iters)]
+    end),
+    {TimeValidateMnemonic, _} = timer:tc(fun() ->
+      [ecu_bip39:validate_mnemonic(Mnemonic12) || _ <- lists:seq(1, Iters)]
+    end),
 
-  Pbkdf2Iters = 100,
-  {TimeMnemonicToSeed, _} = timer:tc(fun() ->
-    [ecu_bip39:mnemonic_to_seed(Mnemonic12, "TREZOR") || _ <- lists:seq(1, Pbkdf2Iters)]
-  end),
+    Pbkdf2Iters =
+      case ecu_compat:is_crypto_available() of
+        true -> 100;
+        false -> 2
+      end,
+    {TimeMnemonicToSeed, _} = timer:tc(fun() ->
+      [ecu_bip39:mnemonic_to_seed(Mnemonic12, "TREZOR") || _ <- lists:seq(1, Pbkdf2Iters)]
+    end),
 
-  ?debugFmt("", []),
-  stats("BIP-39 generate_mnemonic (12w)", "ecu_bip39    ", Iters, TimeGenMnemonic),
-  stats("BIP-39 entropy_to_mnemonic (16B)", "ecu_bip39    ", Iters, TimeEntropyToMnemonic),
-  stats("BIP-39 mnemonic_to_entropy (12w)", "ecu_bip39    ", Iters, TimeMnemonicToEntropy),
-  stats("BIP-39 validate_mnemonic (12w)", "ecu_bip39    ", Iters, TimeValidateMnemonic),
-  stats("BIP-39 mnemonic_to_seed (2048 iters)", "ecu_bip39    ", Pbkdf2Iters, TimeMnemonicToSeed),
-  ok.
+    ?debugFmt("", []),
+    stats("BIP-39 generate_mnemonic (12w)", "ecu_bip39    ", Iters, TimeGenMnemonic),
+    stats("BIP-39 entropy_to_mnemonic (16B)", "ecu_bip39    ", Iters, TimeEntropyToMnemonic),
+    stats("BIP-39 mnemonic_to_entropy (12w)", "ecu_bip39    ", Iters, TimeMnemonicToEntropy),
+    stats("BIP-39 validate_mnemonic (12w)", "ecu_bip39    ", Iters, TimeValidateMnemonic),
+    stats("BIP-39 mnemonic_to_seed (2048 iters)", "ecu_bip39    ", Pbkdf2Iters, TimeMnemonicToSeed),
+    ok
+  end}.
 
 bench_bech32_test() ->
   Iters = 2000,
-  Prog = crypto:strong_rand_bytes(32),
+  Prog = ecu_compat:strong_rand_bytes(32),
   {ok, Addr} = ecu_bech32:encode_segwit_address(<<"bc">>, 1, Prog),
 
   {TimeSegwitEnc, _} = timer:tc(fun() ->
@@ -1076,6 +1096,85 @@ bench_bls12_381_test_() ->
         ok
     end,
     ok
+  end}.
+
+bench_compat_modes_test_() ->
+  {timeout, 60, fun() ->
+    case ecu_compat:is_crypto_available() of
+      false ->
+        ?debugFmt("Skipping compat modes benchmark (OTP crypto not available)", []),
+        ok;
+      true ->
+        OrigMode = ecu_compat:mode(),
+        try
+          Msg = <<"The quick brown fox jumps over the lazy dog">>,
+          Key32 = binary:copy(<<"k">>, 32),
+          Salt = <<"salt1234">>,
+          #{public := SchnorrPub, secret := SchnorrPriv} = ecu_schnorr:sign_keypair(),
+          SchnorrSig = ecu_schnorr:sign(Msg, SchnorrPriv),
+          #{public := EdPub, secret := EdPriv} = ecu_eddsa:sign_keypair(),
+          EdSig = ecu_eddsa:sign_detached(Msg, EdPriv),
+
+          Tests = [
+            {"SHA-256 (64B)", 500, fun() -> ecu_compat:hash(sha256, Msg) end},
+            {"SHA-512 (64B)", 500, fun() -> ecu_compat:hash(sha512, Msg) end},
+            {"RIPEMD-160 (64B)", 500, fun() -> ecu_compat:hash(ripemd160, Msg) end},
+            {"HMAC-SHA256 (64B)", 500, fun() -> ecu_compat:mac(hmac, sha256, Key32, Msg) end},
+            {"HMAC-SHA512 (64B)", 500, fun() -> ecu_compat:mac(hmac, sha512, Key32, Msg) end},
+            {
+              "PBKDF2-HMAC-SHA512 (2048 iters)",
+              5,
+              fun() -> ecu_compat:pbkdf2_hmac(sha512, Msg, Salt, 2048, 64) end
+            },
+            {"BIP-340 Schnorr Sign", 20, fun() -> ecu_schnorr:sign(Msg, SchnorrPriv) end},
+            {"BIP-340 Schnorr Verify", 20, fun() -> ecu_schnorr:verify(SchnorrSig, Msg, SchnorrPub) end},
+            {"Ed25519 Sign", 20, fun() -> ecu_eddsa:sign_detached(Msg, EdPriv) end},
+            {
+              "Ed25519 Verify",
+              20,
+              fun() -> ecu_eddsa:sign_verify_detached(EdSig, Msg, EdPub) end
+            }
+          ],
+
+          ?debugFmt("~n=== Mode Comparison Benchmark (OTP Acceleration vs Pure Erlang) ===", []),
+          ?debugFmt(
+            "~-32s ~15s ~15s ~12s",
+            ["Operation", "OTP (Mode 1)", "Pure (Mode 2)", "Slowdown"]
+          ),
+          ?debugFmt(
+            "~-32s ~15s ~15s ~12s",
+            [
+              "--------------------------------",
+              "---------------",
+              "---------------",
+              "------------"
+            ]
+          ),
+          lists:foreach(
+            fun({Name, Iters, Fun}) ->
+              ecu_compat:set_mode(otp),
+              {TimeOtp, _} = timer:tc(fun() ->
+                [Fun() || _ <- lists:seq(1, Iters)]
+              end),
+              ecu_compat:set_mode(pure),
+              {TimePure, _} = timer:tc(fun() ->
+                [Fun() || _ <- lists:seq(1, Iters)]
+              end),
+              UsOtp = TimeOtp / Iters,
+              UsPure = TimePure / Iters,
+              Ratio = UsPure / max(UsOtp, 0.001),
+              ?debugFmt(
+                "~-32s ~12.2f us ~12.2f us ~10.2fx",
+                [Name, UsOtp, UsPure, Ratio]
+              )
+            end,
+            Tests
+          ),
+          ok
+        after
+          ecu_compat:set_mode(OrigMode)
+        end
+    end
   end}.
 
 stats(What, Who, N, T) ->

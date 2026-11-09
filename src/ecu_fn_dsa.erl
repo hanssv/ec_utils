@@ -105,7 +105,7 @@ parameter_set(_) ->
 %% @doc Generates a fresh FN-DSA keypair from system entropy.
 -spec keypair(parameter_set() | atom()) -> keypair().
 keypair(Set) ->
-  Seed = crypto:strong_rand_bytes(32),
+  Seed = ecu_compat:strong_rand_bytes(32),
   keypair_from_seed(Set, Seed).
 
 %% @doc Generates an FN-DSA keypair deterministically from a seed binary.
@@ -585,7 +585,7 @@ do_sign(Set, Msg, SecretKey, Context, Opts) ->
           _ when Deterministic ->
             derive_deterministic_salt(SecretKey, Msg, Context);
           _ ->
-            crypto:strong_rand_bytes(40)
+            ecu_compat:strong_rand_bytes(40)
         end,
       ChallengeInput =
         case Context of
@@ -627,7 +627,7 @@ do_sign(Set, Msg, SecretKey, Context, Opts) ->
           _ when Deterministic ->
             derive_deterministic_seed(SecretKey, Msg, Salt);
           _ ->
-            crypto:strong_rand_bytes(48)
+            ecu_compat:strong_rand_bytes(48)
         end,
       sign_sampler_loop(
         Seed0,
@@ -784,22 +784,12 @@ sign_sampler_loop(
 -spec derive_deterministic_salt(secret_key(), binary(), binary()) -> binary().
 derive_deterministic_salt(SK, Msg, Context) ->
   Input = <<SK/binary, (byte_size(Context)):16/big, Context/binary, Msg/binary, "fn-dsa-salt">>,
-  try
-    crypto:hash_xof(shake256, Input, 40 * 8)
-  catch
-    _:_ ->
-      ecu_keccak:shake256(Input, 40 * 8)
-  end.
+  ecu_compat:hash_xof(shake256, Input, 40 * 8).
 
 -spec derive_deterministic_seed(secret_key(), binary(), binary()) -> binary().
 derive_deterministic_seed(SK, Msg, Salt) ->
   Input = <<SK/binary, Salt:40/binary, Msg/binary, "fn-dsa-seed">>,
-  try
-    crypto:hash_xof(shake256, Input, 48 * 8)
-  catch
-    _:_ ->
-      ecu_keccak:shake256(Input, 48 * 8)
-  end.
+  ecu_compat:hash_xof(shake256, Input, 48 * 8).
 
 %% ===================================================================
 %% Key & Signature Codecs
@@ -1168,12 +1158,7 @@ rej_hash_to_point(_, _Acc, _Count, _N) ->
 
 -spec shake256(binary(), pos_integer()) -> binary().
 shake256(Data, BitLen) ->
-  try
-    crypto:hash_xof(shake256, Data, BitLen)
-  catch
-    _:_ ->
-      ecu_keccak:shake256(Data, BitLen)
-  end.
+  ecu_compat:hash_xof(shake256, Data, BitLen).
 
 %% ===================================================================
 %% Number Theoretic Transform (NTT) in Z_q[x] / (x^n + 1)

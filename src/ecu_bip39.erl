@@ -63,7 +63,7 @@ generate_mnemonic(SizeOrWords) ->
 generate_mnemonic(SizeOrWords, Wordlist) ->
   EntropyBits = to_entropy_bits(SizeOrWords),
   EntropyBytes = EntropyBits div 8,
-  Entropy = crypto:strong_rand_bytes(EntropyBytes),
+  Entropy = ecu_compat:strong_rand_bytes(EntropyBytes),
   case entropy_to_mnemonic(Entropy, Wordlist) of
     {ok, Mnemonic} -> Mnemonic;
     {error, Reason} -> error({generate_mnemonic_failed, Reason})
@@ -83,7 +83,7 @@ entropy_to_mnemonic(Entropy, Wordlist) when is_binary(Entropy) ->
       {error, invalid_entropy_length};
     true ->
       CSBits = (EntropyBytes * 8) div 32,
-      <<Checksum:CSBits, _/bitstring>> = crypto:hash(sha256, Entropy),
+      <<Checksum:CSBits, _/bitstring>> = ecu_compat:hash(sha256, Entropy),
       Combined = <<Entropy/binary, Checksum:CSBits>>,
       Indices = [Ix || <<Ix:11>> <= Combined],
       case map_indices_to_words(Indices, Wordlist) of
@@ -120,7 +120,7 @@ mnemonic_to_entropy(Mnemonic, Wordlist) ->
           CSBits = WordCount div 3,
           EntropyBytes = WordCount * 4 div 3,
           <<Entropy:EntropyBytes/binary, Checksum:CSBits>> = Bits,
-          <<ExpectedChecksum:CSBits, _/bitstring>> = crypto:hash(sha256, Entropy),
+          <<ExpectedChecksum:CSBits, _/bitstring>> = ecu_compat:hash(sha256, Entropy),
           case Checksum =:= ExpectedChecksum of
             true ->
               {ok, Entropy};
@@ -158,7 +158,7 @@ mnemonic_to_seed(Mnemonic, Passphrase) ->
   MnemonicBin = normalize_mnemonic_string(Mnemonic),
   NFKDPassphrase = to_nfkd_binary(Passphrase),
   Salt = <<"mnemonic", NFKDPassphrase/binary>>,
-  crypto:pbkdf2_hmac(sha512, MnemonicBin, Salt, 2048, 64).
+  ecu_compat:pbkdf2_hmac(sha512, MnemonicBin, Salt, 2048, 64).
 
 %% @doc Direct bridge to derive an HD master key from a mnemonic with empty passphrase.
 -spec mnemonic_to_master_key(ecu_hd:curve(), unicode:chardata() | [unicode:chardata()]) ->

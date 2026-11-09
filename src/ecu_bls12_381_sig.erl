@@ -156,12 +156,12 @@ keygen(IKM, Opts) ->
       undefined ->
         SaltPrime = <<"BLS-SIG-KEYGEN-SALT-">>,
         case Version of
-          v4 -> crypto:hash(sha256, SaltPrime);
+          v4 -> ecu_compat:hash(sha256, SaltPrime);
           v5 -> SaltPrime
         end;
       ExplicitSalt when is_binary(ExplicitSalt) ->
         case Version of
-          v4 -> crypto:hash(sha256, ExplicitSalt);
+          v4 -> ecu_compat:hash(sha256, ExplicitSalt);
           v5 -> ExplicitSalt
         end
     end,
@@ -170,15 +170,15 @@ keygen(IKM, Opts) ->
 -spec keygen_loop(binary(), binary(), binary()) -> {ok, <<_:256>>}.
 keygen_loop(IKM, Info, Salt) ->
   L = 48,
-  PRK = crypto:mac(hmac, sha256, Salt, <<IKM/binary, 0:8>>),
+  PRK = ecu_compat:mac(hmac, sha256, Salt, <<IKM/binary, 0:8>>),
   InfoBytes = <<Info/binary, L:16/big>>,
-  T1 = crypto:mac(hmac, sha256, PRK, <<InfoBytes/binary, 1:8>>),
-  T2 = crypto:mac(hmac, sha256, PRK, <<T1/binary, InfoBytes/binary, 2:8>>),
+  T1 = ecu_compat:mac(hmac, sha256, PRK, <<InfoBytes/binary, 1:8>>),
+  T2 = ecu_compat:mac(hmac, sha256, PRK, <<T1/binary, InfoBytes/binary, 2:8>>),
   OKM = binary:part(<<T1/binary, T2/binary>>, 0, L),
   SK_int = binary:decode_unsigned(OKM) rem ?BLS12_381_R,
   case SK_int of
     0 ->
-      NextSalt = crypto:hash(sha256, Salt),
+      NextSalt = ecu_compat:hash(sha256, Salt),
       keygen_loop(IKM, Info, NextSalt);
     _ ->
       {ok, <<SK_int:256/big>>}

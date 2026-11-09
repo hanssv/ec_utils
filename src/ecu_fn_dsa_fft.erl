@@ -539,7 +539,7 @@ prng_take_bits({Seed, Counter, Buf}, Bits) when bit_size(Buf) >= Bits ->
 prng_take_bits({Seed, Counter, Buf}, Bits) ->
   NewBytes =
     try
-      crypto:hash_xof(shake256, <<Seed/binary, Counter:32/big>>, 256 * 8)
+      ecu_compat:hash_xof(shake256, <<Seed/binary, Counter:32/big>>, 256 * 8)
     catch
       _:_ ->
         ecu_keccak:shake256(<<Seed/binary, Counter:32/big>>, 256 * 8)

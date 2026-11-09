@@ -24,7 +24,7 @@ exp_mod(A, B, P) when is_integer(P), P > 0, is_integer(B), B >= 0, A rem P == 0 
     false -> 1
   end;
 exp_mod(A, B, P) when is_integer(P), P > 0, is_integer(B), B >= 0, A > 0 ->
-  case crypto:mod_pow(A, B, P) of
+  case ecu_compat:mod_pow(A, B, P) of
     Bin when is_binary(Bin) -> binary:decode_unsigned(Bin);
     error -> error(badarg)
   end;

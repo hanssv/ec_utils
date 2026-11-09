@@ -63,7 +63,7 @@ round1(ed25519, Id, T, CtxString) when T >= 1 ->
       R = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(K)),
       GC0 = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(C0)),
       C = ecu_ed25519:scalar_reduce(
-        crypto:hash(sha512, <<Id:256/little, CtxString/binary, GC0/binary, R/binary>>)
+        ecu_compat:hash(sha512, <<Id:256/little, CtxString/binary, GC0/binary, R/binary>>)
       ),
       Mu = ecu_ed25519:s_add(K, ecu_ed25519:s_mul(C0, C)),
       C0Prf = <<R:32/binary, Mu:32/binary>>,
@@ -81,7 +81,7 @@ round1(ed448, Id, T, CtxString) when T >= 1 ->
       R = ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(K)),
       GC0 = ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(C0)),
       C = ecu_ed448:scalar_reduce(
-        crypto:hash_xof(shake256, <<Id:456/little, CtxString/binary, GC0/binary, R/binary>>, 114 * 8)
+        ecu_compat:hash_xof(shake256, <<Id:456/little, CtxString/binary, GC0/binary, R/binary>>, 114 * 8)
       ),
       Mu = ecu_ed448:s_add(K, ecu_ed448:s_mul(C0, C)),
       C0Prf = <<R:57/binary, Mu:57/binary>>,
@@ -163,7 +163,7 @@ round1_check_impl(ed25519, Id, CtxString, <<R:32/binary, Mu:32/binary>>, [C0 | _
           false;
         true ->
           C = ecu_ed25519:scalar_reduce(
-            crypto:hash(sha512, <<Id:256/little, CtxString/binary, C0/binary, R/binary>>)
+            ecu_compat:hash(sha512, <<Id:256/little, CtxString/binary, C0/binary, R/binary>>)
           ),
           LHS = ecu_ed25519:scalar_mul_base_noclamp(Mu),
           RHS = ecu_ed25519:p_add(PtR, ecu_ed25519:scalar_mul_noclamp(C, PtC0)),
@@ -187,7 +187,9 @@ round1_check_impl(ed448, Id, CtxString, <<R:57/binary, Mu:57/binary>>, [C0 | _] 
           false;
         true ->
           C = ecu_ed448:scalar_reduce(
-            crypto:hash_xof(shake256, <<Id:456/little, CtxString/binary, C0/binary, R/binary>>, 114 * 8)
+            ecu_compat:hash_xof(
+              shake256, <<Id:456/little, CtxString/binary, C0/binary, R/binary>>, 114 * 8
+            )
           ),
           LHS = ecu_ed448:scalar_mul_base_noclamp(Mu),
           RHS = ecu_ed448:p_add(PtR, ecu_ed448:scalar_mul_noclamp(C, PtC0)),
@@ -541,7 +543,7 @@ validate_pubcs(_) ->
 
 -spec rnd_scalar_secp256k1() -> scalar().
 rnd_scalar_secp256k1() ->
-  Val = binary:decode_unsigned(crypto:strong_rand_bytes(48)) rem ?SECP256K1_N,
+  Val = binary:decode_unsigned(ecu_compat:strong_rand_bytes(48)) rem ?SECP256K1_N,
   case Val of
     0 -> rnd_scalar_secp256k1();
     _ -> <<Val:256/big>>
