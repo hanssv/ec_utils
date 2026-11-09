@@ -33,6 +33,62 @@ mac(hmac, HashType, Key, Data) ->
   hmac(HashType, Key, Data).
 
 -spec hmac(hash_type(), binary() | iolist(), binary() | iolist()) -> binary().
+hmac(sha512, Key, Data) ->
+  KeyBin = to_binary(Key),
+  DataBin = to_binary(Data),
+  KeyNorm =
+    if
+      byte_size(KeyBin) > 128 ->
+        ecu_sha2:sha512(KeyBin);
+      true ->
+        KeyBin
+    end,
+  PadZeros = 128 - byte_size(KeyNorm),
+  KeyPad = <<KeyNorm/binary, 0:(PadZeros * 8)>>,
+  Ki = xor_pad_128(KeyPad, 16#36),
+  Ko = xor_pad_128(KeyPad, 16#5c),
+  case DataBin of
+    <<D0:64, D1:64, D2:64, D3:64, D4:64, D5:64, D6:64, D7:64>> ->
+      InitState = ecu_sha2:init_state_512(),
+      IState = ecu_sha2:compress_block_512(Ki, InitState),
+      OState = ecu_sha2:compress_block_512(Ko, InitState),
+      {I0, I1, I2, I3, I4, I5, I6, I7} =
+        ecu_sha2:compress_64b_msg_512(D0, D1, D2, D3, D4, D5, D6, D7, IState),
+      {O0, O1, O2, O3, O4, O5, O6, O7} =
+        ecu_sha2:compress_64b_msg_512(I0, I1, I2, I3, I4, I5, I6, I7, OState),
+      <<O0:64, O1:64, O2:64, O3:64, O4:64, O5:64, O6:64, O7:64>>;
+    _ ->
+      Inner = ecu_sha2:sha512(<<Ki/binary, DataBin/binary>>),
+      ecu_sha2:sha512(<<Ko/binary, Inner/binary>>)
+  end;
+hmac(sha256, Key, Data) ->
+  KeyBin = to_binary(Key),
+  DataBin = to_binary(Data),
+  KeyNorm =
+    if
+      byte_size(KeyBin) > 64 ->
+        ecu_sha2:sha256(KeyBin);
+      true ->
+        KeyBin
+    end,
+  PadZeros = 64 - byte_size(KeyNorm),
+  KeyPad = <<KeyNorm/binary, 0:(PadZeros * 8)>>,
+  Ki = xor_pad_64(KeyPad, 16#36),
+  Ko = xor_pad_64(KeyPad, 16#5c),
+  case DataBin of
+    <<D0:32, D1:32, D2:32, D3:32, D4:32, D5:32, D6:32, D7:32>> ->
+      InitState = ecu_sha2:init_state_256(),
+      IState = ecu_sha2:compress_block_256(Ki, InitState),
+      OState = ecu_sha2:compress_block_256(Ko, InitState),
+      {I0, I1, I2, I3, I4, I5, I6, I7} =
+        ecu_sha2:compress_32b_msg_256(D0, D1, D2, D3, D4, D5, D6, D7, IState),
+      {O0, O1, O2, O3, O4, O5, O6, O7} =
+        ecu_sha2:compress_32b_msg_256(I0, I1, I2, I3, I4, I5, I6, I7, OState),
+      <<O0:32, O1:32, O2:32, O3:32, O4:32, O5:32, O6:32, O7:32>>;
+    _ ->
+      Inner = ecu_sha2:sha256(<<Ki/binary, DataBin/binary>>),
+      ecu_sha2:sha256(<<Ko/binary, Inner/binary>>)
+  end;
 hmac(HashType, Key, Data) ->
   KeyBin = to_binary(Key),
   DataBin = to_binary(Data),
@@ -46,12 +102,59 @@ hmac(HashType, Key, Data) ->
     end,
   PadZeros = B - byte_size(KeyNorm),
   KeyPad = <<KeyNorm/binary, 0:(PadZeros * 8)>>,
-  Ipad = binary:copy(<<16#36>>, B),
-  Opad = binary:copy(<<16#5c>>, B),
-  Ki = ecu_entropy:exor(KeyPad, Ipad),
-  Ko = ecu_entropy:exor(KeyPad, Opad),
+  {Ki, Ko} = xor_key_pad(B, KeyPad),
   Inner = hash(HashType, <<Ki/binary, DataBin/binary>>),
   hash(HashType, <<Ko/binary, Inner/binary>>).
+
+-spec xor_pad_64(binary(), byte()) -> binary().
+xor_pad_64(<<K0:64, K1:64, K2:64, K3:64, K4:64, K5:64, K6:64, K7:64>>, Byte) ->
+  W = Byte * 16#0101010101010101,
+  <<
+    (K0 bxor W):64,
+    (K1 bxor W):64,
+    (K2 bxor W):64,
+    (K3 bxor W):64,
+    (K4 bxor W):64,
+    (K5 bxor W):64,
+    (K6 bxor W):64,
+    (K7 bxor W):64
+  >>.
+
+-spec xor_pad_128(binary(), byte()) -> binary().
+xor_pad_128(
+  <<K0:64, K1:64, K2:64, K3:64, K4:64, K5:64, K6:64, K7:64, K8:64, K9:64, K10:64, K11:64, K12:64, K13:64,
+    K14:64, K15:64>>,
+  Byte
+) ->
+  W = Byte * 16#0101010101010101,
+  <<
+    (K0 bxor W):64,
+    (K1 bxor W):64,
+    (K2 bxor W):64,
+    (K3 bxor W):64,
+    (K4 bxor W):64,
+    (K5 bxor W):64,
+    (K6 bxor W):64,
+    (K7 bxor W):64,
+    (K8 bxor W):64,
+    (K9 bxor W):64,
+    (K10 bxor W):64,
+    (K11 bxor W):64,
+    (K12 bxor W):64,
+    (K13 bxor W):64,
+    (K14 bxor W):64,
+    (K15 bxor W):64
+  >>.
+
+-spec xor_key_pad(pos_integer(), binary()) -> {binary(), binary()}.
+xor_key_pad(64, KeyPad) ->
+  {xor_pad_64(KeyPad, 16#36), xor_pad_64(KeyPad, 16#5c)};
+xor_key_pad(128, KeyPad) ->
+  {xor_pad_128(KeyPad, 16#36), xor_pad_128(KeyPad, 16#5c)};
+xor_key_pad(B, KeyPad) ->
+  Ipad = binary:copy(<<16#36>>, B),
+  Opad = binary:copy(<<16#5c>>, B),
+  {ecu_entropy:exor(KeyPad, Ipad), ecu_entropy:exor(KeyPad, Opad)}.
 
 %%%===================================================================
 %%% Internal functions
