@@ -107,8 +107,8 @@ commit(Suite, Secret) when is_atom(Suite), is_binary(Secret) ->
       ed448 -> 57;
       _ -> 32
     end,
-  Rand1 = crypto:strong_rand_bytes(Len),
-  Rand2 = crypto:strong_rand_bytes(Len),
+  Rand1 = ecu_compat:strong_rand_bytes(Len),
+  Rand2 = ecu_compat:strong_rand_bytes(Len),
   commit(Suite, Secret, {Rand1, Rand2});
 commit(Secret, {Rand1, Rand2}) when is_binary(Secret), is_binary(Rand1), is_binary(Rand2) ->
   commit(ed25519, Secret, {Rand1, Rand2}).
@@ -672,7 +672,7 @@ nonce_generate(Suite, Secret) when is_atom(Suite), is_binary(Secret) ->
       ed448 -> 57;
       _ -> 32
     end,
-  Rand = crypto:strong_rand_bytes(Len),
+  Rand = ecu_compat:strong_rand_bytes(Len),
   nonce_generate(Suite, Secret, Rand);
 nonce_generate(Secret, Rand) when is_binary(Secret), is_binary(Rand) ->
   nonce_generate(ed25519, Secret, Rand).
@@ -684,11 +684,13 @@ nonce_generate(Secret, Rand) when is_binary(Secret), is_binary(Rand) ->
 ) -> scalar().
 nonce_generate(ed25519, Secret, RandomBytes) ->
   ecu_ed25519:scalar_reduce(
-    crypto:hash(sha512, <<?ED25519_CTX/binary, "nonce", RandomBytes/binary, Secret/binary>>)
+    ecu_compat:hash(sha512, <<?ED25519_CTX/binary, "nonce", RandomBytes/binary, Secret/binary>>)
   );
 nonce_generate(ed448, Secret, RandomBytes) ->
   ecu_ed448:scalar_reduce(
-    crypto:hash_xof(shake256, <<?ED448_CTX/binary, "nonce", RandomBytes/binary, Secret/binary>>, 114 * 8)
+    ecu_compat:hash_xof(
+      shake256, <<?ED448_CTX/binary, "nonce", RandomBytes/binary, Secret/binary>>, 114 * 8
+    )
   );
 nonce_generate(bip340, Secret, RandomBytes) ->
   nonce_generate(secp256k1, Secret, RandomBytes);
@@ -711,22 +713,22 @@ compute_binding_factors(GroupPublicKey, CommitmentList, Msg) ->
 ) -> binding_factor_list().
 compute_binding_factors(ed25519, GroupPublicKey, CommitmentList, Msg) ->
   SortedList = sort_commitment_list(CommitmentList),
-  MsgHash = crypto:hash(sha512, <<?ED25519_CTX/binary, "msg", Msg/binary>>),
-  EncodedCommitmentHash = crypto:hash(
+  MsgHash = ecu_compat:hash(sha512, <<?ED25519_CTX/binary, "msg", Msg/binary>>),
+  EncodedCommitmentHash = ecu_compat:hash(
     sha512, <<?ED25519_CTX/binary, "com", (encode_group_commitment_list(ed25519, SortedList))/binary>>
   ),
   RhoInputPrefix = <<GroupPublicKey:32/binary, MsgHash/binary, EncodedCommitmentHash/binary>>,
   [
     {Id,
       ecu_ed25519:scalar_reduce(
-        crypto:hash(sha512, <<?ED25519_CTX/binary, "rho", RhoInputPrefix/binary, Id:256/little>>)
+        ecu_compat:hash(sha512, <<?ED25519_CTX/binary, "rho", RhoInputPrefix/binary, Id:256/little>>)
       )}
    || {Id, _, _} <- SortedList
   ];
 compute_binding_factors(ed448, GroupPublicKey, CommitmentList, Msg) ->
   SortedList = sort_commitment_list(CommitmentList),
-  MsgHash = crypto:hash_xof(shake256, <<?ED448_CTX/binary, "msg", Msg/binary>>, 114 * 8),
-  EncodedCommitmentHash = crypto:hash_xof(
+  MsgHash = ecu_compat:hash_xof(shake256, <<?ED448_CTX/binary, "msg", Msg/binary>>, 114 * 8),
+  EncodedCommitmentHash = ecu_compat:hash_xof(
     shake256,
     <<?ED448_CTX/binary, "com", (encode_group_commitment_list(ed448, SortedList))/binary>>,
     114 * 8
@@ -735,7 +737,7 @@ compute_binding_factors(ed448, GroupPublicKey, CommitmentList, Msg) ->
   [
     {Id,
       ecu_ed448:scalar_reduce(
-        crypto:hash_xof(
+        ecu_compat:hash_xof(
           shake256, <<?ED448_CTX/binary, "rho", RhoInputPrefix/binary, Id:456/little>>, 114 * 8
         )
       )}
@@ -751,8 +753,8 @@ compute_binding_factors(bip340, GroupPublicKey, CommitmentList, Msg) ->
   compute_binding_factors(secp256k1, PK_33, CommitmentList, Msg);
 compute_binding_factors(secp256k1, GroupPublicKey, CommitmentList, Msg) ->
   SortedList = sort_commitment_list(CommitmentList),
-  MsgHash = crypto:hash(sha256, <<?SECP256K1_CTX/binary, "msg", Msg/binary>>),
-  EncodedCommitmentHash = crypto:hash(
+  MsgHash = ecu_compat:hash(sha256, <<?SECP256K1_CTX/binary, "msg", Msg/binary>>),
+  EncodedCommitmentHash = ecu_compat:hash(
     sha256,
     <<?SECP256K1_CTX/binary, "com", (encode_group_commitment_list(secp256k1, SortedList))/binary>>
   ),
@@ -858,11 +860,11 @@ compute_challenge(GroupCommitment, GroupPublicKey, Msg) ->
 ) -> scalar().
 compute_challenge(ed25519, GroupCommitment, GroupPublicKey, Msg) ->
   ecu_ed25519:scalar_reduce(
-    crypto:hash(sha512, <<GroupCommitment:32/binary, GroupPublicKey:32/binary, Msg/binary>>)
+    ecu_compat:hash(sha512, <<GroupCommitment:32/binary, GroupPublicKey:32/binary, Msg/binary>>)
   );
 compute_challenge(ed448, GroupCommitment, GroupPublicKey, Msg) ->
   ecu_ed448:scalar_reduce(
-    crypto:hash_xof(
+    ecu_compat:hash_xof(
       shake256,
       <<"SigEd448", 0, 0, GroupCommitment:57/binary, GroupPublicKey:57/binary, Msg/binary>>,
       114 * 8
@@ -1352,7 +1354,7 @@ expand_message_xmd(Msg, DST, LenInBytes) ->
   DST_prime =
     case byte_size(DST) > 255 of
       true ->
-        Oversize = crypto:hash(sha256, [<<"H2C-OVERSIZE-DST-">>, DST]),
+        Oversize = ecu_compat:hash(sha256, [<<"H2C-OVERSIZE-DST-">>, DST]),
         <<Oversize/binary, (byte_size(Oversize)):8>>;
       false ->
         <<DST/binary, (byte_size(DST)):8>>
@@ -1360,10 +1362,10 @@ expand_message_xmd(Msg, DST, LenInBytes) ->
   Z_pad = <<0:512>>,
   L_bytes = <<LenInBytes:16>>,
   Msg_prime = <<Z_pad/binary, Msg/binary, L_bytes/binary, 0:8, DST_prime/binary>>,
-  B0 = crypto:hash(sha256, Msg_prime),
-  B1 = crypto:hash(sha256, <<B0/binary, 1:8, DST_prime/binary>>),
-  XOR1 = crypto:exor(B0, B1),
-  B2 = crypto:hash(sha256, <<XOR1/binary, 2:8, DST_prime/binary>>),
+  B0 = ecu_compat:hash(sha256, Msg_prime),
+  B1 = ecu_compat:hash(sha256, <<B0/binary, 1:8, DST_prime/binary>>),
+  XOR1 = ecu_compat:exor(B0, B1),
+  B2 = ecu_compat:hash(sha256, <<XOR1/binary, 2:8, DST_prime/binary>>),
   binary:part(<<B1/binary, B2/binary>>, 0, LenInBytes).
 
 %% ===================================================================
@@ -1372,19 +1374,19 @@ expand_message_xmd(Msg, DST, LenInBytes) ->
 
 -spec rnd_scalar(ciphersuite()) -> scalar().
 rnd_scalar(ed25519) ->
-  case ecu_ed25519:scalar_reduce(crypto:strong_rand_bytes(64)) of
+  case ecu_ed25519:scalar_reduce(ecu_compat:strong_rand_bytes(64)) of
     <<0:256>> -> rnd_scalar(ed25519);
     S -> S
   end;
 rnd_scalar(ed448) ->
-  case ecu_ed448:scalar_reduce(crypto:strong_rand_bytes(114)) of
+  case ecu_ed448:scalar_reduce(ecu_compat:strong_rand_bytes(114)) of
     <<0:456>> -> rnd_scalar(ed448);
     S -> S
   end;
 rnd_scalar(bip340) ->
   rnd_scalar(secp256k1);
 rnd_scalar(secp256k1) ->
-  Val = binary:decode_unsigned(crypto:strong_rand_bytes(48)) rem ?SECP256K1_N,
+  Val = binary:decode_unsigned(ecu_compat:strong_rand_bytes(48)) rem ?SECP256K1_N,
   case Val of
     0 -> rnd_scalar(secp256k1);
     _ -> <<Val:256/big>>

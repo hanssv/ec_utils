@@ -196,7 +196,7 @@ expand_message_xmd(Msg, DST, LenInBytes, Hash) when
         true ->
           ActualDST =
             case byte_size(DST) > 255 of
-              true -> crypto:hash(Hash, <<"H2C-OVERSIZE-DST-", DST/binary>>);
+              true -> ecu_compat:hash(Hash, <<"H2C-OVERSIZE-DST-", DST/binary>>);
               false -> DST
             end,
           DSTLen = byte_size(ActualDST),
@@ -204,8 +204,8 @@ expand_message_xmd(Msg, DST, LenInBytes, Hash) when
           ZPad = binary:copy(<<0>>, SInBytes),
           LIBStr = <<LenInBytes:16/big>>,
           MsgPrime = <<ZPad/binary, Msg/binary, LIBStr/binary, 0:8, DSTPrime/binary>>,
-          B0 = crypto:hash(Hash, MsgPrime),
-          B1 = crypto:hash(Hash, <<B0/binary, 1:8, DSTPrime/binary>>),
+          B0 = ecu_compat:hash(Hash, MsgPrime),
+          B1 = ecu_compat:hash(Hash, <<B0/binary, 1:8, DSTPrime/binary>>),
           UniformBytes = expand_xmd_loop(2, Ell, B0, B1, DSTPrime, Hash, [B1]),
           binary:part(UniformBytes, 0, LenInBytes)
       end
@@ -369,7 +369,7 @@ unpack_field_elements(Bin, Count, L, P, Acc) ->
 expand_xmd_loop(I, Ell, _B0, _PrevB, _DSTPrime, _Hash, Acc) when I > Ell ->
   iolist_to_binary(lists:reverse(Acc));
 expand_xmd_loop(I, Ell, B0, PrevB, DSTPrime, Hash, Acc) ->
-  Bi = crypto:hash(Hash, <<(crypto:exor(B0, PrevB))/binary, I:8, DSTPrime/binary>>),
+  Bi = ecu_compat:hash(Hash, <<(ecu_compat:exor(B0, PrevB))/binary, I:8, DSTPrime/binary>>),
   expand_xmd_loop(I + 1, Ell, B0, Bi, DSTPrime, Hash, [Bi | Acc]).
 
 %%====================================================================

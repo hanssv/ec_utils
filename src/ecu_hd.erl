@@ -103,7 +103,7 @@ master_key(Curve, Seed) when (Curve =:= secp256k1 orelse Curve =:= ed25519), is_
       {error, invalid_seed_length};
     true ->
       SeedKey = curve_seed_key(Curve),
-      <<IL:256, IR:32/binary>> = crypto:mac(hmac, sha512, SeedKey, Seed),
+      <<IL:256, IR:32/binary>> = ecu_compat:mac(hmac, sha512, SeedKey, Seed),
       case Curve of
         secp256k1 ->
           if
@@ -155,7 +155,7 @@ ckd_priv(#{curve := secp256k1, priv_key := <<PrivInt:256>>, chain_code := CC} = 
         PubKey = ensure_compressed_secp256k1_pub(Parent),
         <<PubKey:33/binary, Index:32/unsigned-big>>
     end,
-  <<IL:256, IR:32/binary>> = crypto:mac(hmac, sha512, CC, Data),
+  <<IL:256, IR:32/binary>> = ecu_compat:mac(hmac, sha512, CC, Data),
   if
     IL >= ?SECP256K1_ORDER ->
       {error, invalid_child_key};
@@ -187,7 +187,7 @@ ckd_priv(#{curve := ed25519, priv_key := <<PrivBin:32/binary>>, chain_code := CC
       {error, unhardened_derivation_not_supported_for_ed25519};
     true ->
       Data = <<0:8, PrivBin/binary, Index:32/unsigned-big>>,
-      <<IL:256, IR:32/binary>> = crypto:mac(hmac, sha512, CC, Data),
+      <<IL:256, IR:32/binary>> = ecu_compat:mac(hmac, sha512, CC, Data),
       ChildPrivBin = <<IL:256>>,
       ChildPub = derive_public_bytes(ed25519, ChildPrivBin),
       FP = key_fingerprint(Parent),
@@ -216,7 +216,7 @@ ckd_pub(#{curve := secp256k1, chain_code := CC} = Parent, Index) when
 ->
   ParentPub = ensure_compressed_secp256k1_pub(Parent),
   Data = <<ParentPub:33/binary, Index:32/unsigned-big>>,
-  <<IL:256, IR:32/binary>> = crypto:mac(hmac, sha512, CC, Data),
+  <<IL:256, IR:32/binary>> = ecu_compat:mac(hmac, sha512, CC, Data),
   if
     IL >= ?SECP256K1_ORDER ->
       {error, invalid_child_key};
@@ -642,13 +642,13 @@ ensure_compressed_secp256k1_pub(#{priv_key := <<Priv:32/binary>>}) ->
 -spec key_fingerprint(extended_key()) -> <<_:32>>.
 key_fingerprint(#{curve := secp256k1} = Key) ->
   Pub = ensure_compressed_secp256k1_pub(Key),
-  <<FP:4/binary, _/binary>> = crypto:hash(ripemd160, crypto:hash(sha256, Pub)),
+  <<FP:4/binary, _/binary>> = ecu_compat:hash(ripemd160, ecu_compat:hash(sha256, Pub)),
   FP;
 key_fingerprint(#{curve := ed25519, pub_key := <<Pub:32/binary>>}) ->
   %% SLIP-0010 prepends 0x00 to Ed25519 public keys when hashing for fingerprint
-  <<FP:4/binary, _/binary>> = crypto:hash(ripemd160, crypto:hash(sha256, <<0:8, Pub/binary>>)),
+  <<FP:4/binary, _/binary>> = ecu_compat:hash(ripemd160, ecu_compat:hash(sha256, <<0:8, Pub/binary>>)),
   FP;
 key_fingerprint(#{curve := ed25519, priv_key := <<Priv:32/binary>>}) ->
   Pub = derive_public_bytes(ed25519, Priv),
-  <<FP:4/binary, _/binary>> = crypto:hash(ripemd160, crypto:hash(sha256, <<0:8, Pub/binary>>)),
+  <<FP:4/binary, _/binary>> = ecu_compat:hash(ripemd160, ecu_compat:hash(sha256, <<0:8, Pub/binary>>)),
   FP.

@@ -37,39 +37,41 @@ generate_mnemonic_test() ->
   ?assertError({bad_mnemonic_size, 64}, ecu_bip39:generate_mnemonic(64)),
   ?assertError({bad_mnemonic_size, 10}, ecu_bip39:generate_mnemonic(10)).
 
-trezor_vectors_test() ->
-  lists:foreach(
-    fun([EntropyHex, MnemonicStr, SeedHex, RootXprv]) ->
-      Entropy = hex_to_bin(EntropyHex),
-      MnemonicBin = iolist_to_binary(MnemonicStr),
-      Seed = hex_to_bin(SeedHex),
+trezor_vectors_test_() ->
+  {timeout, 60, fun() ->
+    lists:foreach(
+      fun([EntropyHex, MnemonicStr, SeedHex, RootXprv]) ->
+        Entropy = hex_to_bin(EntropyHex),
+        MnemonicBin = iolist_to_binary(MnemonicStr),
+        Seed = hex_to_bin(SeedHex),
 
-      %% 1. Entropy to Mnemonic
-      ?assertEqual({ok, MnemonicBin}, ecu_bip39:entropy_to_mnemonic(Entropy)),
+        %% 1. Entropy to Mnemonic
+        ?assertEqual({ok, MnemonicBin}, ecu_bip39:entropy_to_mnemonic(Entropy)),
 
-      %% 2. Mnemonic to Entropy
-      ?assertEqual({ok, Entropy}, ecu_bip39:mnemonic_to_entropy(MnemonicBin)),
-      ?assertEqual({ok, Entropy}, ecu_bip39:mnemonic_to_entropy(MnemonicStr)),
+        %% 2. Mnemonic to Entropy
+        ?assertEqual({ok, Entropy}, ecu_bip39:mnemonic_to_entropy(MnemonicBin)),
+        ?assertEqual({ok, Entropy}, ecu_bip39:mnemonic_to_entropy(MnemonicStr)),
 
-      %% 3. Validate Mnemonic
-      ?assertEqual(ok, ecu_bip39:validate_mnemonic(MnemonicBin)),
-      ?assertEqual(ok, ecu_bip39:validate_mnemonic(MnemonicStr)),
+        %% 3. Validate Mnemonic
+        ?assertEqual(ok, ecu_bip39:validate_mnemonic(MnemonicBin)),
+        ?assertEqual(ok, ecu_bip39:validate_mnemonic(MnemonicStr)),
 
-      %% 4. Mnemonic to Seed with Passphrase "TREZOR"
-      DerivedSeed = ecu_bip39:mnemonic_to_seed(MnemonicBin, "TREZOR"),
-      ?assertEqual(Seed, DerivedSeed),
+        %% 4. Mnemonic to Seed with Passphrase "TREZOR"
+        DerivedSeed = ecu_bip39:mnemonic_to_seed(MnemonicBin, "TREZOR"),
+        ?assertEqual(Seed, DerivedSeed),
 
-      %% 5. Master Key derivation and Extended Key serialization matching BIP-32
-      RootXprvBin = iolist_to_binary(RootXprv),
-      {ok, MasterKey} = ecu_hd:master_key(secp256k1, DerivedSeed),
-      ?assertEqual(RootXprvBin, ecu_hd:to_base58(private, MasterKey)),
+        %% 5. Master Key derivation and Extended Key serialization matching BIP-32
+        RootXprvBin = iolist_to_binary(RootXprv),
+        {ok, MasterKey} = ecu_hd:master_key(secp256k1, DerivedSeed),
+        ?assertEqual(RootXprvBin, ecu_hd:to_base58(private, MasterKey)),
 
-      %% 6. Direct mnemonic_to_master_key bridge
-      {ok, MasterKey2} = ecu_bip39:mnemonic_to_master_key(secp256k1, MnemonicStr, "TREZOR"),
-      ?assertEqual(RootXprvBin, ecu_hd:to_base58(private, MasterKey2))
-    end,
-    test_vectors()
-  ).
+        %% 6. Direct mnemonic_to_master_key bridge
+        {ok, MasterKey2} = ecu_bip39:mnemonic_to_master_key(secp256k1, MnemonicStr, "TREZOR"),
+        ?assertEqual(RootXprvBin, ecu_hd:to_base58(private, MasterKey2))
+      end,
+      test_vectors()
+    )
+  end}.
 
 no_passphrase_test() ->
   Mnemonic =

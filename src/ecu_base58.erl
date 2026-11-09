@@ -614,5 +614,5 @@ decode_chunks(_, _Acc, _T) ->
 
 -spec double_sha256_checksum(binary()) -> <<_:32>>.
 double_sha256_checksum(Data) ->
-  <<Checksum:4/binary, _/binary>> = crypto:hash(sha256, crypto:hash(sha256, Data)),
+  <<Checksum:4/binary, _/binary>> = ecu_compat:hash(sha256, ecu_compat:hash(sha256, Data)),
   Checksum.

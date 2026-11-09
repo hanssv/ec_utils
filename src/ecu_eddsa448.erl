@@ -35,7 +35,7 @@
 %% @end
 -spec sign_keypair() -> keypair().
 sign_keypair() ->
-  Secret = crypto:strong_rand_bytes(57),
+  Secret = ecu_compat:strong_rand_bytes(57),
   sign_seed_keypair(Secret).
 
 %% @doc sign_seed_keypair/1 computes the signing keypair from a seed.
@@ -44,7 +44,7 @@ sign_keypair() ->
 %% @end
 -spec sign_seed_keypair(Secret :: <<_:456>>) -> keypair().
 sign_seed_keypair(<<Secret:57/binary>>) ->
-  <<Seed:57/binary, _/binary>> = crypto:hash_xof(shake256, Secret, 114 * 8),
+  <<Seed:57/binary, _/binary>> = ecu_compat:hash_xof(shake256, Secret, 114 * 8),
   Pub = ecu_ed448:compress(ecu_ed448:scalar_mul_base(Seed)),
   #{public => Pub, secret => <<Secret:57/binary, Pub:57/binary>>}.
 
@@ -104,7 +104,7 @@ sign_detached(Msg, SK, Context) when
   BinMsg = iolist_to_binary(Msg),
   <<Secret:57/binary, _/binary>> = SK,
 
-  <<Seed0:57/bytes, Prefix:57/bytes>> = crypto:hash_xof(shake256, Secret, 114 * 8),
+  <<Seed0:57/bytes, Prefix:57/bytes>> = ecu_compat:hash_xof(shake256, Secret, 114 * 8),
   Seed = clamp(Seed0),
 
   DerivedPub = ecu_ed448:compress(ecu_ed448:scalar_mul_base(Seed0)),
@@ -122,14 +122,14 @@ sign_detached(Msg, SK, Context) when
   Dom = dom4(0, Context),
 
   %% Compute r = SHAKE256(dom4(0, Context) || prefix || msg, 114) mod L
-  Rs0 = crypto:hash_xof(shake256, <<Dom/binary, Prefix/binary, BinMsg/binary>>, 114 * 8),
+  Rs0 = ecu_compat:hash_xof(shake256, <<Dom/binary, Prefix/binary, BinMsg/binary>>, 114 * 8),
   Rs = ecu_ed448:scalar_reduce(Rs0),
 
   %% Compute R = [r]B
   R = ecu_ed448:compress(ecu_ed448:scalar_mul_base_noclamp(Rs)),
 
   %% Compute k = SHAKE256(dom4(0, Context) || R || Pub || msg, 114) mod L
-  Ks0 = crypto:hash_xof(shake256, <<Dom/binary, R/binary, Pub/binary, BinMsg/binary>>, 114 * 8),
+  Ks0 = ecu_compat:hash_xof(shake256, <<Dom/binary, R/binary, Pub/binary, BinMsg/binary>>, 114 * 8),
   Ks = ecu_ed448:scalar_reduce(Ks0),
 
   %% Compute s = (r + k * a) mod L
@@ -167,7 +167,9 @@ sign_verify_detached(<<Sig:114/bytes>>, Msg, <<PK:57/bytes>>, Context) when byte
           false ->
             BinMsg = iolist_to_binary(Msg),
             Dom = dom4(0, Context),
-            Ks0 = crypto:hash_xof(shake256, <<Dom/binary, R/binary, PK/binary, BinMsg/binary>>, 114 * 8),
+            Ks0 = ecu_compat:hash_xof(
+              shake256, <<Dom/binary, R/binary, PK/binary, BinMsg/binary>>, 114 * 8
+            ),
             <<K:456/little-unsigned-integer>> = ecu_ed448:scalar_reduce(Ks0),
             R_prime = ecu_ed448:scalar_mul_dual_base(S, K, ecu_ed448:p_neg(A)),
             case ecu_ed448:is_small_order(R_prime) of
@@ -284,11 +286,11 @@ parse_batch([Item | Rest], DefaultCtx, PointsAcc, SAcc) ->
                 false ->
                   BinMsg = iolist_to_binary(Msg),
                   Dom = dom4(0, Context),
-                  Ks0 = crypto:hash_xof(
+                  Ks0 = ecu_compat:hash_xof(
                     shake256, <<Dom/binary, R_bin/binary, PK/binary, BinMsg/binary>>, 114 * 8
                   ),
                   <<K:456/little-unsigned-integer>> = ecu_ed448:scalar_reduce(Ks0),
-                  <<Z0:128/little-unsigned-integer>> = crypto:strong_rand_bytes(16),
+                  <<Z0:128/little-unsigned-integer>> = ecu_compat:strong_rand_bytes(16),
                   Z =
                     case Z0 of
                       0 -> 1;

@@ -35,7 +35,7 @@
 %% @end
 -spec sign_keypair() -> keypair().
 sign_keypair() ->
-  Secret = crypto:strong_rand_bytes(32),
+  Secret = ecu_compat:strong_rand_bytes(32),
   sign_seed_keypair(Secret).
 
 %% @doc sign_seed_keypair/1 computes the signing keypair from a seed.
@@ -44,7 +44,7 @@ sign_keypair() ->
 %% @end
 -spec sign_seed_keypair(Secret :: <<_:256>>) -> keypair().
 sign_seed_keypair(<<Secret:32/binary>>) ->
-  <<Seed:32/binary, _/binary>> = crypto:hash(sha512, Secret),
+  <<Seed:32/binary, _/binary>> = ecu_compat:hash(sha512, Secret),
   Pub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed)),
   #{public => Pub, secret => <<Secret:32/binary, Pub:32/binary>>}.
 
@@ -88,7 +88,7 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   <<Secret:32/binary, _/binary>> = SK,
 
   %% Grab the Seed, also referred to as 'a' (clamped) and the Prefix
-  <<Seed0:32/bytes, Prefix:32/bytes>> = crypto:hash(sha512, Secret),
+  <<Seed0:32/bytes, Prefix:32/bytes>> = ecu_compat:hash(sha512, Secret),
   Seed = clamp(Seed0),
 
   DerivedPub = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base(Seed0)),
@@ -104,7 +104,7 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
     end,
 
   %% Compute r = H(prefix || msg)
-  Rs0 = crypto:hash(sha512, <<Prefix/bytes, BinMsg/bytes>>),
+  Rs0 = ecu_compat:hash(sha512, <<Prefix/bytes, BinMsg/bytes>>),
   Rs = ecu_ed25519:scalar_reduce(Rs0),
 
   %% Compute R = s⋅G (and since we want the computation to be invertible use
@@ -112,7 +112,7 @@ sign_detached(Msg, SK) when bit_size(SK) == 256; bit_size(SK) == 512 ->
   R = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(Rs)),
 
   %% Compute k = H(R' || Pub || msg)
-  Ks0 = crypto:hash(sha512, <<R/bytes, Pub/bytes, BinMsg/bytes>>),
+  Ks0 = ecu_compat:hash(sha512, <<R/bytes, Pub/bytes, BinMsg/bytes>>),
   Ks = ecu_ed25519:scalar_reduce(Ks0),
 
   %% Compute s = (r + k * a) mod L
@@ -145,7 +145,7 @@ sign_verify_detached(<<Sig:64/bytes>>, Msg, <<PK:32/bytes>>) ->
             false;
           false ->
             BinMsg = iolist_to_binary(Msg),
-            Ks0 = crypto:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
+            Ks0 = ecu_compat:hash(sha512, <<R/binary, PK/binary, BinMsg/binary>>),
             <<K:256/little-unsigned-integer>> = ecu_ed25519:scalar_reduce(Ks0),
             R_prime = ecu_ed25519:scalar_mul_dual_base(S, K, ecu_ed25519:p_neg(A)),
             case ecu_ed25519:is_small_order(R_prime) of
@@ -215,9 +215,9 @@ parse_batch([{<<R_bin:32/binary, Ss:32/binary>>, Msg, <<PK:32/binary>>} | Rest],
               error(badarg);
             false ->
               BinMsg = iolist_to_binary(Msg),
-              Ks0 = crypto:hash(sha512, <<R_bin/binary, PK/binary, BinMsg/binary>>),
+              Ks0 = ecu_compat:hash(sha512, <<R_bin/binary, PK/binary, BinMsg/binary>>),
               <<K:256/little-unsigned-integer>> = ecu_ed25519:scalar_reduce(Ks0),
-              <<Z0:128/little-unsigned-integer>> = crypto:strong_rand_bytes(16),
+              <<Z0:128/little-unsigned-integer>> = ecu_compat:strong_rand_bytes(16),
               Z =
                 case Z0 of
                   0 -> 1;

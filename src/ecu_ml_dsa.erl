@@ -87,7 +87,7 @@
 %% @doc Generates a fresh ML-DSA public and secret keypair from system entropy.
 -spec keypair(parameter_set()) -> keypair().
 keypair(Set) ->
-  Seed = crypto:strong_rand_bytes(32),
+  Seed = ecu_compat:strong_rand_bytes(32),
   keypair_from_seed(Set, Seed).
 
 %% @doc Generates an ML-DSA keypair deterministically from a 32-byte seed.
@@ -227,7 +227,7 @@ sign_internal(Set, Msg, SecretKey, Opts) ->
       {ok, RndBytes} when is_binary(RndBytes), byte_size(RndBytes) =:= 32 ->
         RndBytes;
       _ ->
-        crypto:strong_rand_bytes(32)
+        ecu_compat:strong_rand_bytes(32)
     end,
   {K, L, _Eta, Tau, Beta, Gam1, Gam2, Omega, Lam4} = params(Set),
   {Rho, KeyK, TR, S1, S2, T0} = sk_decode(SecretKey, Set),
@@ -1314,18 +1314,8 @@ signature_size(ml_dsa_87) -> 4627.
 
 -spec shake128(binary(), pos_integer()) -> binary().
 shake128(Data, BitLen) ->
-  try
-    crypto:hash_xof(shake128, Data, BitLen)
-  catch
-    _:_ ->
-      ecu_keccak:shake128(Data, BitLen)
-  end.
+  ecu_compat:hash_xof(shake128, Data, BitLen).
 
 -spec shake256(binary(), pos_integer()) -> binary().
 shake256(Data, BitLen) ->
-  try
-    crypto:hash_xof(shake256, Data, BitLen)
-  catch
-    _:_ ->
-      ecu_keccak:shake256(Data, BitLen)
-  end.
+  ecu_compat:hash_xof(shake256, Data, BitLen).

@@ -51,15 +51,15 @@
 %% @doc tagged_hash/2 computes the BIP-340 tagged hash SHA256(SHA256(tag) || SHA256(tag) || data).
 -spec tagged_hash(binary() | string(), iodata()) -> <<_:256>>.
 tagged_hash(<<"BIP0340/challenge">>, Data) ->
-  crypto:hash(sha256, <<?TAG_CHALLENGE_PREFIX/binary, (iolist_to_binary(Data))/binary>>);
+  ecu_compat:hash(sha256, <<?TAG_CHALLENGE_PREFIX/binary, (iolist_to_binary(Data))/binary>>);
 tagged_hash(<<"BIP0340/aux">>, Data) ->
-  crypto:hash(sha256, <<?TAG_AUX_PREFIX/binary, (iolist_to_binary(Data))/binary>>);
+  ecu_compat:hash(sha256, <<?TAG_AUX_PREFIX/binary, (iolist_to_binary(Data))/binary>>);
 tagged_hash(<<"BIP0340/nonce">>, Data) ->
-  crypto:hash(sha256, <<?TAG_NONCE_PREFIX/binary, (iolist_to_binary(Data))/binary>>);
+  ecu_compat:hash(sha256, <<?TAG_NONCE_PREFIX/binary, (iolist_to_binary(Data))/binary>>);
 tagged_hash(Tag, Data) ->
   TagBin = iolist_to_binary(Tag),
-  TagHash = crypto:hash(sha256, TagBin),
-  crypto:hash(sha256, <<TagHash/binary, TagHash/binary, (iolist_to_binary(Data))/binary>>).
+  TagHash = ecu_compat:hash(sha256, TagBin),
+  ecu_compat:hash(sha256, <<TagHash/binary, TagHash/binary, (iolist_to_binary(Data))/binary>>).
 
 %% @doc lift_x/1 lifts a 256-bit X coordinate to a secp256k1 curve point with EVEN Y coordinate.
 %% Fails if X >= P or if X is not an X coordinate on secp256k1 (y^2 != x^3 + 7).
@@ -88,7 +88,7 @@ lift_x(_) ->
 %% @doc sign_keypair/0 generates a random BIP-340 keypair.
 -spec sign_keypair() -> keypair().
 sign_keypair() ->
-  Secret = crypto:strong_rand_bytes(32),
+  Secret = ecu_compat:strong_rand_bytes(32),
   <<D:256>> = Secret,
   case D > 0 andalso D < ?N of
     true -> sign_keypair_from_secret(Secret);
@@ -112,7 +112,7 @@ sign_keypair_from_secret(_) ->
 %% @doc sign/2 signs a message with a 32-byte secret key using fresh random auxiliary bytes.
 -spec sign(iodata(), secret_key()) -> signature().
 sign(Msg, SecretKey) ->
-  AuxRand = crypto:strong_rand_bytes(32),
+  AuxRand = ecu_compat:strong_rand_bytes(32),
   sign(Msg, SecretKey, AuxRand).
 
 %% @doc sign/3 signs a message with a 32-byte secret key and 32-byte auxiliary randomness.
@@ -125,10 +125,12 @@ sign(Msg, <<D0:256>>, <<AuxRand:32/binary>>) when D0 > 0, D0 < ?N ->
       true -> ?N - D0
     end,
   PxBin = <<Px:256>>,
-  AuxHash = crypto:hash(sha256, <<?TAG_AUX_PREFIX/binary, AuxRand/binary>>),
-  T = crypto:exor(<<D:256>>, AuxHash),
+  AuxHash = ecu_compat:hash(sha256, <<?TAG_AUX_PREFIX/binary, AuxRand/binary>>),
+  T = ecu_compat:exor(<<D:256>>, AuxHash),
   MsgBin = iolist_to_binary(Msg),
-  RandNonce = crypto:hash(sha256, <<?TAG_NONCE_PREFIX/binary, T/binary, PxBin/binary, MsgBin/binary>>),
+  RandNonce = ecu_compat:hash(
+    sha256, <<?TAG_NONCE_PREFIX/binary, T/binary, PxBin/binary, MsgBin/binary>>
+  ),
   <<K0:256>> = RandNonce,
   K1 = K0 rem ?N,
   case K1 of
@@ -142,7 +144,7 @@ sign(Msg, <<D0:256>>, <<AuxRand:32/binary>>) when D0 > 0, D0 < ?N ->
           true -> ?N - K1
         end,
       RxBin = <<Rx:256>>,
-      ChallengeHash = crypto:hash(
+      ChallengeHash = ecu_compat:hash(
         sha256, <<?TAG_CHALLENGE_PREFIX/binary, RxBin/binary, PxBin/binary, MsgBin/binary>>
       ),
       <<E0:256>> = ChallengeHash,
@@ -167,7 +169,7 @@ verify(<<Rx:256, S:256>>, Msg, <<Px:256>>) ->
           MsgBin = iolist_to_binary(Msg),
           RxBin = <<Rx:256>>,
           PxBin = <<Px:256>>,
-          ChallengeHash = crypto:hash(
+          ChallengeHash = ecu_compat:hash(
             sha256, <<?TAG_CHALLENGE_PREFIX/binary, RxBin/binary, PxBin/binary, MsgBin/binary>>
           ),
           <<E0:256>> = ChallengeHash,

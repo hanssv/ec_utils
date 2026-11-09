@@ -126,15 +126,15 @@ rfc6979_init(MsgHash, <<PrivateKey:256>>) ->
   Int2Octets = <<PrivateKey:256>>,
   V0 = binary:copy(<<1>>, 32),
   K0 = binary:copy(<<0>>, 32),
-  K1 = crypto:mac(hmac, sha256, K0, <<V0/binary, 0:8, Int2Octets/binary, Bits2Octets/binary>>),
-  V1 = crypto:mac(hmac, sha256, K1, V0),
-  K2 = crypto:mac(hmac, sha256, K1, <<V1/binary, 1:8, Int2Octets/binary, Bits2Octets/binary>>),
-  V2 = crypto:mac(hmac, sha256, K2, V1),
+  K1 = ecu_compat:mac(hmac, sha256, K0, <<V0/binary, 0:8, Int2Octets/binary, Bits2Octets/binary>>),
+  V1 = ecu_compat:mac(hmac, sha256, K1, V0),
+  K2 = ecu_compat:mac(hmac, sha256, K1, <<V1/binary, 1:8, Int2Octets/binary, Bits2Octets/binary>>),
+  V2 = ecu_compat:mac(hmac, sha256, K2, V1),
   rfc6979_loop(V2, K2).
 
 -spec rfc6979_loop(binary(), binary()) -> {pos_integer(), binary(), binary()}.
 rfc6979_loop(V, K) ->
-  V1 = crypto:mac(hmac, sha256, K, V),
+  V1 = ecu_compat:mac(hmac, sha256, K, V),
   <<KInt:256>> = V1,
   if
     KInt >= 1 andalso KInt < ?N ->
@@ -145,8 +145,8 @@ rfc6979_loop(V, K) ->
 
 -spec rfc6979_step(binary(), binary()) -> {pos_integer(), binary(), binary()}.
 rfc6979_step(V, K) ->
-  KNext = crypto:mac(hmac, sha256, K, <<V/binary, 0:8>>),
-  VNext = crypto:mac(hmac, sha256, KNext, V),
+  KNext = ecu_compat:mac(hmac, sha256, K, <<V/binary, 0:8>>),
+  VNext = ecu_compat:mac(hmac, sha256, KNext, V),
   rfc6979_loop(VNext, KNext).
 
 %% --- internal functions

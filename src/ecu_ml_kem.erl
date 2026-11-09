@@ -72,8 +72,8 @@
 %% @doc Generate a new random keypair for the specified parameter set.
 -spec keypair(parameter_set()) -> {public_key(), secret_key()}.
 keypair(ParamSet) ->
-  SeedD = crypto:strong_rand_bytes(32),
-  SeedZ = crypto:strong_rand_bytes(32),
+  SeedD = ecu_compat:strong_rand_bytes(32),
+  SeedZ = ecu_compat:strong_rand_bytes(32),
   keypair_from_seed(ParamSet, SeedD, SeedZ).
 
 %% @doc Deterministically derive a keypair from two 32-byte seeds (d, z) per FIPS 203.
@@ -83,7 +83,7 @@ keypair_from_seed(ParamSet, SeedD, SeedZ) when
 ->
   {K, Eta1, _, _, _, _, _, _} = params(ParamSet),
   {EkPke, DkPke} = k_pke_keygen(K, Eta1, SeedD),
-  HEk = crypto:hash(sha3_256, EkPke),
+  HEk = ecu_compat:hash(sha3_256, EkPke),
   Dk = <<DkPke/binary, EkPke/binary, HEk/binary, SeedZ/binary>>,
   {EkPke, Dk};
 keypair_from_seed(_, _, _) ->
@@ -92,7 +92,7 @@ keypair_from_seed(_, _, _) ->
 %% @doc Encapsulate against a public key, generating a shared secret and ciphertext.
 -spec encaps(public_key()) -> {shared_secret(), ciphertext()}.
 encaps(PublicKey) ->
-  SeedM = crypto:strong_rand_bytes(32),
+  SeedM = ecu_compat:strong_rand_bytes(32),
   encaps(PublicKey, SeedM).
 
 %% @doc Deterministically encapsulate using a fixed 32-byte seed m per FIPS 203.
@@ -106,8 +106,10 @@ encaps(PublicKey, SeedM) when
     true ->
       case validate_public_key(K, PublicKey) of
         ok ->
-          HPk = crypto:hash(sha3_256, PublicKey),
-          <<SharedSecret:32/binary, R:32/binary>> = crypto:hash(sha3_512, <<SeedM/binary, HPk/binary>>),
+          HPk = ecu_compat:hash(sha3_256, PublicKey),
+          <<SharedSecret:32/binary, R:32/binary>> = ecu_compat:hash(
+            sha3_512, <<SeedM/binary, HPk/binary>>
+          ),
           Ciphertext = k_pke_encrypt(K, Eta1, Eta2, Du, Dv, PublicKey, SeedM, R),
           {SharedSecret, Ciphertext};
         error ->
@@ -135,7 +137,7 @@ decaps(SecretKey, Ciphertext) when is_binary(SecretKey), is_binary(Ciphertext) -
         Z:32/binary
       >> = SecretKey,
       MPrime = k_pke_decrypt(K, Du, Dv, DkPke, Ciphertext),
-      <<KPrime:32/binary, RPrime:32/binary>> = crypto:hash(sha3_512, <<MPrime/binary, HPk/binary>>),
+      <<KPrime:32/binary, RPrime:32/binary>> = ecu_compat:hash(sha3_512, <<MPrime/binary, HPk/binary>>),
       KBar = shake256(<<Z/binary, Ciphertext/binary>>, 256),
       CPrime = k_pke_encrypt(K, Eta1, Eta2, Du, Dv, EkPke, MPrime, RPrime),
       case subtle_eq(Ciphertext, CPrime) of
@@ -166,7 +168,7 @@ parameter_set(_) ->
 
 -spec k_pke_keygen(pos_integer(), pos_integer(), <<_:256>>) -> {binary(), binary()}.
 k_pke_keygen(K, Eta1, SeedD) ->
-  <<Rho:32/binary, Sigma:32/binary>> = crypto:hash(sha3_512, SeedD),
+  <<Rho:32/binary, Sigma:32/binary>> = ecu_compat:hash(sha3_512, SeedD),
   {S_vec, N1} = sample_poly_vector(K, Eta1, Sigma, 0),
   {E_vec, _N2} = sample_poly_vector(K, Eta1, Sigma, N1),
   S_hat = [ntt(S) || S <- S_vec],
@@ -471,21 +473,11 @@ prf(Eta, Seed, N) ->
 
 -spec shake128(binary(), pos_integer()) -> binary().
 shake128(Data, BitLen) ->
-  try
-    crypto:hash_xof(shake128, Data, BitLen)
-  catch
-    _:_ ->
-      ecu_keccak:shake128(Data, BitLen)
-  end.
+  ecu_compat:hash_xof(shake128, Data, BitLen).
 
 -spec shake256(binary(), pos_integer()) -> binary().
 shake256(Data, BitLen) ->
-  try
-    crypto:hash_xof(shake256, Data, BitLen)
-  catch
-    _:_ ->
-      ecu_keccak:shake256(Data, BitLen)
-  end.
+  ecu_compat:hash_xof(shake256, Data, BitLen).
 
 -spec sample_poly_cbd(pos_integer(), binary()) -> poly().
 sample_poly_cbd(2, Bytes) when byte_size(Bytes) =:= 128 ->

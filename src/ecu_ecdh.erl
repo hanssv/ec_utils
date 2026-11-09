@@ -49,10 +49,10 @@
   (x448) -> {<<_:448>>, <<_:448>>};
   (secp256k1) -> {ecu_secp256k1:pt_compressed(), <<_:256>>}.
 keypair(x25519) ->
-  Priv = crypto:strong_rand_bytes(32),
+  Priv = ecu_compat:strong_rand_bytes(32),
   keypair_from_seed(x25519, Priv);
 keypair(x448) ->
-  Priv = crypto:strong_rand_bytes(56),
+  Priv = ecu_compat:strong_rand_bytes(56),
   keypair_from_seed(x448, Priv);
 keypair(secp256k1) ->
   PrivInt = rnd_secp256k1_scalar(),
@@ -137,7 +137,7 @@ hybrid_encaps(<<XPub:32/binary, KemPub:1184/binary>>) ->
   {EphPub, EphPriv} = keypair(x25519),
   {SS_kem, CT_kem} = ecu_ml_kem:encaps(KemPub),
   SS_ecdh = compute_key(x25519, XPub, EphPriv),
-  SharedSecret = crypto:hash(sha3_256, <<SS_kem/binary, SS_ecdh/binary>>),
+  SharedSecret = ecu_compat:hash(sha3_256, <<SS_kem/binary, SS_ecdh/binary>>),
   Ciphertext = <<EphPub/binary, CT_kem/binary>>,
   {SharedSecret, Ciphertext};
 hybrid_encaps(_) ->
@@ -148,7 +148,7 @@ hybrid_encaps(_) ->
 hybrid_decaps(<<XPriv:32/binary, KemPriv:2400/binary>>, <<EphPub:32/binary, CT_kem:1088/binary>>) ->
   SS_ecdh = compute_key(x25519, EphPub, XPriv),
   SS_kem = ecu_ml_kem:decaps(KemPriv, CT_kem),
-  crypto:hash(sha3_256, <<SS_kem/binary, SS_ecdh/binary>>);
+  ecu_compat:hash(sha3_256, <<SS_kem/binary, SS_ecdh/binary>>);
 hybrid_decaps(_, _) ->
   error(badarg).
 
@@ -223,7 +223,7 @@ ed25519_public_to_x25519(_) ->
 ed25519_secret_to_x25519(<<Seed:32/bytes, _:32/bytes>>) ->
   ed25519_secret_to_x25519(Seed);
 ed25519_secret_to_x25519(Seed = <<_:32/bytes>>) ->
-  <<H0:32/binary, _/binary>> = crypto:hash(sha512, Seed),
+  <<H0:32/binary, _/binary>> = ecu_compat:hash(sha512, Seed),
   clamp(x25519, H0);
 ed25519_secret_to_x25519(_) ->
   error(badarg).
@@ -308,7 +308,7 @@ valid_secp256k1_point(_) ->
 
 -spec rnd_secp256k1_scalar() -> pos_integer().
 rnd_secp256k1_scalar() ->
-  <<K:256>> = crypto:strong_rand_bytes(32),
+  <<K:256>> = ecu_compat:strong_rand_bytes(32),
   case K == 0 orelse K >= ?N of
     true -> rnd_secp256k1_scalar();
     false -> K
