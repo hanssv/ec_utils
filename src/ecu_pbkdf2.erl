@@ -99,9 +99,9 @@ pbkdf2_sha512(Password, Salt, Iterations, Length) ->
     (K14 bxor OpadW):64,
     (K15 bxor OpadW):64
   >>,
-  InitState = ecu_sha2:init_state_512(),
-  IState = ecu_sha2:compress_block_512(Ki, InitState),
-  OState = ecu_sha2:compress_block_512(Ko, InitState),
+  InitState = ecu_sha2:init_state_512_split(),
+  IState = ecu_sha2:compress_block_512_split(Ki, InitState),
+  OState = ecu_sha2:compress_block_512_split(Ko, InitState),
   TotalBlocks = (Length + 63) div 64,
   Derived = pbkdf2_blocks_512(1, TotalBlocks, Password, Salt, Iterations, IState, OState, <<>>),
   binary:part(Derived, 0, Length).
@@ -112,8 +112,8 @@ pbkdf2_sha512(Password, Salt, Iterations, Length) ->
   binary(),
   binary(),
   pos_integer(),
-  ecu_sha2:state512(),
-  ecu_sha2:state512(),
+  ecu_sha2:state512_split(),
+  ecu_sha2:state512_split(),
   binary()
 ) -> binary().
 pbkdf2_blocks_512(BlockIndex, TotalBlocks, _Password, _Salt, _Iterations, _IState, _OState, Acc) when
@@ -122,30 +122,27 @@ pbkdf2_blocks_512(BlockIndex, TotalBlocks, _Password, _Salt, _Iterations, _IStat
   Acc;
 pbkdf2_blocks_512(BlockIndex, TotalBlocks, Password, Salt, Iterations, IState, OState, Acc) ->
   U1 = ecu_hmac:hmac(sha512, Password, <<Salt/binary, BlockIndex:32/big>>),
-  <<U0:64, U1_1:64, U2:64, U3:64, U4:64, U5:64, U6:64, U7:64>> = U1,
-  Block =
-    pbkdf2_loop_512(
-      2,
-      Iterations,
-      IState,
-      OState,
-      U0,
-      U1_1,
-      U2,
-      U3,
-      U4,
-      U5,
-      U6,
-      U7,
-      U0,
-      U1_1,
-      U2,
-      U3,
-      U4,
-      U5,
-      U6,
-      U7
-    ),
+  <<U0_h:32, U0_l:32, U1_h:32, U1_l:32, U2_h:32, U2_l:32, U3_h:32, U3_l:32, U4_h:32, U4_l:32, U5_h:32,
+    U5_l:32, U6_h:32, U6_l:32, U7_h:32, U7_l:32>> = U1,
+  U = {
+    U0_h,
+    U0_l,
+    U1_h,
+    U1_l,
+    U2_h,
+    U2_l,
+    U3_h,
+    U3_l,
+    U4_h,
+    U4_l,
+    U5_h,
+    U5_l,
+    U6_h,
+    U6_l,
+    U7_h,
+    U7_l
+  },
+  Block = ecu_sha2:pbkdf2_loop_512(2, Iterations, IState, OState, U, U),
   pbkdf2_blocks_512(
     BlockIndex + 1,
     TotalBlocks,
@@ -155,101 +152,6 @@ pbkdf2_blocks_512(BlockIndex, TotalBlocks, Password, Salt, Iterations, IState, O
     IState,
     OState,
     <<Acc/binary, Block/binary>>
-  ).
-
--spec pbkdf2_loop_512(
-  pos_integer(),
-  pos_integer(),
-  ecu_sha2:state512(),
-  ecu_sha2:state512(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer()
-) -> binary().
-pbkdf2_loop_512(
-  Iter,
-  Iterations,
-  _IState,
-  _OState,
-  _U0,
-  _U1,
-  _U2,
-  _U3,
-  _U4,
-  _U5,
-  _U6,
-  _U7,
-  Acc0,
-  Acc1,
-  Acc2,
-  Acc3,
-  Acc4,
-  Acc5,
-  Acc6,
-  Acc7
-) when Iter > Iterations ->
-  <<Acc0:64/big, Acc1:64/big, Acc2:64/big, Acc3:64/big, Acc4:64/big, Acc5:64/big, Acc6:64/big,
-    Acc7:64/big>>;
-pbkdf2_loop_512(
-  Iter,
-  Iterations,
-  IState,
-  OState,
-  U0,
-  U1,
-  U2,
-  U3,
-  U4,
-  U5,
-  U6,
-  U7,
-  Acc0,
-  Acc1,
-  Acc2,
-  Acc3,
-  Acc4,
-  Acc5,
-  Acc6,
-  Acc7
-) ->
-  {IH0, IH1, IH2, IH3, IH4, IH5, IH6, IH7} =
-    ecu_sha2:compress_64b_msg_512(U0, U1, U2, U3, U4, U5, U6, U7, IState),
-  {NewU0, NewU1, NewU2, NewU3, NewU4, NewU5, NewU6, NewU7} =
-    ecu_sha2:compress_64b_msg_512(IH0, IH1, IH2, IH3, IH4, IH5, IH6, IH7, OState),
-  pbkdf2_loop_512(
-    Iter + 1,
-    Iterations,
-    IState,
-    OState,
-    NewU0,
-    NewU1,
-    NewU2,
-    NewU3,
-    NewU4,
-    NewU5,
-    NewU6,
-    NewU7,
-    Acc0 bxor NewU0,
-    Acc1 bxor NewU1,
-    Acc2 bxor NewU2,
-    Acc3 bxor NewU3,
-    Acc4 bxor NewU4,
-    Acc5 bxor NewU5,
-    Acc6 bxor NewU6,
-    Acc7 bxor NewU7
   ).
 
 -spec pbkdf2_sha256(binary(), binary(), pos_integer(), pos_integer()) -> binary().
