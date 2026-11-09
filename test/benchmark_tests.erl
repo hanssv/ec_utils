@@ -1098,6 +1098,85 @@ bench_bls12_381_test_() ->
     ok
   end}.
 
+bench_compat_modes_test_() ->
+  {timeout, 60, fun() ->
+    case ecu_compat:is_crypto_available() of
+      false ->
+        ?debugFmt("Skipping compat modes benchmark (OTP crypto not available)", []),
+        ok;
+      true ->
+        OrigMode = ecu_compat:mode(),
+        try
+          Msg = <<"The quick brown fox jumps over the lazy dog">>,
+          Key32 = binary:copy(<<"k">>, 32),
+          Salt = <<"salt1234">>,
+          #{public := SchnorrPub, secret := SchnorrPriv} = ecu_schnorr:sign_keypair(),
+          SchnorrSig = ecu_schnorr:sign(Msg, SchnorrPriv),
+          #{public := EdPub, secret := EdPriv} = ecu_eddsa:sign_keypair(),
+          EdSig = ecu_eddsa:sign_detached(Msg, EdPriv),
+
+          Tests = [
+            {"SHA-256 (64B)", 500, fun() -> ecu_compat:hash(sha256, Msg) end},
+            {"SHA-512 (64B)", 500, fun() -> ecu_compat:hash(sha512, Msg) end},
+            {"RIPEMD-160 (64B)", 500, fun() -> ecu_compat:hash(ripemd160, Msg) end},
+            {"HMAC-SHA256 (64B)", 500, fun() -> ecu_compat:mac(hmac, sha256, Key32, Msg) end},
+            {"HMAC-SHA512 (64B)", 500, fun() -> ecu_compat:mac(hmac, sha512, Key32, Msg) end},
+            {
+              "PBKDF2-HMAC-SHA512 (2048 iters)",
+              5,
+              fun() -> ecu_compat:pbkdf2_hmac(sha512, Msg, Salt, 2048, 64) end
+            },
+            {"BIP-340 Schnorr Sign", 20, fun() -> ecu_schnorr:sign(Msg, SchnorrPriv) end},
+            {"BIP-340 Schnorr Verify", 20, fun() -> ecu_schnorr:verify(SchnorrSig, Msg, SchnorrPub) end},
+            {"Ed25519 Sign", 20, fun() -> ecu_eddsa:sign_detached(Msg, EdPriv) end},
+            {
+              "Ed25519 Verify",
+              20,
+              fun() -> ecu_eddsa:sign_verify_detached(EdSig, Msg, EdPub) end
+            }
+          ],
+
+          ?debugFmt("~n=== Mode Comparison Benchmark (OTP Acceleration vs Pure Erlang) ===", []),
+          ?debugFmt(
+            "~-32s ~15s ~15s ~12s",
+            ["Operation", "OTP (Mode 1)", "Pure (Mode 2)", "Slowdown"]
+          ),
+          ?debugFmt(
+            "~-32s ~15s ~15s ~12s",
+            [
+              "--------------------------------",
+              "---------------",
+              "---------------",
+              "------------"
+            ]
+          ),
+          lists:foreach(
+            fun({Name, Iters, Fun}) ->
+              ecu_compat:set_mode(otp),
+              {TimeOtp, _} = timer:tc(fun() ->
+                [Fun() || _ <- lists:seq(1, Iters)]
+              end),
+              ecu_compat:set_mode(pure),
+              {TimePure, _} = timer:tc(fun() ->
+                [Fun() || _ <- lists:seq(1, Iters)]
+              end),
+              UsOtp = TimeOtp / Iters,
+              UsPure = TimePure / Iters,
+              Ratio = UsPure / max(UsOtp, 0.001),
+              ?debugFmt(
+                "~-32s ~12.2f us ~12.2f us ~10.2fx",
+                [Name, UsOtp, UsPure, Ratio]
+              )
+            end,
+            Tests
+          ),
+          ok
+        after
+          ecu_compat:set_mode(OrigMode)
+        end
+    end
+  end}.
+
 stats(What, Who, N, T) ->
   ?debugFmt("~s with ~s ~.2f us/op", [What, Who, T / N]).
 
