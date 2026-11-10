@@ -115,6 +115,7 @@ run_bench(#{id := Id, name := Name, group := Group, run := RunSpec}, Opts) ->
     case maps:get(min_iterations, Opts, auto) of
       auto ->
         if
+          SingleOpUs > 50000 -> 5;
           SingleOpUs > 20000 -> 15;
           SingleOpUs > 5000 -> 25;
           SingleOpUs > 1000 -> 50;
