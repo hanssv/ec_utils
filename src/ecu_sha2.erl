@@ -13,12 +13,37 @@
 
 -typing([eqwalizer]).
 
+-compile(
+  {inline, [
+    rotr32/2,
+    k_constants_256/0,
+    k_constants_512/0
+  ]}
+).
+
 -export([
   sha256/1,
   sha224/1,
   sha512/1,
   sha384/1,
-  hash/2
+  hash/2,
+  init_state_256/0,
+  init_state_512/0,
+  init_state_512_split/0,
+  compress_block_256/2,
+  compress_block_512/2,
+  compress_block_512_split/2,
+  compress_32b_msg_256/9,
+  compress_64b_msg_512/9,
+  process_blocks_256/2,
+  process_blocks_512/2,
+  pbkdf2_loop_512/6
+]).
+
+-export_type([
+  state256/0,
+  state512/0,
+  state512_split/0
 ]).
 
 -define(MASK32, 16#ffffffff).
@@ -46,6 +71,25 @@
   non_neg_integer()
 }.
 
+-type state512_split() :: {
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer()
+}.
+
 -spec hash(sha256 | sha224 | sha512 | sha384, binary() | iolist()) -> binary().
 hash(sha256, Data) -> sha256(Data);
 hash(sha224, Data) -> sha224(Data);
@@ -56,15 +100,7 @@ hash(sha384, Data) -> sha384(Data).
 sha256(Data) ->
   Bin = to_binary(Data),
   Padded = pad_sha256(Bin),
-  H0 = 16#6a09e667,
-  H1 = 16#bb67ae85,
-  H2 = 16#3c6ef372,
-  H3 = 16#a54ff53a,
-  H4 = 16#510e527f,
-  H5 = 16#9b05688c,
-  H6 = 16#1f83d9ab,
-  H7 = 16#5be0cd19,
-  process_blocks_256(Padded, {H0, H1, H2, H3, H4, H5, H6, H7}).
+  process_blocks_256(Padded, init_state_256()).
 
 -spec sha224(binary() | iolist()) -> binary().
 sha224(Data) ->
@@ -85,15 +121,7 @@ sha224(Data) ->
 sha512(Data) ->
   Bin = to_binary(Data),
   Padded = pad_sha512(Bin),
-  H0 = 16#6a09e667f3bcc908,
-  H1 = 16#bb67ae8584caa73b,
-  H2 = 16#3c6ef372fe94f82b,
-  H3 = 16#a54ff53a5f1d36f1,
-  H4 = 16#510e527fade682d1,
-  H5 = 16#9b05688c2b3e6c1f,
-  H6 = 16#1f83d9abfb41bd6b,
-  H7 = 16#5be0cd19137e2179,
-  process_blocks_512(Padded, {H0, H1, H2, H3, H4, H5, H6, H7}).
+  process_blocks_512(Padded, init_state_512()).
 
 -spec sha384(binary() | iolist()) -> binary().
 sha384(Data) ->
@@ -128,39 +156,44 @@ pad_sha256(Data) ->
 process_blocks_256(<<>>, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
   <<H0:32/big, H1:32/big, H2:32/big, H3:32/big, H4:32/big, H5:32/big, H6:32/big, H7:32/big>>;
 process_blocks_256(<<Block:64/binary, Rest/binary>>, State) ->
-  W = expand_w_256(Block),
-  NewState = compress_block_256(W, State),
+  NewState = compress_block_256(Block, State),
   process_blocks_256(Rest, NewState).
 
--spec expand_w_256(binary()) -> tuple().
-expand_w_256(
+-spec compress_block_256(binary(), state256()) -> state256().
+compress_block_256(
   <<W0:32, W1:32, W2:32, W3:32, W4:32, W5:32, W6:32, W7:32, W8:32, W9:32, W10:32, W11:32, W12:32, W13:32,
-    W14:32, W15:32>>
+    W14:32, W15:32>>,
+  {H0, H1, H2, H3, H4, H5, H6, H7}
 ) ->
-  WList = [W0, W1, W2, W3, W4, W5, W6, W7, W8, W9, W10, W11, W12, W13, W14, W15],
-  expand_w_256_loop(16, array_from_list_256(WList)).
-
--spec array_from_list_256([non_neg_integer()]) -> tuple().
-array_from_list_256(List) ->
-  list_to_tuple(List).
-
--spec expand_w_256_loop(pos_integer(), tuple()) -> tuple().
-expand_w_256_loop(64, Tuple) ->
-  Tuple;
-expand_w_256_loop(I, Tuple) ->
-  W_minus_2 = get_word(I - 1, Tuple),
-  W_minus_7 = get_word(I - 6, Tuple),
-  W_minus_15 = get_word(I - 14, Tuple),
-  W_minus_16 = get_word(I - 15, Tuple),
-  S0 = rotr32(W_minus_15, 7) bxor rotr32(W_minus_15, 18) bxor (W_minus_15 bsr 3),
-  S1 = rotr32(W_minus_2, 17) bxor rotr32(W_minus_2, 19) bxor (W_minus_2 bsr 10),
-  Wi = (W_minus_16 + S0 + W_minus_7 + S1) band ?MASK32,
-  expand_w_256_loop(I + 1, erlang:append_element(Tuple, Wi)).
-
--spec compress_block_256(tuple(), state256()) -> state256().
-compress_block_256(WTuple, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
   {A, B, C, D, E, F, G, H} =
-    round_loop_256(1, WTuple, k_constants_256(), H0, H1, H2, H3, H4, H5, H6, H7),
+    rounds_0_to_15_256(
+      16,
+      W0,
+      W1,
+      W2,
+      W3,
+      W4,
+      W5,
+      W6,
+      W7,
+      W8,
+      W9,
+      W10,
+      W11,
+      W12,
+      W13,
+      W14,
+      W15,
+      H0,
+      H1,
+      H2,
+      H3,
+      H4,
+      H5,
+      H6,
+      H7,
+      k_constants_256()
+    ),
   {
     (H0 + A) band ?MASK32,
     (H1 + B) band ?MASK32,
@@ -172,57 +205,449 @@ compress_block_256(WTuple, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
     (H7 + H) band ?MASK32
   }.
 
--spec round_loop_256(
-  pos_integer(),
-  tuple(),
-  tuple(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer()
-) ->
+-spec init_state_256() -> state256().
+init_state_256() ->
   {
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer()
+    16#6a09e667,
+    16#bb67ae85,
+    16#3c6ef372,
+    16#a54ff53a,
+    16#510e527f,
+    16#9b05688c,
+    16#1f83d9ab,
+    16#5be0cd19
   }.
-round_loop_256(65, _W, _K, A, B, C, D, E, F, G, H) ->
+
+-spec compress_32b_msg_256(
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  state256()
+) -> state256().
+compress_32b_msg_256(U0, U1, U2, U3, U4, U5, U6, U7, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
+  {A, B, C, D, E, F, G, H} =
+    rounds_0_to_15_256(
+      16,
+      U0,
+      U1,
+      U2,
+      U3,
+      U4,
+      U5,
+      U6,
+      U7,
+      16#80000000,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      768,
+      H0,
+      H1,
+      H2,
+      H3,
+      H4,
+      H5,
+      H6,
+      H7,
+      k_constants_256()
+    ),
+  {
+    (H0 + A) band ?MASK32,
+    (H1 + B) band ?MASK32,
+    (H2 + C) band ?MASK32,
+    (H3 + D) band ?MASK32,
+    (H4 + E) band ?MASK32,
+    (H5 + F) band ?MASK32,
+    (H6 + G) band ?MASK32,
+    (H7 + H) band ?MASK32
+  }.
+
+-spec rounds_0_to_15_256(
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  [non_neg_integer()]
+) -> state256().
+rounds_0_to_15_256(
+  0,
+  W0,
+  W1,
+  W2,
+  W3,
+  W4,
+  W5,
+  W6,
+  W7,
+  W8,
+  W9,
+  W10,
+  W11,
+  W12,
+  W13,
+  W14,
+  W15,
+  A,
+  B,
+  C,
+  D,
+  E,
+  F,
+  G,
+  H,
+  Ks
+) ->
+  rounds_16_to_63_256(
+    W0,
+    W1,
+    W2,
+    W3,
+    W4,
+    W5,
+    W6,
+    W7,
+    W8,
+    W9,
+    W10,
+    W11,
+    W12,
+    W13,
+    W14,
+    W15,
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    Ks
+  );
+rounds_0_to_15_256(
+  N,
+  W0,
+  W1,
+  W2,
+  W3,
+  W4,
+  W5,
+  W6,
+  W7,
+  W8,
+  W9,
+  W10,
+  W11,
+  W12,
+  W13,
+  W14,
+  W15,
+  A,
+  B,
+  C,
+  D,
+  E,
+  F,
+  G,
+  H,
+  [K0, K1, K2, K3 | Ks]
+) ->
+  %% Round 0
+  S1_0 = rotr32(E, 6) bxor rotr32(E, 11) bxor rotr32(E, 25),
+  Ch0 = G bxor (E band (F bxor G)),
+  T1_0 = (H + S1_0 + Ch0 + K0 + W0) band ?MASK32,
+  S0_0 = rotr32(A, 2) bxor rotr32(A, 13) bxor rotr32(A, 22),
+  Maj0 = (A band B) bxor ((A bxor B) band C),
+  T2_0 = (S0_0 + Maj0) band ?MASK32,
+  A1 = (T1_0 + T2_0) band ?MASK32,
+  E1 = (D + T1_0) band ?MASK32,
+
+  %% Round 1
+  S1_1 = rotr32(E1, 6) bxor rotr32(E1, 11) bxor rotr32(E1, 25),
+  Ch1 = F bxor (E1 band (E bxor F)),
+  T1_1 = (G + S1_1 + Ch1 + K1 + W1) band ?MASK32,
+  S0_1 = rotr32(A1, 2) bxor rotr32(A1, 13) bxor rotr32(A1, 22),
+  Maj1 = (A1 band A) bxor ((A1 bxor A) band B),
+  T2_1 = (S0_1 + Maj1) band ?MASK32,
+  A2 = (T1_1 + T2_1) band ?MASK32,
+  E2 = (C + T1_1) band ?MASK32,
+
+  %% Round 2
+  S1_2 = rotr32(E2, 6) bxor rotr32(E2, 11) bxor rotr32(E2, 25),
+  Ch2 = E bxor (E2 band (E1 bxor E)),
+  T1_2 = (F + S1_2 + Ch2 + K2 + W2) band ?MASK32,
+  S0_2 = rotr32(A2, 2) bxor rotr32(A2, 13) bxor rotr32(A2, 22),
+  Maj2 = (A2 band A1) bxor ((A2 bxor A1) band A),
+  T2_2 = (S0_2 + Maj2) band ?MASK32,
+  A3 = (T1_2 + T2_2) band ?MASK32,
+  E3 = (B + T1_2) band ?MASK32,
+
+  %% Round 3
+  S1_3 = rotr32(E3, 6) bxor rotr32(E3, 11) bxor rotr32(E3, 25),
+  Ch3 = E1 bxor (E3 band (E2 bxor E1)),
+  T1_3 = (E + S1_3 + Ch3 + K3 + W3) band ?MASK32,
+  S0_3 = rotr32(A3, 2) bxor rotr32(A3, 13) bxor rotr32(A3, 22),
+  Maj3 = (A3 band A2) bxor ((A3 bxor A2) band A1),
+  T2_3 = (S0_3 + Maj3) band ?MASK32,
+  A4 = (T1_3 + T2_3) band ?MASK32,
+  E4 = (A + T1_3) band ?MASK32,
+
+  rounds_0_to_15_256(
+    N - 4,
+    W4,
+    W5,
+    W6,
+    W7,
+    W8,
+    W9,
+    W10,
+    W11,
+    W12,
+    W13,
+    W14,
+    W15,
+    W0,
+    W1,
+    W2,
+    W3,
+    A4,
+    A3,
+    A2,
+    A1,
+    E4,
+    E3,
+    E2,
+    E1,
+    Ks
+  );
+rounds_0_to_15_256(
+  _N,
+  _W0,
+  _W1,
+  _W2,
+  _W3,
+  _W4,
+  _W5,
+  _W6,
+  _W7,
+  _W8,
+  _W9,
+  _W10,
+  _W11,
+  _W12,
+  _W13,
+  _W14,
+  _W15,
+  A,
+  B,
+  C,
+  D,
+  E,
+  F,
+  G,
+  H,
+  []
+) ->
+  {A, B, C, D, E, F, G, H}.
+
+-spec rounds_16_to_63_256(
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  [non_neg_integer()]
+) -> state256().
+rounds_16_to_63_256(
+  _W0,
+  _W1,
+  _W2,
+  _W3,
+  _W4,
+  _W5,
+  _W6,
+  _W7,
+  _W8,
+  _W9,
+  _W10,
+  _W11,
+  _W12,
+  _W13,
+  _W14,
+  _W15,
+  A,
+  B,
+  C,
+  D,
+  E,
+  F,
+  G,
+  H,
+  []
+) ->
   {A, B, C, D, E, F, G, H};
-round_loop_256(I, W, K, A, B, C, D, E, F, G, H) ->
-  Wi = get_word(I, W),
-  Ki = get_word(I, K),
-  S1 = rotr32(E, 6) bxor rotr32(E, 11) bxor rotr32(E, 25),
-  Ch = (E band F) bxor ((bnot E) band G),
-  Temp1 = (H + S1 + Ch + Ki + Wi) band ?MASK32,
-  S0 = rotr32(A, 2) bxor rotr32(A, 13) bxor rotr32(A, 22),
-  Maj = (A band B) bxor (A band C) bxor (B band C),
-  Temp2 = (S0 + Maj) band ?MASK32,
-  NewH = G,
-  NewG = F,
-  NewF = E,
-  NewE = (D + Temp1) band ?MASK32,
-  NewD = C,
-  NewC = B,
-  NewB = A,
-  NewA = (Temp1 + Temp2) band ?MASK32,
-  round_loop_256(I + 1, W, K, NewA, NewB, NewC, NewD, NewE, NewF, NewG, NewH).
+rounds_16_to_63_256(
+  W0,
+  W1,
+  W2,
+  W3,
+  W4,
+  W5,
+  W6,
+  W7,
+  W8,
+  W9,
+  W10,
+  W11,
+  W12,
+  W13,
+  W14,
+  W15,
+  A,
+  B,
+  C,
+  D,
+  E,
+  F,
+  G,
+  H,
+  [K0, K1, K2, K3 | Ks]
+) ->
+  %% Round 0
+  S0_0 = rotr32(W1, 7) bxor rotr32(W1, 18) bxor (W1 bsr 3),
+  S1_0 = rotr32(W14, 17) bxor rotr32(W14, 19) bxor (W14 bsr 10),
+  Wi0 = (W0 + S0_0 + W9 + S1_0) band ?MASK32,
+  S1_r0 = rotr32(E, 6) bxor rotr32(E, 11) bxor rotr32(E, 25),
+  Ch0 = G bxor (E band (F bxor G)),
+  T1_0 = (H + S1_r0 + Ch0 + K0 + Wi0) band ?MASK32,
+  S0_r0 = rotr32(A, 2) bxor rotr32(A, 13) bxor rotr32(A, 22),
+  Maj0 = (A band B) bxor ((A bxor B) band C),
+  T2_0 = (S0_r0 + Maj0) band ?MASK32,
+  A1 = (T1_0 + T2_0) band ?MASK32,
+  E1 = (D + T1_0) band ?MASK32,
+
+  %% Round 1
+  S0_1 = rotr32(W2, 7) bxor rotr32(W2, 18) bxor (W2 bsr 3),
+  S1_1 = rotr32(W15, 17) bxor rotr32(W15, 19) bxor (W15 bsr 10),
+  Wi1 = (W1 + S0_1 + W10 + S1_1) band ?MASK32,
+  S1_r1 = rotr32(E1, 6) bxor rotr32(E1, 11) bxor rotr32(E1, 25),
+  Ch1 = F bxor (E1 band (E bxor F)),
+  T1_1 = (G + S1_r1 + Ch1 + K1 + Wi1) band ?MASK32,
+  S0_r1 = rotr32(A1, 2) bxor rotr32(A1, 13) bxor rotr32(A1, 22),
+  Maj1 = (A1 band A) bxor ((A1 bxor A) band B),
+  T2_1 = (S0_r1 + Maj1) band ?MASK32,
+  A2 = (T1_1 + T2_1) band ?MASK32,
+  E2 = (C + T1_1) band ?MASK32,
+
+  %% Round 2
+  S0_2 = rotr32(W3, 7) bxor rotr32(W3, 18) bxor (W3 bsr 3),
+  S1_2 = rotr32(Wi0, 17) bxor rotr32(Wi0, 19) bxor (Wi0 bsr 10),
+  Wi2 = (W2 + S0_2 + W11 + S1_2) band ?MASK32,
+  S1_r2 = rotr32(E2, 6) bxor rotr32(E2, 11) bxor rotr32(E2, 25),
+  Ch2 = E bxor (E2 band (E1 bxor E)),
+  T1_2 = (F + S1_r2 + Ch2 + K2 + Wi2) band ?MASK32,
+  S0_r2 = rotr32(A2, 2) bxor rotr32(A2, 13) bxor rotr32(A2, 22),
+  Maj2 = (A2 band A1) bxor ((A2 bxor A1) band A),
+  T2_2 = (S0_r2 + Maj2) band ?MASK32,
+  A3 = (T1_2 + T2_2) band ?MASK32,
+  E3 = (B + T1_2) band ?MASK32,
+
+  %% Round 3
+  S0_3 = rotr32(W4, 7) bxor rotr32(W4, 18) bxor (W4 bsr 3),
+  S1_3 = rotr32(Wi1, 17) bxor rotr32(Wi1, 19) bxor (Wi1 bsr 10),
+  Wi3 = (W3 + S0_3 + W12 + S1_3) band ?MASK32,
+  S1_r3 = rotr32(E3, 6) bxor rotr32(E3, 11) bxor rotr32(E3, 25),
+  Ch3 = E1 bxor (E3 band (E2 bxor E1)),
+  T1_3 = (E + S1_r3 + Ch3 + K3 + Wi3) band ?MASK32,
+  S0_r3 = rotr32(A3, 2) bxor rotr32(A3, 13) bxor rotr32(A3, 22),
+  Maj3 = (A3 band A2) bxor ((A3 bxor A2) band A1),
+  T2_3 = (S0_r3 + Maj3) band ?MASK32,
+  A4 = (T1_3 + T2_3) band ?MASK32,
+  E4 = (A + T1_3) band ?MASK32,
+
+  rounds_16_to_63_256(
+    W4,
+    W5,
+    W6,
+    W7,
+    W8,
+    W9,
+    W10,
+    W11,
+    W12,
+    W13,
+    W14,
+    W15,
+    Wi0,
+    Wi1,
+    Wi2,
+    Wi3,
+    A4,
+    A3,
+    A2,
+    A1,
+    E4,
+    E3,
+    E2,
+    E1,
+    Ks
+  ).
 
 -spec rotr32(non_neg_integer(), non_neg_integer()) -> non_neg_integer().
 rotr32(X, N) ->
-  ((X bsr N) bor (X bsl (32 - N))) band ?MASK32.
+  (X bsr N) bor ((X band ((1 bsl N) - 1)) bsl (32 - N)).
 
--spec k_constants_256() -> tuple().
+-spec k_constants_256() -> [non_neg_integer()].
 k_constants_256() ->
-  {
+  [
     16#428a2f98,
     16#71374491,
     16#b5c0fbcf,
@@ -287,7 +712,7 @@ k_constants_256() ->
     16#a4506ceb,
     16#bef9a3f7,
     16#c67178f2
-  }.
+  ].
 
 %%%===================================================================
 %%% SHA-512 Block Processing & Round Functions
@@ -300,186 +725,1099 @@ pad_sha512(Data) ->
   <<Data/binary, 16#80, 0:(PadLen * 8), BitLen:128/big>>.
 
 -spec process_blocks_512(binary(), state512()) -> binary().
-process_blocks_512(<<>>, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
-  <<H0:64/big, H1:64/big, H2:64/big, H3:64/big, H4:64/big, H5:64/big, H6:64/big, H7:64/big>>;
-process_blocks_512(<<Block:128/binary, Rest/binary>>, State) ->
-  W = expand_w_512(Block),
-  NewState = compress_block_512(W, State),
-  process_blocks_512(Rest, NewState).
+process_blocks_512(Data, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
+  process_blocks_512_split(
+    Data,
+    {
+      H0 bsr 32,
+      H0 band ?MASK32,
+      H1 bsr 32,
+      H1 band ?MASK32,
+      H2 bsr 32,
+      H2 band ?MASK32,
+      H3 bsr 32,
+      H3 band ?MASK32,
+      H4 bsr 32,
+      H4 band ?MASK32,
+      H5 bsr 32,
+      H5 band ?MASK32,
+      H6 bsr 32,
+      H6 band ?MASK32,
+      H7 bsr 32,
+      H7 band ?MASK32
+    }
+  ).
 
--spec expand_w_512(binary()) -> tuple().
-expand_w_512(
-  <<W0:64, W1:64, W2:64, W3:64, W4:64, W5:64, W6:64, W7:64, W8:64, W9:64, W10:64, W11:64, W12:64, W13:64,
-    W14:64, W15:64>>
+-spec process_blocks_512_split(binary(), state512_split()) -> binary().
+process_blocks_512_split(
+  <<>>,
+  {H0_h, H0_l, H1_h, H1_l, H2_h, H2_l, H3_h, H3_l, H4_h, H4_l, H5_h, H5_l, H6_h, H6_l, H7_h, H7_l}
 ) ->
-  WList = [W0, W1, W2, W3, W4, W5, W6, W7, W8, W9, W10, W11, W12, W13, W14, W15],
-  expand_w_512_loop(16, list_to_tuple(WList)).
+  <<H0_h:32, H0_l:32, H1_h:32, H1_l:32, H2_h:32, H2_l:32, H3_h:32, H3_l:32, H4_h:32, H4_l:32, H5_h:32,
+    H5_l:32, H6_h:32, H6_l:32, H7_h:32, H7_l:32>>;
+process_blocks_512_split(<<Block:128/binary, Rest/binary>>, State) ->
+  NewState = compress_block_512_split(Block, State),
+  process_blocks_512_split(Rest, NewState).
 
--spec expand_w_512_loop(pos_integer(), tuple()) -> tuple().
-expand_w_512_loop(80, Tuple) ->
-  Tuple;
-expand_w_512_loop(I, Tuple) ->
-  W_minus_2 = get_word(I - 1, Tuple),
-  W_minus_7 = get_word(I - 6, Tuple),
-  W_minus_15 = get_word(I - 14, Tuple),
-  W_minus_16 = get_word(I - 15, Tuple),
-  S0 = rotr64(W_minus_15, 1) bxor rotr64(W_minus_15, 8) bxor (W_minus_15 bsr 7),
-  S1 = rotr64(W_minus_2, 19) bxor rotr64(W_minus_2, 61) bxor (W_minus_2 bsr 6),
-  Wi = (W_minus_16 + S0 + W_minus_7 + S1) band ?MASK64,
-  expand_w_512_loop(I + 1, erlang:append_element(Tuple, Wi)).
-
--spec compress_block_512(tuple(), state512()) -> state512().
-compress_block_512(WTuple, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
-  {A, B, C, D, E, F, G, H} =
-    round_loop_512(1, WTuple, k_constants_512(), H0, H1, H2, H3, H4, H5, H6, H7),
+-spec compress_block_512(binary(), state512()) -> state512().
+compress_block_512(Block, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
+  {R0_h, R0_l, R1_h, R1_l, R2_h, R2_l, R3_h, R3_l, R4_h, R4_l, R5_h, R5_l, R6_h, R6_l, R7_h, R7_l} =
+    compress_block_512_split(
+      Block,
+      {
+        H0 bsr 32,
+        H0 band ?MASK32,
+        H1 bsr 32,
+        H1 band ?MASK32,
+        H2 bsr 32,
+        H2 band ?MASK32,
+        H3 bsr 32,
+        H3 band ?MASK32,
+        H4 bsr 32,
+        H4 band ?MASK32,
+        H5 bsr 32,
+        H5 band ?MASK32,
+        H6 bsr 32,
+        H6 band ?MASK32,
+        H7 bsr 32,
+        H7 band ?MASK32
+      }
+    ),
   {
-    (H0 + A) band ?MASK64,
-    (H1 + B) band ?MASK64,
-    (H2 + C) band ?MASK64,
-    (H3 + D) band ?MASK64,
-    (H4 + E) band ?MASK64,
-    (H5 + F) band ?MASK64,
-    (H6 + G) band ?MASK64,
-    (H7 + H) band ?MASK64
+    (R0_h bsl 32) bor R0_l,
+    (R1_h bsl 32) bor R1_l,
+    (R2_h bsl 32) bor R2_l,
+    (R3_h bsl 32) bor R3_l,
+    (R4_h bsl 32) bor R4_l,
+    (R5_h bsl 32) bor R5_l,
+    (R6_h bsl 32) bor R6_l,
+    (R7_h bsl 32) bor R7_l
   }.
 
--spec round_loop_512(
+-spec compress_block_512_split(binary(), state512_split()) -> state512_split().
+compress_block_512_split(
+  <<W0_h:32, W0_l:32, W1_h:32, W1_l:32, W2_h:32, W2_l:32, W3_h:32, W3_l:32, W4_h:32, W4_l:32, W5_h:32,
+    W5_l:32, W6_h:32, W6_l:32, W7_h:32, W7_l:32, W8_h:32, W8_l:32, W9_h:32, W9_l:32, W10_h:32, W10_l:32,
+    W11_h:32, W11_l:32, W12_h:32, W12_l:32, W13_h:32, W13_l:32, W14_h:32, W14_l:32, W15_h:32, W15_l:32>>,
+  {H0_h, H0_l, H1_h, H1_l, H2_h, H2_l, H3_h, H3_l, H4_h, H4_l, H5_h, H5_l, H6_h, H6_l, H7_h, H7_l}
+) ->
+  {A_h, A_l, B_h, B_l, C_h, C_l, D_h, D_l, E_h, E_l, F_h, F_l, G_h, G_l, H_h, H_l} =
+    rounds_0_to_15_512(
+      16,
+      W0_h,
+      W0_l,
+      W1_h,
+      W1_l,
+      W2_h,
+      W2_l,
+      W3_h,
+      W3_l,
+      W4_h,
+      W4_l,
+      W5_h,
+      W5_l,
+      W6_h,
+      W6_l,
+      W7_h,
+      W7_l,
+      W8_h,
+      W8_l,
+      W9_h,
+      W9_l,
+      W10_h,
+      W10_l,
+      W11_h,
+      W11_l,
+      W12_h,
+      W12_l,
+      W13_h,
+      W13_l,
+      W14_h,
+      W14_l,
+      W15_h,
+      W15_l,
+      H0_h,
+      H0_l,
+      H1_h,
+      H1_l,
+      H2_h,
+      H2_l,
+      H3_h,
+      H3_l,
+      H4_h,
+      H4_l,
+      H5_h,
+      H5_l,
+      H6_h,
+      H6_l,
+      H7_h,
+      H7_l,
+      k_constants_512()
+    ),
+  S0_l = H0_l + A_l,
+  S1_l = H1_l + B_l,
+  S2_l = H2_l + C_l,
+  S3_l = H3_l + D_l,
+  S4_l = H4_l + E_l,
+  S5_l = H5_l + F_l,
+  S6_l = H6_l + G_l,
+  S7_l = H7_l + H_l,
+  {
+    (H0_h + A_h + (S0_l bsr 32)) band ?MASK32,
+    S0_l band ?MASK32,
+    (H1_h + B_h + (S1_l bsr 32)) band ?MASK32,
+    S1_l band ?MASK32,
+    (H2_h + C_h + (S2_l bsr 32)) band ?MASK32,
+    S2_l band ?MASK32,
+    (H3_h + D_h + (S3_l bsr 32)) band ?MASK32,
+    S3_l band ?MASK32,
+    (H4_h + E_h + (S4_l bsr 32)) band ?MASK32,
+    S4_l band ?MASK32,
+    (H5_h + F_h + (S5_l bsr 32)) band ?MASK32,
+    S5_l band ?MASK32,
+    (H6_h + G_h + (S6_l bsr 32)) band ?MASK32,
+    S6_l band ?MASK32,
+    (H7_h + H_h + (S7_l bsr 32)) band ?MASK32,
+    S7_l band ?MASK32
+  }.
+
+-spec init_state_512() -> state512().
+init_state_512() ->
+  {
+    16#6a09e667f3bcc908,
+    16#bb67ae8584caa73b,
+    16#3c6ef372fe94f82b,
+    16#a54ff53a5f1d36f1,
+    16#510e527fade682d1,
+    16#9b05688c2b3e6c1f,
+    16#1f83d9abfb41bd6b,
+    16#5be0cd19137e2179
+  }.
+
+-spec init_state_512_split() -> state512_split().
+init_state_512_split() ->
+  {
+    16#6a09e667,
+    16#f3bcc908,
+    16#bb67ae85,
+    16#84caa73b,
+    16#3c6ef372,
+    16#fe94f82b,
+    16#a54ff53a,
+    16#5f1d36f1,
+    16#510e527f,
+    16#ade682d1,
+    16#9b05688c,
+    16#2b3e6c1f,
+    16#1f83d9ab,
+    16#fb41bd6b,
+    16#5be0cd19,
+    16#137e2179
+  }.
+
+-spec compress_64b_msg_512(
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  state512()
+) -> state512().
+compress_64b_msg_512(U0, U1, U2, U3, U4, U5, U6, U7, {H0, H1, H2, H3, H4, H5, H6, H7}) ->
+  {R0_h, R0_l, R1_h, R1_l, R2_h, R2_l, R3_h, R3_l, R4_h, R4_l, R5_h, R5_l, R6_h, R6_l, R7_h, R7_l} =
+    compress_64b_msg_512_split(
+      {
+        U0 bsr 32,
+        U0 band ?MASK32,
+        U1 bsr 32,
+        U1 band ?MASK32,
+        U2 bsr 32,
+        U2 band ?MASK32,
+        U3 bsr 32,
+        U3 band ?MASK32,
+        U4 bsr 32,
+        U4 band ?MASK32,
+        U5 bsr 32,
+        U5 band ?MASK32,
+        U6 bsr 32,
+        U6 band ?MASK32,
+        U7 bsr 32,
+        U7 band ?MASK32
+      },
+      {
+        H0 bsr 32,
+        H0 band ?MASK32,
+        H1 bsr 32,
+        H1 band ?MASK32,
+        H2 bsr 32,
+        H2 band ?MASK32,
+        H3 bsr 32,
+        H3 band ?MASK32,
+        H4 bsr 32,
+        H4 band ?MASK32,
+        H5 bsr 32,
+        H5 band ?MASK32,
+        H6 bsr 32,
+        H6 band ?MASK32,
+        H7 bsr 32,
+        H7 band ?MASK32
+      },
+      k_constants_512()
+    ),
+  {
+    (R0_h bsl 32) bor R0_l,
+    (R1_h bsl 32) bor R1_l,
+    (R2_h bsl 32) bor R2_l,
+    (R3_h bsl 32) bor R3_l,
+    (R4_h bsl 32) bor R4_l,
+    (R5_h bsl 32) bor R5_l,
+    (R6_h bsl 32) bor R6_l,
+    (R7_h bsl 32) bor R7_l
+  }.
+
+-spec compress_64b_msg_512_split(
+  state512_split(),
+  state512_split(),
+  [{non_neg_integer(), non_neg_integer()}]
+) -> state512_split().
+compress_64b_msg_512_split(
+  {U0_h, U0_l, U1_h, U1_l, U2_h, U2_l, U3_h, U3_l, U4_h, U4_l, U5_h, U5_l, U6_h, U6_l, U7_h, U7_l},
+  {H0_h, H0_l, H1_h, H1_l, H2_h, H2_l, H3_h, H3_l, H4_h, H4_l, H5_h, H5_l, H6_h, H6_l, H7_h, H7_l},
+  Ks
+) ->
+  {A_h, A_l, B_h, B_l, C_h, C_l, D_h, D_l, E_h, E_l, F_h, F_l, G_h, G_l, H_h, H_l} =
+    rounds_0_to_15_512(
+      16,
+      U0_h,
+      U0_l,
+      U1_h,
+      U1_l,
+      U2_h,
+      U2_l,
+      U3_h,
+      U3_l,
+      U4_h,
+      U4_l,
+      U5_h,
+      U5_l,
+      U6_h,
+      U6_l,
+      U7_h,
+      U7_l,
+      16#80000000,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1536,
+      H0_h,
+      H0_l,
+      H1_h,
+      H1_l,
+      H2_h,
+      H2_l,
+      H3_h,
+      H3_l,
+      H4_h,
+      H4_l,
+      H5_h,
+      H5_l,
+      H6_h,
+      H6_l,
+      H7_h,
+      H7_l,
+      Ks
+    ),
+  S0_l = H0_l + A_l,
+  S1_l = H1_l + B_l,
+  S2_l = H2_l + C_l,
+  S3_l = H3_l + D_l,
+  S4_l = H4_l + E_l,
+  S5_l = H5_l + F_l,
+  S6_l = H6_l + G_l,
+  S7_l = H7_l + H_l,
+  {
+    (H0_h + A_h + (S0_l bsr 32)) band ?MASK32,
+    S0_l band ?MASK32,
+    (H1_h + B_h + (S1_l bsr 32)) band ?MASK32,
+    S1_l band ?MASK32,
+    (H2_h + C_h + (S2_l bsr 32)) band ?MASK32,
+    S2_l band ?MASK32,
+    (H3_h + D_h + (S3_l bsr 32)) band ?MASK32,
+    S3_l band ?MASK32,
+    (H4_h + E_h + (S4_l bsr 32)) band ?MASK32,
+    S4_l band ?MASK32,
+    (H5_h + F_h + (S5_l bsr 32)) band ?MASK32,
+    S5_l band ?MASK32,
+    (H6_h + G_h + (S6_l bsr 32)) band ?MASK32,
+    S6_l band ?MASK32,
+    (H7_h + H_h + (S7_l bsr 32)) band ?MASK32,
+    S7_l band ?MASK32
+  }.
+
+-spec pbkdf2_loop_512(
   pos_integer(),
-  tuple(),
-  tuple(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer(),
-  non_neg_integer()
+  pos_integer(),
+  state512_split(),
+  state512_split(),
+  state512_split(),
+  state512_split()
+) -> binary().
+pbkdf2_loop_512(Iter, Iterations, IState, OState, U, Acc) ->
+  pbkdf2_loop_512_work(Iter, Iterations, IState, OState, U, Acc, k_constants_512()).
+
+-spec pbkdf2_loop_512_work(
+  pos_integer(),
+  pos_integer(),
+  state512_split(),
+  state512_split(),
+  state512_split(),
+  state512_split(),
+  [{non_neg_integer(), non_neg_integer()}]
+) -> binary().
+pbkdf2_loop_512_work(
+  Iter,
+  Iterations,
+  _IState,
+  _OState,
+  _U,
+  {Acc0_h, Acc0_l, Acc1_h, Acc1_l, Acc2_h, Acc2_l, Acc3_h, Acc3_l, Acc4_h, Acc4_l, Acc5_h, Acc5_l,
+    Acc6_h, Acc6_l, Acc7_h, Acc7_l},
+  _Ks
+) when Iter > Iterations ->
+  <<Acc0_h:32, Acc0_l:32, Acc1_h:32, Acc1_l:32, Acc2_h:32, Acc2_l:32, Acc3_h:32, Acc3_l:32, Acc4_h:32,
+    Acc4_l:32, Acc5_h:32, Acc5_l:32, Acc6_h:32, Acc6_l:32, Acc7_h:32, Acc7_l:32>>;
+pbkdf2_loop_512_work(Iter, Iterations, IState, OState, U, Acc, Ks) ->
+  IH = compress_64b_msg_512_split(U, IState, Ks),
+  NewU = compress_64b_msg_512_split(IH, OState, Ks),
+  NewAcc = xor16(Acc, NewU),
+  pbkdf2_loop_512_work(Iter + 1, Iterations, IState, OState, NewU, NewAcc, Ks).
+
+-spec xor16(state512_split(), state512_split()) -> state512_split().
+xor16(
+  {A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15},
+  {B0, B1, B2, B3, B4, B5, B6, B7, B8, B9, B10, B11, B12, B13, B14, B15}
 ) ->
   {
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer(),
-    non_neg_integer()
+    A0 bxor B0,
+    A1 bxor B1,
+    A2 bxor B2,
+    A3 bxor B3,
+    A4 bxor B4,
+    A5 bxor B5,
+    A6 bxor B6,
+    A7 bxor B7,
+    A8 bxor B8,
+    A9 bxor B9,
+    A10 bxor B10,
+    A11 bxor B11,
+    A12 bxor B12,
+    A13 bxor B13,
+    A14 bxor B14,
+    A15 bxor B15
   }.
-round_loop_512(81, _W, _K, A, B, C, D, E, F, G, H) ->
-  {A, B, C, D, E, F, G, H};
-round_loop_512(I, W, K, A, B, C, D, E, F, G, H) ->
-  Wi = get_word(I, W),
-  Ki = get_word(I, K),
-  S1 = rotr64(E, 14) bxor rotr64(E, 18) bxor rotr64(E, 41),
-  Ch = (E band F) bxor ((bnot E) band G),
-  Temp1 = (H + S1 + Ch + Ki + Wi) band ?MASK64,
-  S0 = rotr64(A, 28) bxor rotr64(A, 34) bxor rotr64(A, 39),
-  Maj = (A band B) bxor (A band C) bxor (B band C),
-  Temp2 = (S0 + Maj) band ?MASK64,
-  NewH = G,
-  NewG = F,
-  NewF = E,
-  NewE = (D + Temp1) band ?MASK64,
-  NewD = C,
-  NewC = B,
-  NewB = A,
-  NewA = (Temp1 + Temp2) band ?MASK64,
-  round_loop_512(I + 1, W, K, NewA, NewB, NewC, NewD, NewE, NewF, NewG, NewH).
 
--spec rotr64(non_neg_integer(), non_neg_integer()) -> non_neg_integer().
-rotr64(X, N) ->
-  ((X bsr N) bor (X bsl (64 - N))) band ?MASK64.
+-spec rounds_0_to_15_512(
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  [{non_neg_integer(), non_neg_integer()}]
+) -> state512_split().
+rounds_0_to_15_512(
+  0,
+  W0_h,
+  W0_l,
+  W1_h,
+  W1_l,
+  W2_h,
+  W2_l,
+  W3_h,
+  W3_l,
+  W4_h,
+  W4_l,
+  W5_h,
+  W5_l,
+  W6_h,
+  W6_l,
+  W7_h,
+  W7_l,
+  W8_h,
+  W8_l,
+  W9_h,
+  W9_l,
+  W10_h,
+  W10_l,
+  W11_h,
+  W11_l,
+  W12_h,
+  W12_l,
+  W13_h,
+  W13_l,
+  W14_h,
+  W14_l,
+  W15_h,
+  W15_l,
+  A_h,
+  A_l,
+  B_h,
+  B_l,
+  C_h,
+  C_l,
+  D_h,
+  D_l,
+  E_h,
+  E_l,
+  F_h,
+  F_l,
+  G_h,
+  G_l,
+  H_h,
+  H_l,
+  Ks
+) ->
+  rounds_16_to_79_512(
+    W0_h,
+    W0_l,
+    W1_h,
+    W1_l,
+    W2_h,
+    W2_l,
+    W3_h,
+    W3_l,
+    W4_h,
+    W4_l,
+    W5_h,
+    W5_l,
+    W6_h,
+    W6_l,
+    W7_h,
+    W7_l,
+    W8_h,
+    W8_l,
+    W9_h,
+    W9_l,
+    W10_h,
+    W10_l,
+    W11_h,
+    W11_l,
+    W12_h,
+    W12_l,
+    W13_h,
+    W13_l,
+    W14_h,
+    W14_l,
+    W15_h,
+    W15_l,
+    A_h,
+    A_l,
+    B_h,
+    B_l,
+    C_h,
+    C_l,
+    D_h,
+    D_l,
+    E_h,
+    E_l,
+    F_h,
+    F_l,
+    G_h,
+    G_l,
+    H_h,
+    H_l,
+    Ks
+  );
+rounds_0_to_15_512(
+  N,
+  W0_h,
+  W0_l,
+  W1_h,
+  W1_l,
+  W2_h,
+  W2_l,
+  W3_h,
+  W3_l,
+  W4_h,
+  W4_l,
+  W5_h,
+  W5_l,
+  W6_h,
+  W6_l,
+  W7_h,
+  W7_l,
+  W8_h,
+  W8_l,
+  W9_h,
+  W9_l,
+  W10_h,
+  W10_l,
+  W11_h,
+  W11_l,
+  W12_h,
+  W12_l,
+  W13_h,
+  W13_l,
+  W14_h,
+  W14_l,
+  W15_h,
+  W15_l,
+  A_h,
+  A_l,
+  B_h,
+  B_l,
+  C_h,
+  C_l,
+  D_h,
+  D_l,
+  E_h,
+  E_l,
+  F_h,
+  F_l,
+  G_h,
+  G_l,
+  H_h,
+  H_l,
+  [{K_h, K_l} | Ks]
+) ->
+  S1_h =
+    ((E_h bsr 14) bor ((E_l band 16#3fff) bsl 18)) bxor
+      ((E_h bsr 18) bor ((E_l band 16#3ffff) bsl 14)) bxor
+      ((E_l bsr 9) bor ((E_h band 16#1ff) bsl 23)),
+  S1_l =
+    ((E_l bsr 14) bor ((E_h band 16#3fff) bsl 18)) bxor
+      ((E_l bsr 18) bor ((E_h band 16#3ffff) bsl 14)) bxor
+      ((E_h bsr 9) bor ((E_l band 16#1ff) bsl 23)),
+  Ch_h = G_h bxor (E_h band (F_h bxor G_h)),
+  Ch_l = G_l bxor (E_l band (F_l bxor G_l)),
+  SumT1_l = H_l + S1_l + Ch_l + K_l + W0_l,
+  CarryT1 = SumT1_l bsr 32,
+  T1_l = SumT1_l band ?MASK32,
+  T1_h = (H_h + S1_h + Ch_h + K_h + W0_h + CarryT1) band ?MASK32,
+  S0_h =
+    ((A_h bsr 28) bor ((A_l band 16#fffffff) bsl 4)) bxor
+      ((A_l bsr 2) bor ((A_h band 16#3) bsl 30)) bxor
+      ((A_l bsr 7) bor ((A_h band 16#7f) bsl 25)),
+  S0_l =
+    ((A_l bsr 28) bor ((A_h band 16#fffffff) bsl 4)) bxor
+      ((A_h bsr 2) bor ((A_l band 16#3) bsl 30)) bxor
+      ((A_h bsr 7) bor ((A_l band 16#7f) bsl 25)),
+  Maj_h = (A_h band B_h) bxor ((A_h bxor B_h) band C_h),
+  Maj_l = (A_l band B_l) bxor ((A_l bxor B_l) band C_l),
+  SumT2_l = S0_l + Maj_l,
+  CarryT2 = SumT2_l bsr 32,
+  T2_l = SumT2_l band ?MASK32,
+  T2_h = (S0_h + Maj_h + CarryT2) band ?MASK32,
+  SumE_l = D_l + T1_l,
+  NewE_l = SumE_l band ?MASK32,
+  NewE_h = (D_h + T1_h + (SumE_l bsr 32)) band ?MASK32,
+  SumA_l = T1_l + T2_l,
+  NewA_l = SumA_l band ?MASK32,
+  NewA_h = (T1_h + T2_h + (SumA_l bsr 32)) band ?MASK32,
+  rounds_0_to_15_512(
+    N - 1,
+    W1_h,
+    W1_l,
+    W2_h,
+    W2_l,
+    W3_h,
+    W3_l,
+    W4_h,
+    W4_l,
+    W5_h,
+    W5_l,
+    W6_h,
+    W6_l,
+    W7_h,
+    W7_l,
+    W8_h,
+    W8_l,
+    W9_h,
+    W9_l,
+    W10_h,
+    W10_l,
+    W11_h,
+    W11_l,
+    W12_h,
+    W12_l,
+    W13_h,
+    W13_l,
+    W14_h,
+    W14_l,
+    W15_h,
+    W15_l,
+    W0_h,
+    W0_l,
+    NewA_h,
+    NewA_l,
+    A_h,
+    A_l,
+    B_h,
+    B_l,
+    C_h,
+    C_l,
+    NewE_h,
+    NewE_l,
+    E_h,
+    E_l,
+    F_h,
+    F_l,
+    G_h,
+    G_l,
+    Ks
+  );
+rounds_0_to_15_512(
+  _N,
+  _W0,
+  _W1,
+  _W2,
+  _W3,
+  _W4,
+  _W5,
+  _W6,
+  _W7,
+  _W8,
+  _W9,
+  _W10,
+  _W11,
+  _W12,
+  _W13,
+  _W14,
+  _W15,
+  _W16,
+  _W17,
+  _W18,
+  _W19,
+  _W20,
+  _W21,
+  _W22,
+  _W23,
+  _W24,
+  _W25,
+  _W26,
+  _W27,
+  _W28,
+  _W29,
+  _W30,
+  _W31,
+  A_h,
+  A_l,
+  B_h,
+  B_l,
+  C_h,
+  C_l,
+  D_h,
+  D_l,
+  E_h,
+  E_l,
+  F_h,
+  F_l,
+  G_h,
+  G_l,
+  H_h,
+  H_l,
+  []
+) ->
+  {A_h, A_l, B_h, B_l, C_h, C_l, D_h, D_l, E_h, E_l, F_h, F_l, G_h, G_l, H_h, H_l}.
 
--spec k_constants_512() -> tuple().
+-spec rounds_16_to_79_512(
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  [{non_neg_integer(), non_neg_integer()}]
+) -> state512_split().
+rounds_16_to_79_512(
+  _W0_h,
+  _W0_l,
+  _W1_h,
+  _W1_l,
+  _W2_h,
+  _W2_l,
+  _W3_h,
+  _W3_l,
+  _W4_h,
+  _W4_l,
+  _W5_h,
+  _W5_l,
+  _W6_h,
+  _W6_l,
+  _W7_h,
+  _W7_l,
+  _W8_h,
+  _W8_l,
+  _W9_h,
+  _W9_l,
+  _W10_h,
+  _W10_l,
+  _W11_h,
+  _W11_l,
+  _W12_h,
+  _W12_l,
+  _W13_h,
+  _W13_l,
+  _W14_h,
+  _W14_l,
+  _W15_h,
+  _W15_l,
+  A_h,
+  A_l,
+  B_h,
+  B_l,
+  C_h,
+  C_l,
+  D_h,
+  D_l,
+  E_h,
+  E_l,
+  F_h,
+  F_l,
+  G_h,
+  G_l,
+  H_h,
+  H_l,
+  []
+) ->
+  {A_h, A_l, B_h, B_l, C_h, C_l, D_h, D_l, E_h, E_l, F_h, F_l, G_h, G_l, H_h, H_l};
+rounds_16_to_79_512(
+  W0_h,
+  W0_l,
+  W1_h,
+  W1_l,
+  W2_h,
+  W2_l,
+  W3_h,
+  W3_l,
+  W4_h,
+  W4_l,
+  W5_h,
+  W5_l,
+  W6_h,
+  W6_l,
+  W7_h,
+  W7_l,
+  W8_h,
+  W8_l,
+  W9_h,
+  W9_l,
+  W10_h,
+  W10_l,
+  W11_h,
+  W11_l,
+  W12_h,
+  W12_l,
+  W13_h,
+  W13_l,
+  W14_h,
+  W14_l,
+  W15_h,
+  W15_l,
+  A_h,
+  A_l,
+  B_h,
+  B_l,
+  C_h,
+  C_l,
+  D_h,
+  D_l,
+  E_h,
+  E_l,
+  F_h,
+  F_l,
+  G_h,
+  G_l,
+  H_h,
+  H_l,
+  [{K_h, K_l} | Ks]
+) ->
+  Sig0_h =
+    ((W1_h bsr 1) bor ((W1_l band 1) bsl 31)) bxor
+      ((W1_h bsr 8) bor ((W1_l band 16#ff) bsl 24)) bxor
+      (W1_h bsr 7),
+  Sig0_l =
+    ((W1_l bsr 1) bor ((W1_h band 1) bsl 31)) bxor
+      ((W1_l bsr 8) bor ((W1_h band 16#ff) bsl 24)) bxor
+      (((W1_l bsr 7) bor ((W1_h band 16#7f) bsl 25)) band ?MASK32),
+  Sig1_h =
+    ((W14_h bsr 19) bor ((W14_l band 16#7ffff) bsl 13)) bxor
+      ((W14_l bsr 29) bor ((W14_h band 16#1fffffff) bsl 3)) bxor
+      (W14_h bsr 6),
+  Sig1_l =
+    ((W14_l bsr 19) bor ((W14_h band 16#7ffff) bsl 13)) bxor
+      ((W14_h bsr 29) bor ((W14_l band 16#1fffffff) bsl 3)) bxor
+      (((W14_l bsr 6) bor ((W14_h band 16#3f) bsl 26)) band ?MASK32),
+  SumWi_l = W0_l + Sig0_l + W9_l + Sig1_l,
+  CarryWi = SumWi_l bsr 32,
+  Wi_l = SumWi_l band ?MASK32,
+  Wi_h = (W0_h + Sig0_h + W9_h + Sig1_h + CarryWi) band ?MASK32,
+  S1_h =
+    ((E_h bsr 14) bor ((E_l band 16#3fff) bsl 18)) bxor
+      ((E_h bsr 18) bor ((E_l band 16#3ffff) bsl 14)) bxor
+      ((E_l bsr 9) bor ((E_h band 16#1ff) bsl 23)),
+  S1_l =
+    ((E_l bsr 14) bor ((E_h band 16#3fff) bsl 18)) bxor
+      ((E_l bsr 18) bor ((E_h band 16#3ffff) bsl 14)) bxor
+      ((E_h bsr 9) bor ((E_l band 16#1ff) bsl 23)),
+  Ch_h = G_h bxor (E_h band (F_h bxor G_h)),
+  Ch_l = G_l bxor (E_l band (F_l bxor G_l)),
+  SumT1_l = H_l + S1_l + Ch_l + K_l + Wi_l,
+  CarryT1 = SumT1_l bsr 32,
+  T1_l = SumT1_l band ?MASK32,
+  T1_h = (H_h + S1_h + Ch_h + K_h + Wi_h + CarryT1) band ?MASK32,
+  S0_h =
+    ((A_h bsr 28) bor ((A_l band 16#fffffff) bsl 4)) bxor
+      ((A_l bsr 2) bor ((A_h band 16#3) bsl 30)) bxor
+      ((A_l bsr 7) bor ((A_h band 16#7f) bsl 25)),
+  S0_l =
+    ((A_l bsr 28) bor ((A_h band 16#fffffff) bsl 4)) bxor
+      ((A_h bsr 2) bor ((A_l band 16#3) bsl 30)) bxor
+      ((A_h bsr 7) bor ((A_l band 16#7f) bsl 25)),
+  Maj_h = (A_h band B_h) bxor ((A_h bxor B_h) band C_h),
+  Maj_l = (A_l band B_l) bxor ((A_l bxor B_l) band C_l),
+  SumT2_l = S0_l + Maj_l,
+  CarryT2 = SumT2_l bsr 32,
+  T2_l = SumT2_l band ?MASK32,
+  T2_h = (S0_h + Maj_h + CarryT2) band ?MASK32,
+  SumE_l = D_l + T1_l,
+  NewE_l = SumE_l band ?MASK32,
+  NewE_h = (D_h + T1_h + (SumE_l bsr 32)) band ?MASK32,
+  SumA_l = T1_l + T2_l,
+  NewA_l = SumA_l band ?MASK32,
+  NewA_h = (T1_h + T2_h + (SumA_l bsr 32)) band ?MASK32,
+  rounds_16_to_79_512(
+    W1_h,
+    W1_l,
+    W2_h,
+    W2_l,
+    W3_h,
+    W3_l,
+    W4_h,
+    W4_l,
+    W5_h,
+    W5_l,
+    W6_h,
+    W6_l,
+    W7_h,
+    W7_l,
+    W8_h,
+    W8_l,
+    W9_h,
+    W9_l,
+    W10_h,
+    W10_l,
+    W11_h,
+    W11_l,
+    W12_h,
+    W12_l,
+    W13_h,
+    W13_l,
+    W14_h,
+    W14_l,
+    W15_h,
+    W15_l,
+    Wi_h,
+    Wi_l,
+    NewA_h,
+    NewA_l,
+    A_h,
+    A_l,
+    B_h,
+    B_l,
+    C_h,
+    C_l,
+    NewE_h,
+    NewE_l,
+    E_h,
+    E_l,
+    F_h,
+    F_l,
+    G_h,
+    G_l,
+    Ks
+  ).
+
+-spec k_constants_512() -> [{non_neg_integer(), non_neg_integer()}].
 k_constants_512() ->
-  {
-    16#428a2f98d728ae22,
-    16#7137449123ef65cd,
-    16#b5c0fbcfec4d3b2f,
-    16#e9b5dba58189dbbc,
-    16#3956c25bf348b538,
-    16#59f111f1b605d019,
-    16#923f82a4af194f9b,
-    16#ab1c5ed5da6d8118,
-    16#d807aa98a3030242,
-    16#12835b0145706fbe,
-    16#243185be4ee4b28c,
-    16#550c7dc3d5ffb4e2,
-    16#72be5d74f27b896f,
-    16#80deb1fe3b1696b1,
-    16#9bdc06a725c71235,
-    16#c19bf174cf692694,
-    16#e49b69c19ef14ad2,
-    16#efbe4786384f25e3,
-    16#0fc19dc68b8cd5b5,
-    16#240ca1cc77ac9c65,
-    16#2de92c6f592b0275,
-    16#4a7484aa6ea6e483,
-    16#5cb0a9dcbd41fbd4,
-    16#76f988da831153b5,
-    16#983e5152ee66dfab,
-    16#a831c66d2db43210,
-    16#b00327c898fb213f,
-    16#bf597fc7beef0ee4,
-    16#c6e00bf33da88fc2,
-    16#d5a79147930aa725,
-    16#06ca6351e003826f,
-    16#142929670a0e6e70,
-    16#27b70a8546d22ffc,
-    16#2e1b21385c26c926,
-    16#4d2c6dfc5ac42aed,
-    16#53380d139d95b3df,
-    16#650a73548baf63de,
-    16#766a0abb3c77b2a8,
-    16#81c2c92e47edaee6,
-    16#92722c851482353b,
-    16#a2bfe8a14cf10364,
-    16#a81a664bbc423001,
-    16#c24b8b70d0f89791,
-    16#c76c51a30654be30,
-    16#d192e819d6ef5218,
-    16#d69906245565a910,
-    16#f40e35855771202a,
-    16#106aa07032bbd1b8,
-    16#19a4c116b8d2d0c8,
-    16#1e376c085141ab53,
-    16#2748774cdf8eeb99,
-    16#34b0bcb5e19b48a8,
-    16#391c0cb3c5c95a63,
-    16#4ed8aa4ae3418acb,
-    16#5b9cca4f7763e373,
-    16#682e6ff3d6b2b8a3,
-    16#748f82ee5defb2fc,
-    16#78a5636f43172f60,
-    16#84c87814a1f0ab72,
-    16#8cc702081a6439ec,
-    16#90befffa23631e28,
-    16#a4506cebde82bde9,
-    16#bef9a3f7b2c67915,
-    16#c67178f2e372532b,
-    16#ca273eceea26619c,
-    16#d186b8c721c0c207,
-    16#eada7dd6cde0eb1e,
-    16#f57d4f7fee6ed178,
-    16#06f067aa72176fba,
-    16#0a637dc5a2c898a6,
-    16#113f9804bef90dae,
-    16#1b710b35131c471b,
-    16#28db77f523047d84,
-    16#32caab7b40c72493,
-    16#3c9ebe0a15c9bebc,
-    16#431d67c49c100d4c,
-    16#4cc5d4becb3e42b6,
-    16#597f299cfc657e2a,
-    16#5fcb6fab3ad6faec,
-    16#6c44198c4a475817
-  }.
-
--compile({inline, [get_word/2]}).
-
--spec get_word(pos_integer(), tuple()) -> non_neg_integer().
-get_word(Idx, Tuple) ->
-  case element(Idx, Tuple) of
-    W when is_integer(W) -> W
-  end.
+  [
+    {16#428a2f98, 16#d728ae22},
+    {16#71374491, 16#23ef65cd},
+    {16#b5c0fbcf, 16#ec4d3b2f},
+    {16#e9b5dba5, 16#8189dbbc},
+    {16#3956c25b, 16#f348b538},
+    {16#59f111f1, 16#b605d019},
+    {16#923f82a4, 16#af194f9b},
+    {16#ab1c5ed5, 16#da6d8118},
+    {16#d807aa98, 16#a3030242},
+    {16#12835b01, 16#45706fbe},
+    {16#243185be, 16#4ee4b28c},
+    {16#550c7dc3, 16#d5ffb4e2},
+    {16#72be5d74, 16#f27b896f},
+    {16#80deb1fe, 16#3b1696b1},
+    {16#9bdc06a7, 16#25c71235},
+    {16#c19bf174, 16#cf692694},
+    {16#e49b69c1, 16#9ef14ad2},
+    {16#efbe4786, 16#384f25e3},
+    {16#0fc19dc6, 16#8b8cd5b5},
+    {16#240ca1cc, 16#77ac9c65},
+    {16#2de92c6f, 16#592b0275},
+    {16#4a7484aa, 16#6ea6e483},
+    {16#5cb0a9dc, 16#bd41fbd4},
+    {16#76f988da, 16#831153b5},
+    {16#983e5152, 16#ee66dfab},
+    {16#a831c66d, 16#2db43210},
+    {16#b00327c8, 16#98fb213f},
+    {16#bf597fc7, 16#beef0ee4},
+    {16#c6e00bf3, 16#3da88fc2},
+    {16#d5a79147, 16#930aa725},
+    {16#06ca6351, 16#e003826f},
+    {16#14292967, 16#0a0e6e70},
+    {16#27b70a85, 16#46d22ffc},
+    {16#2e1b2138, 16#5c26c926},
+    {16#4d2c6dfc, 16#5ac42aed},
+    {16#53380d13, 16#9d95b3df},
+    {16#650a7354, 16#8baf63de},
+    {16#766a0abb, 16#3c77b2a8},
+    {16#81c2c92e, 16#47edaee6},
+    {16#92722c85, 16#1482353b},
+    {16#a2bfe8a1, 16#4cf10364},
+    {16#a81a664b, 16#bc423001},
+    {16#c24b8b70, 16#d0f89791},
+    {16#c76c51a3, 16#0654be30},
+    {16#d192e819, 16#d6ef5218},
+    {16#d6990624, 16#5565a910},
+    {16#f40e3585, 16#5771202a},
+    {16#106aa070, 16#32bbd1b8},
+    {16#19a4c116, 16#b8d2d0c8},
+    {16#1e376c08, 16#5141ab53},
+    {16#2748774c, 16#df8eeb99},
+    {16#34b0bcb5, 16#e19b48a8},
+    {16#391c0cb3, 16#c5c95a63},
+    {16#4ed8aa4a, 16#e3418acb},
+    {16#5b9cca4f, 16#7763e373},
+    {16#682e6ff3, 16#d6b2b8a3},
+    {16#748f82ee, 16#5defb2fc},
+    {16#78a5636f, 16#43172f60},
+    {16#84c87814, 16#a1f0ab72},
+    {16#8cc70208, 16#1a6439ec},
+    {16#90befffa, 16#23631e28},
+    {16#a4506ceb, 16#de82bde9},
+    {16#bef9a3f7, 16#b2c67915},
+    {16#c67178f2, 16#e372532b},
+    {16#ca273ece, 16#ea26619c},
+    {16#d186b8c7, 16#21c0c207},
+    {16#eada7dd6, 16#cde0eb1e},
+    {16#f57d4f7f, 16#ee6ed178},
+    {16#06f067aa, 16#72176fba},
+    {16#0a637dc5, 16#a2c898a6},
+    {16#113f9804, 16#bef90dae},
+    {16#1b710b35, 16#131c471b},
+    {16#28db77f5, 16#23047d84},
+    {16#32caab7b, 16#40c72493},
+    {16#3c9ebe0a, 16#15c9bebc},
+    {16#431d67c4, 16#9c100d4c},
+    {16#4cc5d4be, 16#cb3e42b6},
+    {16#597f299c, 16#fc657e2a},
+    {16#5fcb6fab, 16#3ad6faec},
+    {16#6c44198c, 16#4a475817}
+  ].

@@ -25,6 +25,7 @@ list_suites() ->
     musig2,
     h2c,
     keccak,
+    hash,
     hd,
     bls12_381
   ].
@@ -72,6 +73,7 @@ all_benchmarks() ->
     musig2_benchmarks(),
     h2c_benchmarks(),
     keccak_benchmarks(),
+    hash_benchmarks(),
     hd_benchmarks(),
     bls12_381_benchmarks()
   ]).
@@ -638,6 +640,57 @@ keccak_benchmarks() ->
       name => <<"SHAKE256 (64 bytes output)">>,
       group => keccak,
       run => {fun(D) -> ecu_keccak:shake256(D, 64) end, Data32}
+    }
+  ].
+
+%% ===================================================================
+%% SHA-2, RIPEMD, HMAC & PBKDF2
+%% ===================================================================
+
+hash_benchmarks() ->
+  Data64 = crypto:strong_rand_bytes(64),
+  Key32 = crypto:strong_rand_bytes(32),
+  Key64 = crypto:strong_rand_bytes(64),
+  Pass = <<"password">>,
+  Salt = <<"salt">>,
+
+  [
+    #{
+      id => sha2_256_64b,
+      name => <<"SHA-256 (64 bytes)">>,
+      group => hash,
+      run => {fun(D) -> ecu_sha2:sha256(D) end, Data64}
+    },
+    #{
+      id => sha2_512_64b,
+      name => <<"SHA-512 (64 bytes)">>,
+      group => hash,
+      run => {fun(D) -> ecu_sha2:sha512(D) end, Data64}
+    },
+    #{
+      id => ripemd160_64b,
+      name => <<"RIPEMD-160 (64 bytes)">>,
+      group => hash,
+      run => {fun(D) -> ecu_ripemd160:ripemd160(D) end, Data64}
+    },
+    #{
+      id => hmac_sha256_64b,
+      name => <<"HMAC-SHA256 (64 bytes)">>,
+      group => hash,
+      run => {fun({K, D}) -> ecu_hmac:hmac(sha256, K, D) end, {Key32, Data64}}
+    },
+    #{
+      id => hmac_sha512_64b,
+      name => <<"HMAC-SHA512 (64 bytes)">>,
+      group => hash,
+      run => {fun({K, D}) -> ecu_hmac:hmac(sha512, K, D) end, {Key64, Data64}}
+    },
+    #{
+      id => pbkdf2_hmac_sha512_2048,
+      name => <<"PBKDF2-HMAC-SHA512 (2048 iters)">>,
+      group => hash,
+      run =>
+        {fun({P, S}) -> ecu_pbkdf2:pbkdf2_hmac(sha512, P, S, 2048, 64) end, {Pass, Salt}}
     }
   ].
 
