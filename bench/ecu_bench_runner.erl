@@ -95,7 +95,8 @@ run_bench(#{id := Id, name := Name, group := Group, run := RunSpec}, Opts) ->
       F when is_function(F, 0) -> {fun(_) -> F() end, ok}
     end,
 
-  %% Step 1: Calibration & Warmup
+  %% Step 1: Calibration & Warmup (warm up code loading / JIT first)
+  Fun(State),
   CalibT0 = erlang:monotonic_time(microsecond),
   Fun(State),
   CalibT1 = erlang:monotonic_time(microsecond),

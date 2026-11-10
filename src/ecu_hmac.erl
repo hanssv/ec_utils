@@ -47,20 +47,31 @@ hmac(sha512, Key, Data) ->
   KeyPad = <<KeyNorm/binary, 0:(PadZeros * 8)>>,
   Ki = xor_pad_128(KeyPad, 16#36),
   Ko = xor_pad_128(KeyPad, 16#5c),
-  case DataBin of
-    <<D0:64, D1:64, D2:64, D3:64, D4:64, D5:64, D6:64, D7:64>> ->
-      InitState = ecu_sha2:init_state_512(),
-      IState = ecu_sha2:compress_block_512(Ki, InitState),
-      OState = ecu_sha2:compress_block_512(Ko, InitState),
-      {I0, I1, I2, I3, I4, I5, I6, I7} =
-        ecu_sha2:compress_64b_msg_512(D0, D1, D2, D3, D4, D5, D6, D7, IState),
-      {O0, O1, O2, O3, O4, O5, O6, O7} =
-        ecu_sha2:compress_64b_msg_512(I0, I1, I2, I3, I4, I5, I6, I7, OState),
-      <<O0:64, O1:64, O2:64, O3:64, O4:64, O5:64, O6:64, O7:64>>;
-    _ ->
-      Inner = ecu_sha2:sha512(<<Ki/binary, DataBin/binary>>),
-      ecu_sha2:sha512(<<Ko/binary, Inner/binary>>)
-  end;
+  InitState = ecu_sha2:init_state_512(),
+  IState = ecu_sha2:compress_block_512(Ki, InitState),
+  OState = ecu_sha2:compress_block_512(Ko, InitState),
+  DataSize = byte_size(DataBin),
+  {I0, I1, I2, I3, I4, I5, I6, I7} =
+    if
+      DataSize =:= 64 ->
+        <<D0:64, D1:64, D2:64, D3:64, D4:64, D5:64, D6:64, D7:64>> = DataBin,
+        ecu_sha2:compress_64b_msg_512(D0, D1, D2, D3, D4, D5, D6, D7, IState);
+      DataSize =< 111 ->
+        PadLen = 111 - DataSize,
+        TotalBits = (128 + DataSize) * 8,
+        InnerBlock = <<DataBin/binary, 16#80, 0:(PadLen * 8), TotalBits:128/big>>,
+        ecu_sha2:compress_block_512(InnerBlock, IState);
+      true ->
+        PadLen = (112 - (DataSize + 1) rem 128 + 128) rem 128,
+        TotalBits = (128 + DataSize) * 8,
+        Padded = <<DataBin/binary, 16#80, 0:(PadLen * 8), TotalBits:128/big>>,
+        <<R0:64, R1:64, R2:64, R3:64, R4:64, R5:64, R6:64, R7:64>> =
+          ecu_sha2:process_blocks_512(Padded, IState),
+        {R0, R1, R2, R3, R4, R5, R6, R7}
+    end,
+  {O0, O1, O2, O3, O4, O5, O6, O7} =
+    ecu_sha2:compress_64b_msg_512(I0, I1, I2, I3, I4, I5, I6, I7, OState),
+  <<O0:64, O1:64, O2:64, O3:64, O4:64, O5:64, O6:64, O7:64>>;
 hmac(sha256, Key, Data) ->
   KeyBin = to_binary(Key),
   DataBin = to_binary(Data),
@@ -75,20 +86,31 @@ hmac(sha256, Key, Data) ->
   KeyPad = <<KeyNorm/binary, 0:(PadZeros * 8)>>,
   Ki = xor_pad_64(KeyPad, 16#36),
   Ko = xor_pad_64(KeyPad, 16#5c),
-  case DataBin of
-    <<D0:32, D1:32, D2:32, D3:32, D4:32, D5:32, D6:32, D7:32>> ->
-      InitState = ecu_sha2:init_state_256(),
-      IState = ecu_sha2:compress_block_256(Ki, InitState),
-      OState = ecu_sha2:compress_block_256(Ko, InitState),
-      {I0, I1, I2, I3, I4, I5, I6, I7} =
-        ecu_sha2:compress_32b_msg_256(D0, D1, D2, D3, D4, D5, D6, D7, IState),
-      {O0, O1, O2, O3, O4, O5, O6, O7} =
-        ecu_sha2:compress_32b_msg_256(I0, I1, I2, I3, I4, I5, I6, I7, OState),
-      <<O0:32, O1:32, O2:32, O3:32, O4:32, O5:32, O6:32, O7:32>>;
-    _ ->
-      Inner = ecu_sha2:sha256(<<Ki/binary, DataBin/binary>>),
-      ecu_sha2:sha256(<<Ko/binary, Inner/binary>>)
-  end;
+  InitState = ecu_sha2:init_state_256(),
+  IState = ecu_sha2:compress_block_256(Ki, InitState),
+  OState = ecu_sha2:compress_block_256(Ko, InitState),
+  DataSize = byte_size(DataBin),
+  {I0, I1, I2, I3, I4, I5, I6, I7} =
+    if
+      DataSize =:= 32 ->
+        <<D0:32, D1:32, D2:32, D3:32, D4:32, D5:32, D6:32, D7:32>> = DataBin,
+        ecu_sha2:compress_32b_msg_256(D0, D1, D2, D3, D4, D5, D6, D7, IState);
+      DataSize =< 55 ->
+        PadLen = 55 - DataSize,
+        TotalBits = (64 + DataSize) * 8,
+        InnerBlock = <<DataBin/binary, 16#80, 0:(PadLen * 8), TotalBits:64/big>>,
+        ecu_sha2:compress_block_256(InnerBlock, IState);
+      true ->
+        PadLen = (56 - (DataSize + 1) rem 64 + 64) rem 64,
+        TotalBits = (64 + DataSize) * 8,
+        Padded = <<DataBin/binary, 16#80, 0:(PadLen * 8), TotalBits:64/big>>,
+        <<R0:32, R1:32, R2:32, R3:32, R4:32, R5:32, R6:32, R7:32>> =
+          ecu_sha2:process_blocks_256(Padded, IState),
+        {R0, R1, R2, R3, R4, R5, R6, R7}
+    end,
+  {O0, O1, O2, O3, O4, O5, O6, O7} =
+    ecu_sha2:compress_32b_msg_256(I0, I1, I2, I3, I4, I5, I6, I7, OState),
+  <<O0:32, O1:32, O2:32, O3:32, O4:32, O5:32, O6:32, O7:32>>;
 hmac(HashType, Key, Data) ->
   KeyBin = to_binary(Key),
   DataBin = to_binary(Data),

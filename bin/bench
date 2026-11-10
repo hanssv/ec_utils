@@ -6,8 +6,8 @@ main(Args) ->
   RepoDir = filename:dirname(filename:dirname(filename:absname(ScriptPath))),
   BenchEbin = filename:join([RepoDir, "_build", "bench", "lib", "ec_utils", "ebin"]),
   DefaultEbin = filename:join([RepoDir, "_build", "default", "lib", "ec_utils", "ebin"]),
-  code:add_pathz(DefaultEbin),
-  code:add_pathz(BenchEbin),
+  code:add_patha(DefaultEbin),
+  code:add_patha(BenchEbin),
 
   case code:which(ecu_bench) of
     non_existing ->
