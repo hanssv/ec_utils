@@ -102,8 +102,8 @@ jobs:
         run: |
           git fetch origin master
           git worktree add /tmp/master-worktree origin/master
-          cp -r bench/ /tmp/master-worktree/bench/
-          cp -r bin/ /tmp/master-worktree/bin/
+          cp -r bench/* /tmp/master-worktree/bench/
+          cp -r bin/* /tmp/master-worktree/bin/
           (cd /tmp/master-worktree && rebar3 as bench compile && ./bin/bench --save /tmp/master-baseline.json -d 100 all)
           git worktree remove --force /tmp/master-worktree
 
