@@ -337,9 +337,9 @@ parameter_set(Other) when is_atom(Other) ->
 -spec keypair(parameter_set()) -> keypair().
 keypair(ParamSet) ->
   #slh_params{n = N} = Params = parameter_set(ParamSet),
-  SKSeed = crypto:strong_rand_bytes(N),
-  SKPrf = crypto:strong_rand_bytes(N),
-  PKSeed = crypto:strong_rand_bytes(N),
+  SKSeed = ecu_compat:strong_rand_bytes(N),
+  SKPrf = ecu_compat:strong_rand_bytes(N),
+  PKSeed = ecu_compat:strong_rand_bytes(N),
   keypair_from_seeds_internal(Params, SKSeed, SKPrf, PKSeed).
 
 -spec keypair_from_seed(parameter_set(), binary()) -> keypair().
@@ -401,7 +401,7 @@ sign(ParamSet, Msg, SK, Ctx) when
     byte_size(Ctx) > 255 ->
       error({context_too_long, byte_size(Ctx)});
     true ->
-      AddRnd = crypto:strong_rand_bytes(N),
+      AddRnd = ecu_compat:strong_rand_bytes(N),
       Mprime = <<0:8, (byte_size(Ctx)):8, Ctx/binary, Msg/binary>>,
       slh_sign_internal(Mprime, SK, AddRnd, Params)
   end.

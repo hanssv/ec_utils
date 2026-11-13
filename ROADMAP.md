@@ -216,11 +216,19 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 16. Native Cryptographic Independence (Replacing `crypto`)
+## 16. Native Cryptographic Independence (Replacing `crypto`) `[Completed]`
 
 - **Goal**: Enable running `ec_utils` in environments without OpenSSL or OTP `crypto` application, providing a 100% self-contained pure-Erlang cryptographic stack.
-- **Features**:
-  - High-performance entropy source: native CSPRNG fallback (reading `/dev/urandom` / `getrandom(2)` via pure-Erlang port or minimal standalone NIF) to replace `crypto:strong_rand_bytes/1`.
-  - Native hash primitives: complete coverage of hash algorithms used in signatures and key derivations (SHA-2, SHA-3/SHAKE already pure-Erlang; extend to RIPEMD-160 and BLAKE2 as needed).
-  - Configurable backend selection allowing seamless switching between OTP `crypto` acceleration and pure-Erlang standalone operation.
+- **Features `[Completed]`**:
+  - `ecu_entropy`: Native CSPRNG reading from `/dev/urandom` with a pure-Erlang SHAKE-256 system-state sponge fallback, plus constant-time binary XOR (`exor/2`).
+  - `ecu_compat`: Unified cryptographic gateway dispatching to OTP `crypto` when available or pure-Erlang fallback for all operations:
+    - Hashing: SHA-2 (SHA-224/256/384/512), Keccak-256, SHA-3, and RIPEMD-160.
+    - XOF: SHAKE-128 and SHAKE-256.
+    - MAC & KDF: HMAC, HKDF, and PBKDF2-HMAC.
+    - Modular Arithmetic: Arbitrary-precision pure-Erlang `mod_pow/3`.
+    - Randomness: Transparent CSPRNG random byte generation (`strong_rand_bytes/1`).
+  - Compile-time zero-dependency mode: `-DECU_NO_CRYPTO` completely strips all references to `crypto` at compilation time.
+  - Runtime backend selection: Configurable dynamically via `ecu_compat:set_mode/1` (`default | pure | otp`) or application environment `{ec_utils, crypto_mode, Mode}`.
+  - 100% codebase unification: Every module in `src/` routes external cryptographic and entropy calls exclusively through `ecu_compat`.
+  - Comprehensive unit testing (`ecu_compat_tests.erl`) cross-verifying pure-Erlang vs OTP implementations across all primitives.
 
