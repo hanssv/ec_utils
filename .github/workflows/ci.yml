@@ -3,18 +3,8 @@ name: CI
 on:
   push:
     branches: [ master ]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.gitignore'
   pull_request:
     branches: [ master ]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.gitignore'
 
 permissions:
   contents: read
@@ -33,13 +23,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check for code changes
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(gh pr view "${{ github.event.pull_request.number }}" --json files --jq '.files[].path' | grep -v -E '^(\.gitignore|LICENSE|.*\.md|docs/)' || true)
+            if [ -z "$CHANGED" ]; then
+              echo "Documentation-only change detected; passing checks without build steps."
+              echo "run_checks=false" >> $GITHUB_OUTPUT
+            else
+              echo "Code changes detected."
+              echo "run_checks=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "run_checks=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Erlang/OTP
+        if: steps.filter.outputs.run_checks == 'true'
         uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ matrix.otp }}
           install-rebar: false
 
       - name: Cache rebar3
+        if: steps.filter.outputs.run_checks == 'true'
         id: cache-rebar3
         uses: actions/cache@v4
         with:
@@ -47,7 +57,7 @@ jobs:
           key: rebar3-3.27.3
 
       - name: Install rebar3
-        if: steps.cache-rebar3.outputs.cache-hit != 'true'
+        if: steps.filter.outputs.run_checks == 'true' && steps.cache-rebar3.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/.local/bin
           gh release download 3.27.3 --repo erlang/rebar3 --pattern "rebar3" --output ~/.local/bin/rebar3
@@ -56,14 +66,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Add local bin to PATH
+        if: steps.filter.outputs.run_checks == 'true'
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Install system dependencies
+        if: steps.filter.outputs.run_checks == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y libsodium-dev
 
       - name: Cache erlfmt
+        if: steps.filter.outputs.run_checks == 'true'
         id: cache-erlfmt
         uses: actions/cache@v4
         with:
@@ -71,7 +84,7 @@ jobs:
           key: erlfmt-${{ runner.os }}-otp-${{ matrix.otp }}-v1
 
       - name: Install erlfmt
-        if: steps.cache-erlfmt.outputs.cache-hit != 'true'
+        if: steps.filter.outputs.run_checks == 'true' && steps.cache-erlfmt.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/.local/bin
           git clone --depth 1 https://github.com/Quviq/erlfmt.git /tmp/erlfmt
@@ -81,22 +94,26 @@ jobs:
           rm -rf /tmp/erlfmt
 
       - name: Check code formatting
+        if: steps.filter.outputs.run_checks == 'true'
         run: PATH="$HOME/.local/bin:$PATH" make fmt-check
 
       - name: Compile
+        if: steps.filter.outputs.run_checks == 'true'
         run: rebar3 compile
 
       - name: Run EUnit & Benchmarks
+        if: steps.filter.outputs.run_checks == 'true'
         run: rebar3 eunit
 
       - name: Run Performance Benchmarks
+        if: steps.filter.outputs.run_checks == 'true'
         run: |
           rebar3 as bench compile
           echo "## Cryptographic Performance Benchmarks (OTP ${{ matrix.otp }})" >> $GITHUB_STEP_SUMMARY
           ./bin/bench --markdown all >> $GITHUB_STEP_SUMMARY
 
       - name: Publish Benchmark Results to PR
-        if: github.event_name == 'pull_request' && matrix.otp == '29'
+        if: steps.filter.outputs.run_checks == 'true' && github.event_name == 'pull_request' && matrix.otp == '29'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -136,6 +153,7 @@ jobs:
           fi
 
       - name: Install ELP
+        if: steps.filter.outputs.run_checks == 'true'
         # Pinned ELP release 2026-10-14; keep in sync with mise.toml
         run: |
           gh release download 2026-10-14 --repo WhatsApp/erlang-language-platform \
@@ -148,9 +166,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Run eqWAlizer
+        if: steps.filter.outputs.run_checks == 'true'
         run: elp eqwalize-all --as default
 
       - name: Cache Dialyzer PLTs
+        if: steps.filter.outputs.run_checks == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -161,4 +181,5 @@ jobs:
             dialyzer-plt-${{ runner.os }}-otp-${{ matrix.otp }}-
 
       - name: Run Dialyzer
+        if: steps.filter.outputs.run_checks == 'true'
         run: rebar3 dialyzer
