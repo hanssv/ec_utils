@@ -279,6 +279,26 @@ true = ecu_ml_dsa:verify(Msg, DetSig, PublicKey, Context).
 #{public := PK, secret := SK} = ecu_ml_dsa:keypair_from_seed(ml_dsa_44, Seed32).
 ```
 
+### Stateless Hash-Based Signatures (SLH-DSA / FIPS 205)
+
+Pure-Erlang implementation of the NIST Stateless Hash-Based Digital Signature Standard FIPS 205 (formerly SPHINCS+), covering all 12 SHA-2 and SHAKE parameter sets:
+
+```erlang
+%% Fast Category 1 keypair generation, signing, and verification (SHA-2 recommended for Erlang)
+#{public := PublicKey, secret := SecretKey} = ecu_slh_dsa:keypair(slh_dsa_sha2_128f),
+Msg = <<"Stateless hash-based signature">>,
+Signature = ecu_slh_dsa:sign(Msg, SecretKey),
+true = ecu_slh_dsa:verify(Msg, Signature, PublicKey).
+
+%% Deterministic signing with optional context string (0 to 255 bytes)
+Context = <<"app-auth-v1">>,
+DetSig = ecu_slh_dsa:sign_deterministic(Msg, SecretKey, Context),
+true = ecu_slh_dsa:verify(Msg, DetSig, PublicKey, Context).
+
+%% Deterministic keypair derivation from seeds (SK.seed, SK.prf, PK.seed)
+#{public := PK, secret := SK} = ecu_slh_dsa:keypair_from_seeds(slh_dsa_sha2_128f, SKSeed, SKPrf, PKSeed).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -482,6 +502,20 @@ Supported Curves & API
   - `verify/3,4`: Signature verification with optional context string.
   - `parameter_set/1`: Identify parameter set (`ml_dsa_44 | ml_dsa_65 | ml_dsa_87`) from public key, secret key, or signature binary size.
 
+### SLH-DSA (FIPS 205) Stateless Hash-Based Signatures
+
+- `ecu_slh_dsa`: Pure-Erlang implementation of the NIST Stateless Hash-Based Digital Signature Standard (FIPS 205):
+  - Full support for all 12 FIPS 205 parameter sets:
+    - SHA-2 family: `slh_dsa_sha2_128s`, `slh_dsa_sha2_128f`, `slh_dsa_sha2_192s`, `slh_dsa_sha2_192f`, `slh_dsa_sha2_256s`, `slh_dsa_sha2_256f`.
+    - SHAKE family: `slh_dsa_shake_128s`, `slh_dsa_shake_128f`, `slh_dsa_shake_192s`, `slh_dsa_shake_192f`, `slh_dsa_shake_256s`, `slh_dsa_shake_256f`.
+  - `keypair/1`: Fresh `#{public => PK, secret => SK}` keypair generation using strong random bytes.
+  - `keypair_from_seed/2`, `keypair_from_seeds/4`: Deterministic keypair generation from seed binaries per FIPS 205 Algorithm 16.
+  - `sign/2,3,4`: Randomized digital signature generation (hedged per FIPS 205 Algorithm 17) with optional context string ($0 \le |C| \le 255$) and optional auxiliary randomness.
+  - `sign_deterministic/2,3,4`: Deterministic digital signature generation with optional context string.
+  - `verify/3,4,5`: Signature verification per FIPS 205 Algorithm 19 with optional context string.
+  - `parameter_set/1`: Identify parameter set from public key, secret key, or signature binary size.
+  - Performance: SHA-2 parameter sets (`slh_dsa_sha2_128f` ~346 ms) execute ~24× faster on the BEAM than SHAKE parameter sets due to 64-bit bignum representation in Keccak; SHA-2 is recommended for pure-Erlang environments.
+
 Performance & Benchmarks
 ------------------------
 
@@ -501,7 +535,7 @@ the library incorporates key algorithmic optimizations:
    address recovery interleave two scalar multiplications into a single doubling
    chain, eliminating process spawning and message passing overhead.
 
-### Measured Performance (`rebar3 eunit -m benchmark_tests`, Apple Silicon)
+### Measured Performance (`make bench`, Apple Silicon)
 
 | Operation | Baseline | Optimized | Speedup | Reference (Native NIF / OpenSSL) | vs Reference |
 |:---|---:|---:|---:|---:|---:|
@@ -622,9 +656,9 @@ Roadmap
 -------
 
 See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cryptographic extensions, including:
-- **Diffie-Hellman Key Exchange (X25519 / RFC 7748)**: Pure-Erlang Montgomery ladder on Curve25519.
-- **Ed448 Goldilocks Curve (RFC 8032 & RFC 7748)**: 448-bit Edwards curve arithmetic and SHAKE256 `[Completed]`.
-- **FROST(Ed448, SHAKE256)**: Threshold signing for Ed448 `[Completed]`.
+- **Quantum-Resistant Cryptography**: ML-KEM (FIPS 203), ML-DSA (FIPS 204), and SLH-DSA (FIPS 205) `[Completed]`.
+- **Multi-Party & Threshold Signatures**: FROST (RFC 9591 on Ed25519, Ed448, secp256k1, BIP-340) and MuSig2 (BIP-327) `[Completed]`.
+- **HD Wallets & Mnemonics**: BIP-32, SLIP-0010, AEX-10, and BIP-39 `[Completed]`.
 - **Pairing-Friendly Cryptography (BLS12-381)**: Primitives for threshold BLS signatures and ZK-SNARK verifiers.
 
 Security Considerations & Limitations
