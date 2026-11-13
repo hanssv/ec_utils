@@ -9,8 +9,8 @@
   main/1
 ]).
 
--define(DEFAULT_DURATION_MS, 250).
--define(DEFAULT_THRESHOLD_PCT, 15.0).
+-define(DEFAULT_DURATION_MS, auto).
+-define(DEFAULT_THRESHOLD_PCT, 5.0).
 
 -spec main([string()]) -> no_return().
 main(Args) ->
@@ -57,18 +57,35 @@ run(Opts) ->
 
   MinIterations = maps:get(min_iterations, Opts, auto),
   BenchOpts = #{duration_ms => DurationMs, min_iterations => MinIterations},
-  Results = ecu_bench_runner:run_all(Benchmarks, BenchOpts),
+  CurrentRuns =
+    case maps:get(current_path, Opts, undefined) of
+      undefined ->
+        Rounds = maps:get(rounds, Opts, 1),
+        case Rounds of
+          1 ->
+            [ecu_bench_runner:run_all(Benchmarks, BenchOpts)];
+          N when N > 1 ->
+            [ecu_bench_runner:run_all(Benchmarks, BenchOpts) || _ <- lists:seq(1, N)]
+        end;
+      CurrentFilesStr ->
+        load_file_runs(CurrentFilesStr)
+    end,
+  CurrentResults =
+    case CurrentRuns of
+      [SingleRun] -> SingleRun;
+      MultipleRuns -> ecu_bench_runner:combine_results(MultipleRuns)
+    end,
 
-  %% Print results (when not comparing with markdown)
+  %% Print results (when not comparing)
   case {JsonOut, Markdown, ComparePath} of
     {true, _, _} ->
       ok;
+    {_, _, Comp} when Comp =/= undefined ->
+      ok;
     {false, true, undefined} ->
-      io:format("~s~n", [ecu_bench_runner:format_markdown(Results)]);
-    {false, false, _} ->
-      io:format("~s~n", [ecu_bench_runner:format_table(Results)]);
-    _ ->
-      ok
+      io:format("~s~n", [ecu_bench_runner:format_markdown(CurrentResults)]);
+    {false, false, undefined} ->
+      io:format("~s~n", [ecu_bench_runner:format_table(CurrentResults)])
   end,
 
   %% Handle JSON output / saving
@@ -77,7 +94,7 @@ run(Opts) ->
     undefined ->
       ok;
     FilePath ->
-      JsonBin = ecu_bench_runner:to_json(Results, Metadata),
+      JsonBin = ecu_bench_runner:to_json(CurrentResults, Metadata),
       case file:write_file(FilePath, JsonBin) of
         ok ->
           case JsonOut orelse Markdown of
@@ -91,7 +108,7 @@ run(Opts) ->
 
   case JsonOut of
     true ->
-      io:format("~s~n", [ecu_bench_runner:to_json(Results, Metadata)]);
+      io:format("~s~n", [ecu_bench_runner:to_json(CurrentResults, Metadata)]);
     false ->
       ok
   end,
@@ -100,36 +117,50 @@ run(Opts) ->
   case ComparePath of
     undefined ->
       halt(0);
-    BaselineFile ->
-      case file:read_file(BaselineFile) of
+    BaselineFilesStr ->
+      BaselineRuns = load_file_runs(BaselineFilesStr),
+      Comparison =
+        ecu_bench_runner:compare(CurrentRuns, BaselineRuns, ThresholdPct),
+      case Markdown of
+        true ->
+          io:format("~s~n", [ecu_bench_runner:format_comparison_markdown(Comparison)]);
+        false ->
+          io:format("~n==> Regression Comparison against ~s:~n~n", [BaselineFilesStr]),
+          io:format("~s~n", [ecu_bench_runner:format_comparison_table(Comparison)])
+      end,
+      case {maps:get(has_regression, Comparison), FailOnRegression} of
+        {true, true} ->
+          io:format(standard_error, "ERROR: Performance regression detected!~n", []),
+          halt(1);
+        _ ->
+          halt(0)
+      end
+  end.
+
+load_file_runs(PathsStr) ->
+  Paths = [string:trim(P) || P <- string:split(PathsStr, ",", all), P =/= ""],
+  lists:map(
+    fun(Path) ->
+      case file:read_file(Path) of
         {ok, BaselineBin} ->
           case ecu_bench_runner:from_json(BaselineBin) of
-            {ok, BaselineResults, _BaseMeta} ->
-              Comparison =
-                ecu_bench_runner:compare(Results, BaselineResults, ThresholdPct),
-              case Markdown of
-                true ->
-                  io:format("~s~n", [ecu_bench_runner:format_comparison_markdown(Comparison)]);
-                false ->
-                  io:format("~n==> Regression Comparison against ~s:~n~n", [BaselineFile]),
-                  io:format("~s~n", [ecu_bench_runner:format_comparison_table(Comparison)])
-              end,
-              case {maps:get(has_regression, Comparison), FailOnRegression} of
-                {true, true} ->
-                  io:format(standard_error, "ERROR: Performance regression detected!~n", []),
-                  halt(1);
-                _ ->
-                  halt(0)
-              end;
+            {ok, Results, _BaseMeta} ->
+              Results;
             {error, ParseErr} ->
-              io:format(standard_error, "Failed to parse baseline JSON: ~p~n", [ParseErr]),
+              io:format(
+                standard_error,
+                "Failed to parse benchmark JSON (~s): ~p~n",
+                [Path, ParseErr]
+              ),
               halt(1)
           end;
         {error, ReadErr} ->
-          io:format(standard_error, "Failed to read baseline file: ~p~n", [ReadErr]),
+          io:format(standard_error, "Failed to read benchmark file (~s): ~p~n", [Path, ReadErr]),
           halt(1)
       end
-  end.
+    end,
+    Paths
+  ).
 
 collect_metadata() ->
   GitCommit = get_git_commit(),
@@ -167,11 +198,16 @@ parse_args(["-f", Filter | Rest], Acc) ->
 parse_args(["--filter", Filter | Rest], Acc) ->
   parse_args(Rest, Acc#{filter => Filter});
 parse_args(["-d", DurationStr | Rest], Acc) ->
-  try list_to_integer(DurationStr) of
-    D when D > 0 -> parse_args(Rest, Acc#{duration_ms => D});
-    _ -> {error, "Duration must be positive"}
-  catch
-    _:_ -> {error, "Invalid duration integer: " ++ DurationStr}
+  case DurationStr of
+    "auto" ->
+      parse_args(Rest, Acc#{duration_ms => auto});
+    _ ->
+      try list_to_integer(DurationStr) of
+        D when D > 0 -> parse_args(Rest, Acc#{duration_ms => D});
+        _ -> {error, "Duration must be positive"}
+      catch
+        _:_ -> {error, "Invalid duration integer: " ++ DurationStr}
+      end
   end;
 parse_args(["--duration", DurationStr | Rest], Acc) ->
   parse_args(["-d", DurationStr | Rest], Acc);
@@ -182,6 +218,15 @@ parse_args(["--min-iterations", MinStr | Rest], Acc) ->
   catch
     _:_ -> {error, "Invalid min-iterations integer: " ++ MinStr}
   end;
+parse_args(["-r", RoundsStr | Rest], Acc) ->
+  try list_to_integer(RoundsStr) of
+    R when R > 0 -> parse_args(Rest, Acc#{rounds => R});
+    _ -> {error, "Rounds must be positive"}
+  catch
+    _:_ -> {error, "Invalid rounds integer: " ++ RoundsStr}
+  end;
+parse_args(["--rounds", RoundsStr | Rest], Acc) ->
+  parse_args(["-r", RoundsStr | Rest], Acc);
 parse_args(["-s", Path | Rest], Acc) ->
   parse_args(Rest, Acc#{save_path => Path});
 parse_args(["--save", Path | Rest], Acc) ->
@@ -190,6 +235,8 @@ parse_args(["-c", Path | Rest], Acc) ->
   parse_args(Rest, Acc#{compare_path => Path});
 parse_args(["--compare", Path | Rest], Acc) ->
   parse_args(Rest, Acc#{compare_path => Path});
+parse_args(["--current", Path | Rest], Acc) ->
+  parse_args(Rest, Acc#{current_path => Path});
 parse_args(["-t", ThreshStr | Rest], Acc) ->
   try list_to_float(ThreshStr) of
     T when T >= 0.0 -> parse_args(Rest, Acc#{threshold_pct => T})
@@ -226,8 +273,10 @@ print_help() ->
     "Options:~n"
     "  -f, --filter <PATTERN>     Filter benchmarks by group or name substring (default: all)~n"
     "  -d, --duration <MS>        Target benchmark duration in milliseconds (default: 250)~n"
+    "  -r, --rounds <N>           Number of benchmark rounds to run and pool (default: 1)~n"
     "  -s, --save <FILE>          Save benchmark results as JSON baseline to FILE~n"
-    "  -c, --compare <FILE>       Compare results against baseline JSON in FILE~n"
+    "  -c, --compare <FILES>      Compare results against baseline JSON file(s) (comma-separated)~n"
+    "      --current <FILES>      Load PR benchmark results from JSON file(s) (comma-separated)~n"
     "  -t, --threshold <PCT>      Regression percentage threshold (default: 15.0%)~n"
     "  -m, --markdown             Output results as GitHub-flavored Markdown table~n"
     "      --json                 Output raw JSON results to stdout~n"
