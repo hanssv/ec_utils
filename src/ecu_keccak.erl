@@ -581,6 +581,20 @@ absorb_block21(
 
 -spec squeeze(state_words(), pos_integer(), pos_integer()) -> bitstring().
 squeeze(
+  {A0, A1, _A2, _A3, _A4, _A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18,
+    _A19, _A20, _A21, _A22, _A23, _A24},
+  128,
+  _RateWords
+) ->
+  <<A0:64/little, A1:64/little>>;
+squeeze(
+  {A0, A1, A2, _A3, _A4, _A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18,
+    _A19, _A20, _A21, _A22, _A23, _A24},
+  192,
+  _RateWords
+) ->
+  <<A0:64/little, A1:64/little, A2:64/little>>;
+squeeze(
   {A0, A1, A2, A3, _A4, _A5, _A6, _A7, _A8, _A9, _A10, _A11, _A12, _A13, _A14, _A15, _A16, _A17, _A18,
     _A19, _A20, _A21, _A22, _A23, _A24},
   256,
@@ -609,6 +623,10 @@ squeeze(
 ) ->
   <<A0:64/little, A1:64/little, A2:64/little, A3:64/little, A4:64/little, A5:64/little, A6:64/little,
     A7:64/little>>;
+squeeze(State, OutputBitLength, RateWords) when OutputBitLength =< RateWords * 64 ->
+  RateBin = extract_rate_bin(State, RateWords),
+  <<ResultBits:OutputBitLength/bitstring, _/bitstring>> = RateBin,
+  ResultBits;
 squeeze(State, OutputBitLength, RateWords) ->
   squeeze_loop(State, OutputBitLength, RateWords, <<>>).
 
@@ -616,13 +634,19 @@ squeeze(State, OutputBitLength, RateWords) ->
 squeeze_loop(_State, OutputBitLength, _RateWords, Acc) when
   OutputBitLength =< bit_size(Acc)
 ->
-  <<ResultBits:OutputBitLength, _/bitstring>> = Acc,
-  <<ResultBits:OutputBitLength>>;
+  <<ResultBits:OutputBitLength/bitstring, _/bitstring>> = Acc,
+  ResultBits;
 squeeze_loop(State, OutputBitLength, RateWords, Acc) ->
   RateBin = extract_rate_bin(State, RateWords),
   NewAcc = <<Acc/bitstring, RateBin/binary>>,
-  NewState = inner_keccak_fast(State),
-  squeeze_loop(NewState, OutputBitLength, RateWords, NewAcc).
+  case OutputBitLength =< bit_size(NewAcc) of
+    true ->
+      <<ResultBits:OutputBitLength/bitstring, _/bitstring>> = NewAcc,
+      ResultBits;
+    false ->
+      NewState = inner_keccak_fast(State),
+      squeeze_loop(NewState, OutputBitLength, RateWords, NewAcc)
+  end.
 
 -spec extract_rate_bin(state_words(), pos_integer()) -> binary().
 extract_rate_bin(
