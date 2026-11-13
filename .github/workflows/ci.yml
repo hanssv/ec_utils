@@ -93,7 +93,7 @@ jobs:
         run: |
           rebar3 as bench compile
           echo "## Cryptographic Performance Benchmarks (OTP ${{ matrix.otp }})" >> $GITHUB_STEP_SUMMARY
-          ./bin/bench --markdown -d 100 all >> $GITHUB_STEP_SUMMARY
+          ./bin/bench --markdown all >> $GITHUB_STEP_SUMMARY
 
       - name: Publish Benchmark Results to PR
         if: github.event_name == 'pull_request' && matrix.otp == '29'
@@ -104,7 +104,17 @@ jobs:
           git worktree add /tmp/master-worktree origin/master
           cp -r bench/* /tmp/master-worktree/bench/
           cp -r bin/* /tmp/master-worktree/bin/
-          (cd /tmp/master-worktree && rebar3 as bench compile && ./bin/bench --save /tmp/master-baseline.json -d 100 all)
+          (cd /tmp/master-worktree && rebar3 as bench compile)
+
+          for r in 1 2 3 4 5 6; do
+            if [ $((r % 2)) -eq 1 ]; then
+              (cd /tmp/master-worktree && ./bin/bench --save /tmp/master-$r.json all)
+              ./bin/bench --save /tmp/pr-$r.json all
+            else
+              ./bin/bench --save /tmp/pr-$r.json all
+              (cd /tmp/master-worktree && ./bin/bench --save /tmp/master-$r.json all)
+            fi
+          done
           git worktree remove --force /tmp/master-worktree
 
           BODY_FILE="/tmp/bench.md"
@@ -112,7 +122,9 @@ jobs:
           echo "$MARKER" > "$BODY_FILE"
           echo "## Cryptographic Performance: PR vs. Master Baseline (OTP ${{ matrix.otp }})" >> "$BODY_FILE"
           echo "" >> "$BODY_FILE"
-          ./bin/bench --compare /tmp/master-baseline.json --markdown -d 100 all >> "$BODY_FILE"
+          ./bin/bench --compare /tmp/master-1.json,/tmp/master-2.json,/tmp/master-3.json,/tmp/master-4.json,/tmp/master-5.json,/tmp/master-6.json \
+                      --current /tmp/pr-1.json,/tmp/pr-2.json,/tmp/pr-3.json,/tmp/pr-4.json,/tmp/pr-5.json,/tmp/pr-6.json \
+                      --markdown all >> "$BODY_FILE"
 
           COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n 1)

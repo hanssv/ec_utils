@@ -21,6 +21,7 @@ list_suites() ->
     ecdh,
     ml_kem,
     ml_dsa,
+    slh_dsa,
     frost,
     musig2,
     h2c,
@@ -69,6 +70,7 @@ all_benchmarks() ->
     ecdh_benchmarks(),
     ml_kem_benchmarks(),
     ml_dsa_benchmarks(),
+    slh_dsa_benchmarks(),
     frost_benchmarks(),
     musig2_benchmarks(),
     h2c_benchmarks(),
@@ -83,20 +85,20 @@ all_benchmarks() ->
 %% ===================================================================
 
 ed25519_benchmarks() ->
-  Scalar = crypto:strong_rand_bytes(32),
-  P1 = ecu_ed25519:scalar_mul_base(crypto:strong_rand_bytes(32)),
-  P2 = ecu_ed25519:scalar_mul_base(crypto:strong_rand_bytes(32)),
-  #{public := EdPub, secret := EdPriv} = ecu_eddsa:sign_keypair(),
-  Msg = crypto:strong_rand_bytes(32),
+  Scalar = <<1:256>>,
+  P1 = ecu_ed25519:scalar_mul_base(<<1:256>>),
+  P2 = ecu_ed25519:scalar_mul_base(<<2:256>>),
+  #{public := EdPub, secret := EdPriv} = ecu_eddsa:sign_seed_keypair(<<3:256>>),
+  Msg = <<"ec_utils Ed25519 benchmark message payload">>,
   EdSig = ecu_eddsa:sign_detached(Msg, EdPriv),
 
   Batch32 = [
     begin
-      #{public := PK, secret := SK} = ecu_eddsa:sign_keypair(),
-      M = crypto:strong_rand_bytes(32),
+      #{public := PK, secret := SK} = ecu_eddsa:sign_seed_keypair(<<I:256>>),
+      M = <<I:64, "benchmark_message_data_bytes_24">>,
       {ecu_eddsa:sign_detached(M, SK), M, PK}
     end
-   || _ <- lists:seq(1, 32)
+   || I <- lists:seq(1, 32)
   ],
 
   [
@@ -144,15 +146,17 @@ ed25519_benchmarks() ->
 %% ===================================================================
 
 secp256k1_benchmarks() ->
-  SecpPriv = crypto:strong_rand_bytes(32),
+  SecpPriv = <<1:256>>,
   SecpPub = ecu_secp256k1:scalar_mul_base(SecpPriv),
-  MsgHash = crypto:strong_rand_bytes(32),
+  MsgHash = <<2:256>>,
   {SecpSig, _} = ecu_ecdsa:sign_secp256k1(MsgHash, SecpPriv),
-  EthMsg = crypto:strong_rand_bytes(32),
+  EthMsg = <<"ethereum message hash 32 bytes!!">>,
   EthSig = ecu_crypto:eth_sign(EthMsg, SecpPriv),
 
-  #{public := Bip340Pub, secret := Bip340Priv} = ecu_schnorr:sign_keypair(),
-  Bip340Sig = ecu_schnorr:sign(MsgHash, Bip340Priv),
+  Bip340Priv = <<3:256>>,
+  Bip340Pub = ecu_secp256k1:scalar_mul_base(Bip340Priv),
+  AuxRand0 = <<0:256>>,
+  Bip340Sig = ecu_schnorr:sign(MsgHash, Bip340Priv, AuxRand0),
 
   [
     #{
@@ -190,7 +194,7 @@ secp256k1_benchmarks() ->
       id => bip340_sign,
       name => <<"BIP-340 Schnorr Sign">>,
       group => secp256k1,
-      run => {fun({M, SK}) -> ecu_schnorr:sign(M, SK) end, {MsgHash, Bip340Priv}}
+      run => {fun({M, SK, AR}) -> ecu_schnorr:sign(M, SK, AR) end, {MsgHash, Bip340Priv, AuxRand0}}
     },
     #{
       id => bip340_verify,
@@ -205,10 +209,11 @@ secp256k1_benchmarks() ->
 %% ===================================================================
 
 ed448_benchmarks() ->
-  Scalar448 = crypto:strong_rand_bytes(57),
+  Scalar448 = binary:copy(<<16#33>>, 57),
   Point448 = ecu_ed448:scalar_mul_base(Scalar448),
-  #{public := Ed448Pub, secret := Ed448Priv} = ecu_eddsa448:sign_keypair(),
-  Msg448 = crypto:strong_rand_bytes(32),
+  #{public := Ed448Pub, secret := Ed448Priv} =
+    ecu_eddsa448:sign_seed_keypair(binary:copy(<<16#55>>, 57)),
+  Msg448 = <<"ec_utils Ed448 benchmark message">>,
   Ed448Sig = ecu_eddsa448:sign_detached(Msg448, Ed448Priv),
 
   [
@@ -247,15 +252,21 @@ ed448_benchmarks() ->
 %% ===================================================================
 
 ecdh_benchmarks() ->
-  {_PubA25519, PrivA25519} = ecu_ecdh:keypair(x25519),
-  {PubB25519, _PrivB25519} = ecu_ecdh:keypair(x25519),
-  {_PubA448, PrivA448} = ecu_ecdh:keypair(x448),
-  {PubB448, _PrivB448} = ecu_ecdh:keypair(x448),
-  {_PubA256, PrivA256} = ecu_ecdh:keypair(secp256k1),
-  {PubB256, _PrivB256} = ecu_ecdh:keypair(secp256k1),
+  {_PubA25519, PrivA25519} = ecu_ecdh:keypair_from_seed(x25519, <<1:256>>),
+  {PubB25519, _PrivB25519} = ecu_ecdh:keypair_from_seed(x25519, <<2:256>>),
+  {_PubA448, PrivA448} = ecu_ecdh:keypair_from_seed(x448, binary:copy(<<1>>, 56)),
+  {PubB448, _PrivB448} = ecu_ecdh:keypair_from_seed(x448, binary:copy(<<2>>, 56)),
+  {_PubA256, PrivA256} = ecu_ecdh:keypair_from_seed(secp256k1, <<1:256>>),
+  {PubB256, _PrivB256} = ecu_ecdh:keypair_from_seed(secp256k1, <<2:256>>),
 
-  {HybridPK, HybridSK} = ecu_ecdh:hybrid_keypair(x25519_mlkem768),
-  {_SS, HybridCT} = ecu_ecdh:hybrid_encaps(HybridPK),
+  {XPub, _} = ecu_ecdh:keypair_from_seed(x25519, <<1:256>>),
+  {KemPub, KemPriv} =
+    ecu_ml_kem:keypair_from_seed(ml_kem_768, binary:copy(<<1>>, 32), binary:copy(<<2>>, 32)),
+  {EphPub, _} = ecu_ecdh:keypair_from_seed(x25519, <<3:256>>),
+  {_SSKem, CTKem} = ecu_ml_kem:encaps(KemPub, binary:copy(<<4>>, 32)),
+  HybridPK = <<XPub/binary, KemPub/binary>>,
+  HybridSK = <<PrivA25519/binary, KemPriv/binary>>,
+  HybridCT = <<EphPub/binary, CTKem/binary>>,
 
   [
     #{
@@ -280,7 +291,17 @@ ecdh_benchmarks() ->
       id => ecdh_hybrid_x25519_mlkem768_encaps,
       name => <<"Hybrid X25519+MLKEM768 Encaps">>,
       group => ecdh,
-      run => {fun(PK) -> ecu_ecdh:hybrid_encaps(PK) end, HybridPK}
+      run =>
+        {
+          fun({<<XP:32/binary, KP:1184/binary>>, SeedX, SeedM}) ->
+            {EphP, EphS} = ecu_ecdh:keypair_from_seed(x25519, SeedX),
+            {SS_k, CT_k} = ecu_ml_kem:encaps(KP, SeedM),
+            SS_e = ecu_ecdh:compute_key(x25519, XP, EphS),
+            SharedSecret = ecu_compat:hash(sha3_256, <<SS_k/binary, SS_e/binary>>),
+            {SharedSecret, <<EphP/binary, CT_k/binary>>}
+          end,
+          {HybridPK, binary:copy(<<16#44>>, 32), binary:copy(<<16#55>>, 32)}
+        }
     },
     #{
       id => ecdh_hybrid_x25519_mlkem768_decaps,
@@ -311,13 +332,13 @@ ml_kem_benchmarks() ->
       id => ml_kem_512_keypair,
       name => <<"ML-KEM-512 Keypair">>,
       group => ml_kem,
-      run => fun() -> ecu_ml_kem:keypair(ml_kem_512) end
+      run => {fun({D, Z}) -> ecu_ml_kem:keypair_from_seed(ml_kem_512, D, Z) end, {SeedD, SeedZ}}
     },
     #{
       id => ml_kem_512_encaps,
       name => <<"ML-KEM-512 Encaps">>,
       group => ml_kem,
-      run => {fun(PK) -> ecu_ml_kem:encaps(PK) end, PK512}
+      run => {fun({PK, M}) -> ecu_ml_kem:encaps(PK, M) end, {PK512, SeedD}}
     },
     #{
       id => ml_kem_512_decaps,
@@ -329,13 +350,13 @@ ml_kem_benchmarks() ->
       id => ml_kem_768_keypair,
       name => <<"ML-KEM-768 Keypair">>,
       group => ml_kem,
-      run => fun() -> ecu_ml_kem:keypair(ml_kem_768) end
+      run => {fun({D, Z}) -> ecu_ml_kem:keypair_from_seed(ml_kem_768, D, Z) end, {SeedD, SeedZ}}
     },
     #{
       id => ml_kem_768_encaps,
       name => <<"ML-KEM-768 Encaps">>,
       group => ml_kem,
-      run => {fun(PK) -> ecu_ml_kem:encaps(PK) end, PK768}
+      run => {fun({PK, M}) -> ecu_ml_kem:encaps(PK, M) end, {PK768, SeedD}}
     },
     #{
       id => ml_kem_768_decaps,
@@ -347,13 +368,13 @@ ml_kem_benchmarks() ->
       id => ml_kem_1024_keypair,
       name => <<"ML-KEM-1024 Keypair">>,
       group => ml_kem,
-      run => fun() -> ecu_ml_kem:keypair(ml_kem_1024) end
+      run => {fun({D, Z}) -> ecu_ml_kem:keypair_from_seed(ml_kem_1024, D, Z) end, {SeedD, SeedZ}}
     },
     #{
       id => ml_kem_1024_encaps,
       name => <<"ML-KEM-1024 Encaps">>,
       group => ml_kem,
-      run => {fun(PK) -> ecu_ml_kem:encaps(PK) end, PK1024}
+      run => {fun({PK, M}) -> ecu_ml_kem:encaps(PK, M) end, {PK1024, SeedD}}
     },
     #{
       id => ml_kem_1024_decaps,
@@ -386,7 +407,7 @@ ml_dsa_benchmarks() ->
       id => ml_dsa_44_keypair,
       name => <<"ML-DSA-44 Keypair">>,
       group => ml_dsa,
-      run => fun() -> ecu_ml_dsa:keypair(ml_dsa_44) end
+      run => {fun(S) -> ecu_ml_dsa:keypair_from_seed(ml_dsa_44, S) end, Seed44}
     },
     #{
       id => ml_dsa_44_sign,
@@ -404,7 +425,7 @@ ml_dsa_benchmarks() ->
       id => ml_dsa_65_keypair,
       name => <<"ML-DSA-65 Keypair">>,
       group => ml_dsa,
-      run => fun() -> ecu_ml_dsa:keypair(ml_dsa_65) end
+      run => {fun(S) -> ecu_ml_dsa:keypair_from_seed(ml_dsa_65, S) end, Seed65}
     },
     #{
       id => ml_dsa_65_sign,
@@ -422,7 +443,7 @@ ml_dsa_benchmarks() ->
       id => ml_dsa_87_keypair,
       name => <<"ML-DSA-87 Keypair">>,
       group => ml_dsa,
-      run => fun() -> ecu_ml_dsa:keypair(ml_dsa_87) end
+      run => {fun(S) -> ecu_ml_dsa:keypair_from_seed(ml_dsa_87, S) end, Seed87}
     },
     #{
       id => ml_dsa_87_sign,
@@ -439,14 +460,69 @@ ml_dsa_benchmarks() ->
   ].
 
 %% ===================================================================
+%% SLH-DSA (FIPS 205)
+%% ===================================================================
+
+slh_dsa_benchmarks() ->
+  case code:ensure_loaded(ecu_slh_dsa) of
+    {module, ecu_slh_dsa} ->
+      Msg = <<"ec_utils SLH-DSA benchmark message">>,
+      Seed = <<1:128>>,
+      #{public := PK_sha2, secret := SK_sha2} =
+        ecu_slh_dsa:keypair_from_seeds(slh_dsa_sha2_128f, Seed, Seed, Seed),
+      Sig_sha2 = ecu_slh_dsa:sign_deterministic(slh_dsa_sha2_128f, Msg, SK_sha2),
+
+      [
+        #{
+          id => slh_dsa_sha2_128f_keypair,
+          name => <<"SLH-DSA-SHA2-128f Keypair">>,
+          group => slh_dsa,
+          run =>
+            {
+              fun(S) -> ecu_slh_dsa:keypair_from_seeds(slh_dsa_sha2_128f, S, S, S) end,
+              Seed
+            }
+        },
+        #{
+          id => slh_dsa_sha2_128f_sign,
+          name => <<"SLH-DSA-SHA2-128f Sign">>,
+          group => slh_dsa,
+          run =>
+            {
+              fun({M, SK}) -> ecu_slh_dsa:sign_deterministic(slh_dsa_sha2_128f, M, SK) end,
+              {Msg, SK_sha2}
+            }
+        },
+        #{
+          id => slh_dsa_sha2_128f_verify,
+          name => <<"SLH-DSA-SHA2-128f Verify">>,
+          group => slh_dsa,
+          run =>
+            {
+              fun({M, Sig, PK}) -> ecu_slh_dsa:verify(slh_dsa_sha2_128f, Sig, M, PK) end,
+              {Msg, Sig_sha2, PK_sha2}
+            }
+        }
+      ];
+    _ ->
+      []
+  end.
+
+%% ===================================================================
 %% FROST (RFC 9591)
 %% ===================================================================
 
 frost_benchmarks() ->
   Msg = <<"FROST benchmark message">>,
-  {Shares, GroupPK, _} = ecu_frost:trusted_dealer_keygen(ed25519, 2, 3),
+  Coeffs = [<<1:256/little>>, <<2:256/little>>],
+  Shares = [{I, ecu_frost:polynomial_evaluate(ed25519, I, Coeffs)} || I <- lists:seq(1, 3)],
+  VSSCommitment = [ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(C)) || C <- Coeffs],
+  GroupPK = hd(VSSCommitment),
   Selected = lists:sublist(Shares, 2),
-  Nonces = [{Id, S, ecu_frost:commit(ed25519, S)} || {Id, S} <- Selected],
+  Nonces = [
+    {Id, S, ecu_frost:commit(ed25519, S, {<<Id:256>>, <<(Id + 10):256>>})}
+   || {Id, S} <- Selected
+  ],
   CommitList = [{Id, HC, BC} || {Id, _, {_, {HC, BC}}} <- Nonces],
   SigShares = [
     ecu_frost:sign(ed25519, Id, S, GroupPK, NP, Msg, CommitList)
@@ -460,7 +536,11 @@ frost_benchmarks() ->
       id => frost_ed25519_commit,
       name => <<"FROST Ed25519 Commit">>,
       group => frost,
-      run => {fun(S) -> ecu_frost:commit(ed25519, S) end, FirstS}
+      run =>
+        {
+          fun({S, RP}) -> ecu_frost:commit(ed25519, S, RP) end,
+          {FirstS, {<<1:256>>, <<2:256>>}}
+        }
     },
     #{
       id => frost_ed25519_sign,
@@ -498,17 +578,21 @@ frost_benchmarks() ->
 %% ===================================================================
 
 musig2_benchmarks() ->
-  Msg = crypto:strong_rand_bytes(32),
-  SKs = [crypto:strong_rand_bytes(32) || _ <- lists:seq(1, 3)],
+  Msg = <<42:256>>,
+  SKs = [<<1:256>>, <<2:256>>, <<3:256>>],
   PKs = [ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK)) || SK <- SKs],
   {ok, Ctx} = ecu_musig2:key_agg(PKs),
 
   Nonces = [
     begin
-      {SN, PN} = ecu_musig2:nonce_gen(SK),
-      {SN, PN}
+      K1 = I * 10 + 1,
+      K2 = I * 10 + 2,
+      R1 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K1)),
+      R2 = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(K2)),
+      SignerPub = ecu_secp256k1:compress(ecu_secp256k1:scalar_mul_base(SK)),
+      {<<K1:256, K2:256, SignerPub/binary>>, <<R1/binary, R2/binary>>}
     end
-   || SK <- SKs
+   || {I, SK} <- lists:zip(lists:seq(1, length(SKs)), SKs)
   ],
   PubNonces = [PN || {_, PN} <- Nonces],
   {ok, AggNonce} = ecu_musig2:nonce_agg(PubNonces),
@@ -613,8 +697,8 @@ h2c_benchmarks() ->
 %% ===================================================================
 
 keccak_benchmarks() ->
-  Data32 = crypto:strong_rand_bytes(32),
-  Data1024 = crypto:strong_rand_bytes(1024),
+  Data32 = binary:copy(<<"0123456789abcdef">>, 2),
+  Data1024 = binary:copy(<<"0123456789abcdef">>, 64),
 
   [
     #{
@@ -648,9 +732,9 @@ keccak_benchmarks() ->
 %% ===================================================================
 
 hash_benchmarks() ->
-  Data64 = crypto:strong_rand_bytes(64),
-  Key32 = crypto:strong_rand_bytes(32),
-  Key64 = crypto:strong_rand_bytes(64),
+  Data64 = binary:copy(<<"0123456789abcdef">>, 4),
+  Key32 = binary:copy(<<16#aa>>, 32),
+  Key64 = binary:copy(<<16#bb>>, 64),
   Pass = <<"password">>,
   Salt = <<"salt">>,
 
@@ -699,9 +783,9 @@ hash_benchmarks() ->
 %% ===================================================================
 
 hd_benchmarks() ->
-  Payload = crypto:strong_rand_bytes(78),
+  Payload = binary:copy(<<16#42>>, 78),
   B58Str = ecu_base58:encode_check(Payload),
-  Seed = crypto:strong_rand_bytes(32),
+  Seed = binary:copy(<<16#33>>, 32),
   {ok, MSecp} = ecu_hd:master_key(secp256k1, Seed),
   MSecpPub = ecu_hd:to_public(MSecp),
   {ok, MEd} = ecu_hd:master_key(ed25519, Seed),
