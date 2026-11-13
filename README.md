@@ -3,7 +3,7 @@ ec_utils
 
 A pure Erlang cryptographic library implementing elliptic curve arithmetic
 (**Ed25519**, **Ed448**, **secp256k1**), digital signatures (ECDSA, EdDSA,
-BIP-340 Schnorr, **ML-DSA / FIPS 204**), threshold signatures (FROST RFC 9591), multi-signatures
+BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
 Hash-to-Curve (RFC 9380), hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
@@ -581,6 +581,12 @@ the library incorporates key algorithmic optimizations:
 | **ml_dsa_65 keypair** | — | **5.68 ms** | — | 244 µs (crypto / OpenSSL) | 23.3× |
 | **ml_dsa_65 sign** | — | **45.21 ms** | — | 2.32 ms (crypto / OpenSSL) | 19.5× |
 | **ml_dsa_65 verify** | — | **5.28 ms** | — | 449 µs (crypto / OpenSSL) | 11.8× |
+| **slh_dsa_sha2_128f keypair** | — | **17.3 ms** | — | 446 µs (crypto / OpenSSL) | 38.9× |
+| **slh_dsa_sha2_128f sign** | — | **346 ms** | — | 9.87 ms (crypto / OpenSSL) | 35.1× |
+| **slh_dsa_sha2_128f verify** | — | **20.9 ms** | — | 563 µs (crypto / OpenSSL) | 37.1× |
+| **slh_dsa_shake_128f keypair** | 712 ms | **355 ms** | **2.00×** | 12.5 ms (crypto / OpenSSL) | 28.4× |
+| **slh_dsa_shake_128f sign** | 16.37 s | **8.20 s** | **2.00×** | 27.2 ms (crypto / OpenSSL) | 301× |
+| **slh_dsa_shake_128f verify** | 968 ms | **470 ms** | **2.06×** | 1.74 ms (crypto / OpenSSL) | 270× |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
@@ -588,6 +594,7 @@ the library incorporates key algorithmic optimizations:
 - *BIP-340 Schnorr, Keccak-256, and Hash-to-Curve reference benchmarks use an optional test NIF (`k256`, `sha3`, `hash2curve`) buildable via `make rustcrypto_reference`.*
 - *FROST threshold reference benchmarks use optional RFC 9591 test NIFs (Zcash Foundation `frost-core` crates) buildable via `make frost_reference`.*
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
+- *Pure Erlang SLH-DSA signing executes ~80,000 hash operations. SHA-2 parameter sets (`slh_dsa_sha2_128f` at 346 ms) are ~24× faster than SHAKE parameter sets (`slh_dsa_shake_128f` at 8.20 s) because Keccak-f[1600] operates on 64-bit uints that exceed BEAM's 60-bit `smallint` range and lack SIMD vectorization. In contrast, native OpenSSL uses multi-buffer SIMD (AVX2/AVX-512) to compute 4–8 Keccak states concurrently, reaching 27.2 ms.*
 - *All reference NIFs can be built together using `make reference_nifs`.*
 
 ### Automated Benchmarking CLI
