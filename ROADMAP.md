@@ -169,7 +169,26 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 12. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
+## 12. Stateless Hash-Based Signatures: SLH-DSA (FIPS 205) `[Completed]`
+
+- **Standard**: [NIST FIPS 205](https://doi.org/10.6028/NIST.FIPS.205) (Stateless Hash-Based Digital Signature Standard, based on SPHINCS+).
+- **Goal**: Implement pure-Erlang quantum-resistant stateless hash-based digital signatures with zero native dependencies in `src/`.
+- **Features `[Completed]`**:
+  - Full support for all 12 NIST FIPS 205 parameter sets:
+    - SHA-2 family: `slh_dsa_sha2_128s`, `slh_dsa_sha2_128f`, `slh_dsa_sha2_192s`, `slh_dsa_sha2_192f`, `slh_dsa_sha2_256s`, `slh_dsa_sha2_256f`.
+    - SHAKE family: `slh_dsa_shake_128s`, `slh_dsa_shake_128f`, `slh_dsa_shake_192s`, `slh_dsa_shake_192f`, `slh_dsa_shake_256s`, `slh_dsa_shake_256f`.
+  - Winternitz One-Time Signatures (WOTS+) with checksum chaining and leaf computation.
+  - Forest of Random Subsets (FORS) few-time signatures with tree hashing.
+  - Hypertree multi-layer XMSS tree traversal and authentication path verification.
+  - Address encoding for WOTS+, WOTS+ PK, Tree, FORS Tree, FORS PK, and PRF.
+  - Randomized signing (hedged per FIPS 205 §5.3) and deterministic signing with optional user context strings ($0 \le |C| \le 255$).
+  - 100% verified against official NIST ACVP intermediate test vectors (Algorithms 16, 17, 19).
+  - Bidirectional differential testing against OTP 29 `crypto`.
+  - Pure-Erlang Keccak-f[1600] squeeze optimization providing ~2× speedup on SHAKE parameter sets.
+
+---
+
+## 13. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
 
 - **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Ethereum / Filecoin / Zcash zk-SNARK primitives.
 - **Goal**: Support pairing-based cryptography, short aggregate signatures, and zero-knowledge proof verification.
@@ -181,7 +200,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 13. Algorithmic Performance Optimizations (Deferred)
+## 14. Algorithmic Performance Optimizations (Deferred)
 
 - **GLV Endomorphism Decomposition (secp256k1)**: Decomposing 256-bit scalars into 128-bit halves ($k \cdot P = k_1 \cdot P + k_2 \cdot \phi(P)$) to halve doubling chains.
 - **wNAF Variable Scalar Multiplication**: Windowed Non-Adjacent Form ($w=4, 5$) to reduce point additions by 33–50%.
@@ -189,7 +208,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 14. Packaging & Release Readiness
+## 15. Packaging & Release Readiness
 
 - **Hex.pm Packaging**: Metadata validation in `src/ec_utils.app.src` for publishing to Hex.pm.
 - **Documentation**: Integration with `rebar3 ex_doc` for generating HexDocs.
@@ -197,7 +216,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 15. Native Cryptographic Independence (Replacing `crypto`)
+## 16. Native Cryptographic Independence (Replacing `crypto`)
 
 - **Goal**: Enable running `ec_utils` in environments without OpenSSL or OTP `crypto` application, providing a 100% self-contained pure-Erlang cryptographic stack.
 - **Features**:
