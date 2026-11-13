@@ -28,7 +28,8 @@ list_suites() ->
     keccak,
     hash,
     hd,
-    bls12_381
+    bls12_381,
+    groth16
   ].
 
 -spec get_benchmarks(atom() | string() | binary()) -> [ecu_bench_runner:bench_def()].
@@ -77,7 +78,8 @@ all_benchmarks() ->
     keccak_benchmarks(),
     hash_benchmarks(),
     hd_benchmarks(),
-    bls12_381_benchmarks()
+    bls12_381_benchmarks(),
+    groth16_benchmarks()
   ]).
 
 %% ===================================================================
@@ -903,5 +905,61 @@ bls12_381_benchmarks() ->
       group => bls12_381,
       run =>
         {fun({PK, M, S}) -> ecu_bls12_381_sig:verify(min_pk, PK, M, S) end, {MinPkPub, Msg, MinPkSig}}
+    }
+  ].
+
+groth16_benchmarks() ->
+  Inputs = [12345, 67890],
+  AlphaVal = 123456789123456789,
+  BetaVal = 987654321987654321,
+  GammaVal = 112233445566778899,
+  DeltaVal = 998877665544332211,
+  G1 = ecu_bls12_381:g1_generator(),
+  G2 = ecu_bls12_381:g2_generator(),
+  AlphaG1 = ecu_bls12_381:g1_scalar_mul(G1, AlphaVal),
+  BetaG2 = ecu_bls12_381:g2_scalar_mul(G2, BetaVal),
+  GammaG2 = ecu_bls12_381:g2_scalar_mul(G2, GammaVal),
+  DeltaG2 = ecu_bls12_381:g2_scalar_mul(G2, DeltaVal),
+  IC = [
+    ecu_bls12_381:g1_scalar_mul(G1, 314159265),
+    ecu_bls12_381:g1_scalar_mul(G1, 314169272),
+    ecu_bls12_381:g1_scalar_mul(G1, 314179279)
+  ],
+  VK = #{
+    alpha_g1 => AlphaG1,
+    beta_g2 => BetaG2,
+    gamma_g2 => GammaG2,
+    delta_g2 => DeltaG2,
+    ic => IC
+  },
+  R = ecu_bls12_381:r(),
+  AVal = 777777777,
+  BVal = 888888888,
+  A = ecu_bls12_381:g1_scalar_mul(G1, AVal),
+  B = ecu_bls12_381:g2_scalar_mul(G2, BVal),
+  KPubScalar = (314159265 + 12345 * 314169272 + 67890 * 314179279) rem R,
+  DeltaInvBin =
+    case ecu_compat:mod_pow(DeltaVal, R - 2, R) of
+      error -> error(mod_pow_failed);
+      Bin when is_binary(Bin) -> Bin
+    end,
+  DeltaInv = binary:decode_unsigned(DeltaInvBin),
+  Num = ((AVal * BVal) - (AlphaVal * BetaVal) - (KPubScalar * GammaVal)) rem R,
+  CVal = (((Num rem R + R) rem R) * DeltaInv) rem R,
+  C = ecu_bls12_381:g1_scalar_mul(G1, CVal),
+  Proof = #{a => A, b => B, c => C},
+  Batch = [{Inputs, Proof}, {Inputs, Proof}, {Inputs, Proof}, {Inputs, Proof}],
+  [
+    #{
+      id => groth16_verify,
+      name => <<"Groth16 Verify (BLS12-381)">>,
+      group => groth16,
+      run => {fun({V, In, P}) -> ecu_groth16:verify(V, In, P) end, {VK, Inputs, Proof}}
+    },
+    #{
+      id => groth16_verify_batch_4,
+      name => <<"Groth16 Batch Verify (4 proofs)">>,
+      group => groth16,
+      run => {fun({V, Bth}) -> ecu_groth16:verify_batch(V, Bth) end, {VK, Batch}}
     }
   ].

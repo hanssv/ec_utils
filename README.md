@@ -6,6 +6,7 @@ A pure Erlang cryptographic library implementing elliptic curve arithmetic
 BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
+pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **Groth16**),
 Hash-to-Curve (RFC 9380), hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
 mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
 
@@ -299,6 +300,25 @@ true = ecu_slh_dsa:verify(Msg, DetSig, PublicKey, Context).
 #{public := PK, secret := SK} = ecu_slh_dsa:keypair_from_seeds(slh_dsa_sha2_128f, SKSeed, SKPrf, PKSeed).
 ```
 
+### Groth16 zk-SNARK Proof Verification (BLS12-381)
+
+Pure-Erlang verification of Groth16 zero-knowledge proofs over the BLS12-381 pairing-friendly curve:
+
+```erlang
+%% Single proof verification
+Proof = #{a => ProofA, b => ProofB, c => ProofC},
+VK = #{alpha_g1 => Alpha, beta_g2 => Beta, gamma_g2 => Gamma, delta_g2 => Delta, ic => [IC0, IC1]},
+PublicInputs = [12345],
+true = ecu_groth16:verify(VK, PublicInputs, Proof).
+
+%% Randomized batch verification of multiple Groth16 proofs in a single multi-Miller loop
+Batch = [
+    {Inputs1, Proof1},
+    {Inputs2, Proof2}
+],
+true = ecu_groth16:verify_batch(VK, Batch).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -516,6 +536,17 @@ Supported Curves & API
   - `parameter_set/1`: Identify parameter set from public key, secret key, or signature binary size.
   - Performance: SHA-2 parameter sets (`slh_dsa_sha2_128f` ~346 ms) execute ~24× faster on the BEAM than SHAKE parameter sets due to 64-bit bignum representation in Keccak; SHA-2 is recommended for pure-Erlang environments.
 
+### Pairing-Friendly Cryptography & Groth16 zk-SNARK Verification (BLS12-381)
+
+- `ecu_bls12_381`: Group arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_q$) and $\mathbb{G}_2$ (over $\mathbb{F}_{q^2}$) with Jacobian projective coordinates, point compression, and subgroup validation.
+- `ecu_bls12_381_pairing`: Optimal Ate pairing $e: \mathbb{G}_1 \times \mathbb{G}_2 \rightarrow \mathbb{G}_T$ and multi-Miller loop accumulation over field extension $\mathbb{F}_{q^{12}}$.
+- `ecu_bls12_381_sig`: BLS signature generation, non-interactive aggregation, and verification (`min_pk` and `min_sig` ciphersuites per draft-irtf-cfrg-bls-signature).
+- `ecu_groth16`: Pure-Erlang Groth16 zero-knowledge proof verifier over BLS12-381:
+  - `verify/3,4`: Verify Groth16 proof against verification key and public inputs using a 4-pair multi-Miller loop and single final exponentiation.
+  - `verify_batch/2,3`: Randomized batch verification aggregating $N$ proofs into $N + 3$ pairings via 128-bit random weights (~2.5× higher throughput).
+  - Flexible point codecs supporting records (`#groth16_proof{}`, `#groth16_vk{}`), maps, tuples, 48B/96B compressed points, and 96B/192B uncompressed points.
+  - Strict validation: rejects points not on curve, points not in prime subgroup, points at infinity, and out-of-range scalars.
+
 Performance & Benchmarks
 ------------------------
 
@@ -621,6 +652,8 @@ the library incorporates key algorithmic optimizations:
 | **slh_dsa_shake_128f keypair** | 712 ms | **355 ms** | **2.00×** | 12.5 ms (crypto / OpenSSL) | 28.4× |
 | **slh_dsa_shake_128f sign** | 16.37 s | **8.20 s** | **2.00×** | 27.2 ms (crypto / OpenSSL) | 301× |
 | **slh_dsa_shake_128f verify** | 968 ms | **470 ms** | **2.06×** | 1.74 ms (crypto / OpenSSL) | 270× |
+| **groth16 verify (BLS12-381)** | — | **25.2 ms** | — | — | — |
+| **groth16 batch verify (4 proofs)** | — | **9.9 ms/proof** | **~2.5×** | — | — |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
@@ -660,7 +693,7 @@ See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cry
 - **Multi-Party & Threshold Signatures**: FROST (RFC 9591 on Ed25519, Ed448, secp256k1, BIP-340) and MuSig2 (BIP-327) `[Completed]`.
 - **HD Wallets & Mnemonics**: BIP-32, SLIP-0010, AEX-10, and BIP-39 `[Completed]`.
 - **Native Cryptographic Independence**: 100% pure-Erlang fallback for hashing, HMAC, and CSPRNG entropy via `ecu_compat` and `ecu_entropy` `[Completed]`.
-- **Pairing-Friendly Cryptography (BLS12-381)**: Primitives for threshold BLS signatures and ZK-SNARK verifiers.
+- **Pairing-Friendly Cryptography & zk-SNARKs (BLS12-381)**: BLS signatures and Groth16 proof verification `[Phase 1 Completed]`.
 
 Security Considerations & Limitations
 -------------------------------------
