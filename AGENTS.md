@@ -46,8 +46,12 @@ Detailed style rules are defined in [`STYLE.md`](STYLE.md). Key points:
   - Body: Wrap explanatory body text at **72 characters**, separated from subject by a blank line.
 - **Direct Responses**:
   Never use terminal `echo` commands to announce task completion; provide direct, concise markdown responses instead.
+- **Benchmark Reporting Format**:
+  Always present benchmark results in the standard comparative table format:
+  `| Operation | Pure Erlang | Reference (Rust NIF) | vs Reference |`
+  with execution times in `µs` (or `ms`) and the explicit speed ratio factor (e.g. `1.93×`). Never dump raw Ops/sec without this comparative table.
 - **Tooling & Command Transparency**:
-  Avoid ad-hoc inline host scripts (e.g. `python3 -c '...'` or multi-line `-eval` blobs) in approval dialogs. Use standard, transparent CLI tools (`jq`, `grep`, `sed`), committed named scripts, Erlang project tools (`rebar3`, `escript`), or differential testing with OTP 29 `crypto` instead.
+  NEVER use ad-hoc Python (`python3 -c '...'`, scripts) or arbitrary host runtime one-liners to read files, parse logs, or inspect transcripts. Use dedicated file-reading tools (`read_file`), standard transparent CLI tools (`jq`, `grep`, `sed`), committed named scripts, or Erlang project tools (`rebar3`, `escript`).
 
 ---
 

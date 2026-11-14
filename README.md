@@ -319,6 +319,24 @@ Batch = [
 true = ecu_groth16:verify_batch(VK, Batch).
 ```
 
+### Poseidon Algebraic Hash Function (BLS12-381 & BN254)
+
+Pure-Erlang Poseidon algebraic hashing for ZK circuits and smart contract platforms:
+
+```erlang
+%% BLS12-381 2-to-1 hashing (compatible with Aeternity FATE VM / Sophia Crypto.poseidon)
+Hash = ecu_poseidon:hash3(1, 2).
+
+%% BN254 2-to-1 hashing (compatible with Circomlib / Ethereum / Tornado Cash)
+HashBN = ecu_poseidon:hash3(bn254, 1, 2).
+
+%% Multi-element hashing (t in 2..9)
+MultiHash = ecu_poseidon:hash(bls12_381, [1, 2, 3, 4]).
+
+%% 32-byte big-endian binary inputs
+BinHash = ecu_poseidon:hash_binary(bn254, [<<1:256>>, <<2:256>>]).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -546,6 +564,14 @@ Supported Curves & API
   - `verify_batch/2,3`: Randomized batch verification aggregating $N$ proofs into $N + 3$ pairings via 128-bit random weights (~2.5× higher throughput).
   - Flexible point codecs supporting records (`#groth16_proof{}`, `#groth16_vk{}`), maps, tuples, 48B/96B compressed points, and 96B/192B uncompressed points.
   - Strict validation: rejects points not on curve, points not in prime subgroup, points at infinity, and out-of-range scalars.
+- `ecu_poseidon`: Pure-Erlang implementation of the Poseidon algebraic hash function and Hades permutation:
+  - `hash3/2`: Hash two elements over BLS12-381 ($t=3$, $R_F=8, R_P=57$, total 65 rounds: 4 full, 57 partial, 4 full). 100% compatible with Aeternity FATE VM opcode and `aeu_poseidon:hash3/2`.
+  - `hash3/3`: Hash two elements specifying curve (`bls12_381` or `bn254`).
+  - `hash/1,2`: Hash arbitrary $N \in [1, 8]$ field elements ($t \in [2, 9]$) using the Hades permutation with element-wise round constant addition and Cauchy MDS matrix mixing.
+  - `hash_binary/1,2`: Big-endian 32-byte binary hashing with strict canonical boundary validation ($< q$).
+  - `permute/2`: Evaluate the Hades permutation on full state vectors.
+  - Optimized implementation: Unrolled constants table, register-allocated tail-recursive loop, zero heap allocations for `hash3/2,3` (~90 µs/hash, >10,800 hashes/sec in pure Erlang).
+- `ecu_poseidon_constants`: Precomputed round constants and MDS matrices for BLS12-381 (from canonical Grain LFSR) and BN254 (matching Circomlib).
 
 Performance & Benchmarks
 ------------------------
@@ -693,7 +719,7 @@ See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cry
 - **Multi-Party & Threshold Signatures**: FROST (RFC 9591 on Ed25519, Ed448, secp256k1, BIP-340) and MuSig2 (BIP-327) `[Completed]`.
 - **HD Wallets & Mnemonics**: BIP-32, SLIP-0010, AEX-10, and BIP-39 `[Completed]`.
 - **Native Cryptographic Independence**: 100% pure-Erlang fallback for hashing, HMAC, and CSPRNG entropy via `ecu_compat` and `ecu_entropy` `[Completed]`.
-- **Pairing-Friendly Cryptography & zk-SNARKs (BLS12-381)**: BLS signatures and Groth16 proof verification `[Phase 1 Completed]`.
+- **Pairing-Friendly Cryptography, zk-SNARKs & Poseidon (BLS12-381 & BN254)**: BLS signatures, Groth16 proof verification, and Poseidon algebraic hashing `[Phase 1 & 2 Completed]`.
 
 Security Considerations & Limitations
 -------------------------------------

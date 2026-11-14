@@ -192,7 +192,7 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 - **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Groth16 zk-SNARK verification ([Groth 2016](https://eprint.iacr.org/2016/260)).
 - **Goal**: Support pairing-based cryptography, short aggregate signatures, and zero-knowledge proof verification.
-- **Features `[Phase 1 Completed]`**:
+- **Features `[Phase 1 & 2 Completed]`**:
   - Arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_q$) and $\mathbb{G}_2$ (over extension field $\mathbb{F}_{q^2}$) on the BLS12-381 curve (`ecu_bls12_381`, `ecu_bls12_381_fp`).
   - Optimal Ate pairing $e: \mathbb{G}_1 \times \mathbb{G}_2 \rightarrow \mathbb{G}_T$ over field extension $\mathbb{F}_{q^{12}}$ with multi-Miller loop accumulation (`ecu_bls12_381_pairing`).
   - BLS signature generation, aggregation, and verification (`ecu_bls12_381_sig`).
@@ -201,8 +201,12 @@ This document outlines planned enhancements, cryptographic extensions, and archi
     - Public input accumulation $K_{pub} = IC_0 + \sum x_i IC_i$ in Jacobian projective coordinates.
     - Randomized multi-proof batch verification (`verify_batch/2,3`) reducing $4N$ pairings to $N + 3$ pairings via 128-bit random weights (~2.5× throughput).
     - Support for maps, records, tuples, 48B/96B compressed points, and 96B/192B uncompressed points.
-- **Next Phases**:
-  - Phase 2: Poseidon hash function over finite fields (`ecu_poseidon`) for ZK-friendly circuits (Tornado Cash, Semaphore).
+  - Poseidon algebraic hash function over finite fields (`ecu_poseidon`, `ecu_poseidon_constants`):
+    - Supports both BLS12-381 scalar field (matching Aeternity / FATE / Sophia `Crypto.poseidon`) and BN254 scalar field (matching Circomlib / Ethereum / Tornado Cash).
+    - Optimized unrolled `hash3/2,3` for 2-to-1 binary tree hashing with zero heap allocations in inner loops (~90 µs/hash, >10,800 hashes/sec pure Erlang).
+    - Generic Hades permutation `permute/2` and multi-input hashing `hash/1,2` for state widths $t \in [2, 9]$.
+    - Big-endian binary codecs `hash_binary/1,2` with strict canonical range validation ($< q$).
+    - Cross-validated against Aeternity `aeu_poseidon` and Rust reference oracle (`crates/poseidon_nif`, using `light-poseidon` and native BLS12-381 Hades).
 
 ---
 
