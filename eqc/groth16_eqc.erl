@@ -18,6 +18,7 @@
 
 -define(BLS, ecu_bls12_381).
 -define(R, ?BLS12_381_R).
+-define(NIF, ecu_bls12_381_nif).
 
 %%%-------------------------------------------------------------------
 %%% Generators
@@ -187,5 +188,89 @@ prop_format_invariance() ->
       ResComp = ecu_groth16:verify(VKComp, Inputs, ProofComp),
 
       ResRec andalso ResMap andalso ResComp
+    end
+  ).
+
+prop_differential_blst() ->
+  ?FORALL(
+    {VK, Inputs, Proof},
+    gen_groth16_instance(),
+    case ?NIF:is_loaded() of
+      true ->
+        PureResult = ecu_groth16:verify(VK, Inputs, Proof),
+        #groth16_vk{
+          alpha_g1 = Alpha,
+          beta_g2 = Beta,
+          gamma_g2 = Gamma,
+          delta_g2 = Delta,
+          ic = IC
+        } = VK,
+        #groth16_proof{a = A, b = B, c = C} = Proof,
+        AlphaBin = ?BLS:g1_compress(Alpha),
+        BetaBin = ?BLS:g2_compress(Beta),
+        GammaBin = ?BLS:g2_compress(Gamma),
+        DeltaBin = ?BLS:g2_compress(Delta),
+        ICBins = [?BLS:g1_compress(Pt) || Pt <- IC],
+        InputBins = [<<X:256/little>> || X <- Inputs],
+        ABin = ?BLS:g1_compress(A),
+        BBin = ?BLS:g2_compress(B),
+        CBin = ?BLS:g1_compress(C),
+        NifResult = ?NIF:groth16_verify(
+          AlphaBin,
+          BetaBin,
+          GammaBin,
+          DeltaBin,
+          ICBins,
+          InputBins,
+          ABin,
+          BBin,
+          CBin
+        ),
+        PureResult == true andalso NifResult == true;
+      false ->
+        true
+    end
+  ).
+
+prop_differential_blst_tampered() ->
+  ?FORALL(
+    {{VK, Inputs, Proof}, DeltaX},
+    {gen_groth16_instance(), choose(1, ?R - 1)},
+    case ?NIF:is_loaded() andalso Inputs =/= [] of
+      true ->
+        [X0 | Rest] = Inputs,
+        TamperedInputs = [(X0 + DeltaX) rem ?R | Rest],
+        PureResult = ecu_groth16:verify(VK, TamperedInputs, Proof),
+        #groth16_vk{
+          alpha_g1 = Alpha,
+          beta_g2 = Beta,
+          gamma_g2 = Gamma,
+          delta_g2 = Delta,
+          ic = IC
+        } = VK,
+        #groth16_proof{a = A, b = B, c = C} = Proof,
+        AlphaBin = ?BLS:g1_compress(Alpha),
+        BetaBin = ?BLS:g2_compress(Beta),
+        GammaBin = ?BLS:g2_compress(Gamma),
+        DeltaBin = ?BLS:g2_compress(Delta),
+        ICBins = [?BLS:g1_compress(Pt) || Pt <- IC],
+        InputBins = [<<X:256/little>> || X <- TamperedInputs],
+        ABin = ?BLS:g1_compress(A),
+        BBin = ?BLS:g2_compress(B),
+        CBin = ?BLS:g1_compress(C),
+        NifResult = ?NIF:groth16_verify(
+          AlphaBin,
+          BetaBin,
+          GammaBin,
+          DeltaBin,
+          ICBins,
+          InputBins,
+          ABin,
+          BBin,
+          CBin
+        ),
+        PureResult == false andalso NifResult == false;
+      _ ->
+        true
     end
   ).

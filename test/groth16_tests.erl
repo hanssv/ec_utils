@@ -13,6 +13,7 @@
 
 -define(BLS, ecu_bls12_381).
 -define(R, ?BLS12_381_R).
+-define(NIF, ecu_bls12_381_nif).
 
 %%%===================================================================
 %%% Helper: Generate a mathematically valid Groth16 instance
@@ -255,3 +256,105 @@ batch_verification_test() ->
     {Inputs3, Proof3}
   ],
   ?assertNot(ecu_groth16:verify_batch(VK, BadBatch)).
+
+official_test_vector_test() ->
+  Path =
+    case filelib:is_regular("test/data/groth16_bls12_381.json") of
+      true -> "test/data/groth16_bls12_381.json";
+      false -> filename:join([code:lib_dir(ec_utils), "test", "data", "groth16_bls12_381.json"])
+    end,
+  {ok, Bin} = file:read_file(Path),
+  Data = json:decode(Bin),
+  #{
+    <<"vk">> := #{
+      <<"alpha_g1">> := AlphaHex,
+      <<"beta_g2">> := BetaHex,
+      <<"gamma_g2">> := GammaHex,
+      <<"delta_g2">> := DeltaHex,
+      <<"ic">> := ICHexList
+    },
+    <<"public_inputs">> := InputStrs,
+    <<"proof">> := #{
+      <<"a">> := AHex,
+      <<"b">> := BHex,
+      <<"c">> := CHex
+    }
+  } = Data,
+  Alpha = binary:decode_hex(AlphaHex),
+  Beta = binary:decode_hex(BetaHex),
+  Gamma = binary:decode_hex(GammaHex),
+  Delta = binary:decode_hex(DeltaHex),
+  IC = [binary:decode_hex(H) || H <- ICHexList],
+  Inputs = [binary_to_integer(S) || S <- InputStrs],
+  A = binary:decode_hex(AHex),
+  B = binary:decode_hex(BHex),
+  C = binary:decode_hex(CHex),
+  VK = #{
+    alpha_g1 => Alpha,
+    beta_g2 => Beta,
+    gamma_g2 => Gamma,
+    delta_g2 => Delta,
+    ic => IC
+  },
+  Proof = #{a => A, b => B, c => C},
+  %% 1. Pure Erlang verifies official vector
+  ?assert(ecu_groth16:verify(VK, Inputs, Proof)),
+  %% 2. blst NIF cross-check
+  case ?NIF:is_loaded() of
+    true ->
+      InputBins = [<<X:256/little>> || X <- Inputs],
+      ?assert(?NIF:groth16_verify(Alpha, Beta, Gamma, Delta, IC, InputBins, A, B, C));
+    false ->
+      ok
+  end,
+  %% 3. Tampered input rejection
+  TamperedInputs = [123456788, 987654321],
+  ?assertNot(ecu_groth16:verify(VK, TamperedInputs, Proof)),
+  %% 4. Tampered proof rejection
+  G1 = ?BLS:g1_generator(),
+  {ok, DecA} = ?BLS:g1_decompress(A),
+  ProofBadA = Proof#{a => ?BLS:g1_compress(?BLS:g1_add(DecA, G1))},
+  ?assertNot(ecu_groth16:verify(VK, Inputs, ProofBadA)).
+
+differential_blst_oracle_test() ->
+  case ?NIF:is_loaded() of
+    true ->
+      Inputs = [42, 84, 126],
+      {VK, Proof} = generate_groth16_instance(Inputs, 777),
+      %% Both pure Erlang and blst agree on valid instance
+      ?assert(ecu_groth16:verify(VK, Inputs, Proof)),
+      #groth16_vk{alpha_g1 = Alpha, beta_g2 = Beta, gamma_g2 = Gamma, delta_g2 = Delta, ic = IC} = VK,
+      #groth16_proof{a = A, b = B, c = C} = Proof,
+      AlphaBin = ?BLS:g1_compress(Alpha),
+      BetaBin = ?BLS:g2_compress(Beta),
+      GammaBin = ?BLS:g2_compress(Gamma),
+      DeltaBin = ?BLS:g2_compress(Delta),
+      ICBins = [?BLS:g1_compress(Pt) || Pt <- IC],
+      InputBins = [<<X:256/little>> || X <- Inputs],
+      ABin = ?BLS:g1_compress(A),
+      BBin = ?BLS:g2_compress(B),
+      CBin = ?BLS:g1_compress(C),
+      ?assert(
+        ?NIF:groth16_verify(AlphaBin, BetaBin, GammaBin, DeltaBin, ICBins, InputBins, ABin, BBin, CBin)
+      ),
+      %% Tamper scalar input -> both reject
+      TamperedInputs = [43, 84, 126],
+      TamperedInputBins = [<<X:256/little>> || X <- TamperedInputs],
+      ?assertNot(ecu_groth16:verify(VK, TamperedInputs, Proof)),
+      ?assertNot(
+        ?NIF:groth16_verify(
+          AlphaBin, BetaBin, GammaBin, DeltaBin, ICBins, TamperedInputBins, ABin, BBin, CBin
+        )
+      ),
+      %% Tamper proof point C -> both reject
+      G1 = ?BLS:g1_generator(),
+      BadPtC = ?BLS:g1_add(C, G1),
+      BadC = ?BLS:g1_compress(BadPtC),
+      BadProofC = Proof#groth16_proof{c = BadPtC},
+      ?assertNot(ecu_groth16:verify(VK, Inputs, BadProofC)),
+      ?assertNot(
+        ?NIF:groth16_verify(AlphaBin, BetaBin, GammaBin, DeltaBin, ICBins, InputBins, ABin, BBin, BadC)
+      );
+    false ->
+      ok
+  end.

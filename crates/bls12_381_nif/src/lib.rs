@@ -217,6 +217,106 @@ fn pairing_check(pairs: Vec<(Binary, Binary)>) -> bool {
     ctx.finalverify(None)
 }
 
+/// Groth16 verification check using blst
+#[rustler::nif]
+fn groth16_verify(
+    alpha_bytes: Binary,
+    beta_bytes: Binary,
+    gamma_bytes: Binary,
+    delta_bytes: Binary,
+    ic_bytes: Vec<Binary>,
+    input_scalars: Vec<Binary>,
+    a_bytes: Binary,
+    b_bytes: Binary,
+    c_bytes: Binary,
+) -> bool {
+    if ic_bytes.len() != input_scalars.len() + 1 {
+        return false;
+    }
+    let mut alpha = blst::blst_p1_affine::default();
+    if unsafe { blst::blst_p1_uncompress(&mut alpha, alpha_bytes.as_slice().as_ptr()) }
+        != BLST_ERROR::BLST_SUCCESS
+    {
+        return false;
+    }
+    let mut beta = blst::blst_p2_affine::default();
+    if unsafe { blst::blst_p2_uncompress(&mut beta, beta_bytes.as_slice().as_ptr()) }
+        != BLST_ERROR::BLST_SUCCESS
+    {
+        return false;
+    }
+    let mut gamma = blst::blst_p2_affine::default();
+    if unsafe { blst::blst_p2_uncompress(&mut gamma, gamma_bytes.as_slice().as_ptr()) }
+        != BLST_ERROR::BLST_SUCCESS
+    {
+        return false;
+    }
+    let mut delta = blst::blst_p2_affine::default();
+    if unsafe { blst::blst_p2_uncompress(&mut delta, delta_bytes.as_slice().as_ptr()) }
+        != BLST_ERROR::BLST_SUCCESS
+    {
+        return false;
+    }
+    let mut a_aff = blst::blst_p1_affine::default();
+    if unsafe { blst::blst_p1_uncompress(&mut a_aff, a_bytes.as_slice().as_ptr()) }
+        != BLST_ERROR::BLST_SUCCESS
+    {
+        return false;
+    }
+    let mut b = blst::blst_p2_affine::default();
+    if unsafe { blst::blst_p2_uncompress(&mut b, b_bytes.as_slice().as_ptr()) }
+        != BLST_ERROR::BLST_SUCCESS
+    {
+        return false;
+    }
+    let mut c = blst::blst_p1_affine::default();
+    if unsafe { blst::blst_p1_uncompress(&mut c, c_bytes.as_slice().as_ptr()) }
+        != BLST_ERROR::BLST_SUCCESS
+    {
+        return false;
+    }
+
+    let mut neg_a = blst::blst_p1::default();
+    unsafe { blst::blst_p1_from_affine(&mut neg_a, &a_aff) };
+    unsafe { blst::blst_p1_cneg(&mut neg_a, true) };
+    let mut neg_a_aff = blst::blst_p1_affine::default();
+    unsafe { blst::blst_p1_to_affine(&mut neg_a_aff, &neg_a) };
+
+    let mut ic0_aff = blst::blst_p1_affine::default();
+    if unsafe { blst::blst_p1_uncompress(&mut ic0_aff, ic_bytes[0].as_slice().as_ptr()) }
+        != BLST_ERROR::BLST_SUCCESS
+    {
+        return false;
+    }
+    let mut k_pub = blst::blst_p1::default();
+    unsafe { blst::blst_p1_from_affine(&mut k_pub, &ic0_aff) };
+
+    for (scalar_bin, ic_bin) in input_scalars.iter().zip(ic_bytes.iter().skip(1)) {
+        let mut ic_pt = blst::blst_p1_affine::default();
+        if unsafe { blst::blst_p1_uncompress(&mut ic_pt, ic_bin.as_slice().as_ptr()) }
+            != BLST_ERROR::BLST_SUCCESS
+        {
+            return false;
+        }
+        let mut ic_proj = blst::blst_p1::default();
+        unsafe { blst::blst_p1_from_affine(&mut ic_proj, &ic_pt) };
+        let s = scalar_bin.as_slice();
+        let mut term = blst::blst_p1::default();
+        unsafe { blst::blst_p1_mult(&mut term, &ic_proj, s.as_ptr(), s.len() * 8) };
+        unsafe { blst::blst_p1_add_or_double(&mut k_pub, &k_pub, &term) };
+    }
+    let mut k_pub_aff = blst::blst_p1_affine::default();
+    unsafe { blst::blst_p1_to_affine(&mut k_pub_aff, &k_pub) };
+
+    let mut ctx = blst::Pairing::new(false, &[]);
+    ctx.raw_aggregate(&b, &neg_a_aff);
+    ctx.raw_aggregate(&beta, &alpha);
+    ctx.raw_aggregate(&gamma, &k_pub_aff);
+    ctx.raw_aggregate(&delta, &c);
+    ctx.commit();
+    ctx.finalverify(None)
+}
+
 /// Minimal-pubkey BLS keygen: PK in G1 (48 bytes), SK (32 bytes)
 #[rustler::nif]
 fn min_pk_keygen<'a>(
