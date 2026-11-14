@@ -91,7 +91,15 @@
 -spec run_all([bench_def()], map()) -> [bench_result()].
 run_all(BenchDefs, Opts) ->
   prewarm_benchmarks(BenchDefs),
-  lists:map(fun(Def) -> run_bench_in_process(Def, Opts) end, BenchDefs).
+  lists:filtermap(
+    fun(Def) ->
+      case run_bench_in_process(Def, Opts) of
+        skip -> false;
+        Result -> {true, Result}
+      end
+    end,
+    BenchDefs
+  ).
 
 run_bench_in_process(Def, Opts) ->
   Parent = self(),
@@ -105,6 +113,8 @@ run_bench_in_process(Def, Opts) ->
     {Ref, Result} ->
       demonitor(MonRef, [flush]),
       Result;
+    {'DOWN', MonRef, process, _, {undef, _}} ->
+      skip;
     {'DOWN', MonRef, process, _, Reason} ->
       exit(Reason)
   end.

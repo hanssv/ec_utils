@@ -188,15 +188,21 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 13. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381)
+## 13. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381) `[Phase 1 Completed]`
 
-- **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Ethereum / Filecoin / Zcash zk-SNARK primitives.
+- **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Groth16 zk-SNARK verification ([Groth 2016](https://eprint.iacr.org/2016/260)).
 - **Goal**: Support pairing-based cryptography, short aggregate signatures, and zero-knowledge proof verification.
-- **Features**:
-  - Arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_q$) and $\mathbb{G}_2$ (over extension field $\mathbb{F}_{q^2}$) on the BLS12-381 curve.
-  - Optimal Ate pairing $e: \mathbb{G}_1 \times \mathbb{G}_2 \rightarrow \mathbb{G}_T$ over field extension $\mathbb{F}_{q^{12}}$.
-  - BLS threshold and aggregate signatures (non-interactive aggregation of $N$ signatures into a single group element).
-  - Verifier building blocks for Groth16 / PLONK zk-SNARK proof verification.
+- **Features `[Phase 1 Completed]`**:
+  - Arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_q$) and $\mathbb{G}_2$ (over extension field $\mathbb{F}_{q^2}$) on the BLS12-381 curve (`ecu_bls12_381`, `ecu_bls12_381_fp`).
+  - Optimal Ate pairing $e: \mathbb{G}_1 \times \mathbb{G}_2 \rightarrow \mathbb{G}_T$ over field extension $\mathbb{F}_{q^{12}}$ with multi-Miller loop accumulation (`ecu_bls12_381_pairing`).
+  - BLS signature generation, aggregation, and verification (`ecu_bls12_381_sig`).
+  - Groth16 zk-SNARK proof verification (`ecu_groth16`):
+    - Multi-pairing verification equation: $e(A, B) = e(\alpha, \beta) \cdot e(K_{pub}, \gamma) \cdot e(C, \delta)$ evaluated via a single 4-pair Miller loop and final exponentiation.
+    - Public input accumulation $K_{pub} = IC_0 + \sum x_i IC_i$ in Jacobian projective coordinates.
+    - Randomized multi-proof batch verification (`verify_batch/2,3`) reducing $4N$ pairings to $N + 3$ pairings via 128-bit random weights (~2.5× throughput).
+    - Support for maps, records, tuples, 48B/96B compressed points, and 96B/192B uncompressed points.
+- **Next Phases**:
+  - Phase 2: Poseidon hash function over finite fields (`ecu_poseidon`) for ZK-friendly circuits (Tornado Cash, Semaphore).
 
 ---
 

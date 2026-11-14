@@ -17,6 +17,7 @@
   g2_add/2,
   pairing/2,
   pairing_check/1,
+  groth16_verify/9,
   min_pk_keygen/1,
   min_pk_sign/3,
   min_pk_verify/4,
@@ -93,6 +94,19 @@ pairing(_P1, _P2) ->
   erlang:nif_error(not_loaded).
 
 pairing_check(_Pairs) ->
+  erlang:nif_error(not_loaded).
+
+groth16_verify(
+  _Alpha,
+  _Beta,
+  _Gamma,
+  _Delta,
+  _IC,
+  _InputScalars,
+  _A,
+  _B,
+  _C
+) ->
   erlang:nif_error(not_loaded).
 
 min_pk_keygen(_IKM) ->
