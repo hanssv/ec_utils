@@ -89,9 +89,20 @@ bls12_381_reference:
 		cp crates/bls12_381_nif/target/release/ecu_bls12_381_nif.dll priv/ecu_bls12_381_nif.dll; \
 	fi
 
-reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference
+poseidon_reference:
+	mkdir -p priv
+	cd crates/poseidon_nif && cargo build --release
+	@if [ -f crates/poseidon_nif/target/release/libecu_poseidon_nif.dylib ]; then \
+		cp crates/poseidon_nif/target/release/libecu_poseidon_nif.dylib priv/ecu_poseidon_nif.so; \
+	elif [ -f crates/poseidon_nif/target/release/libecu_poseidon_nif.so ]; then \
+		cp crates/poseidon_nif/target/release/libecu_poseidon_nif.so priv/ecu_poseidon_nif.so; \
+	elif [ -f crates/poseidon_nif/target/release/ecu_poseidon_nif.dll ]; then \
+		cp crates/poseidon_nif/target/release/ecu_poseidon_nif.dll priv/ecu_poseidon_nif.dll; \
+	fi
+
+reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference
 
 clean:
 	rebar3 clean
-	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* priv/ecu_fn_dsa_nif.* priv/ecu_bls12_381_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target crates/fn_dsa_nif/target crates/bls12_381_nif/target
+	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* priv/ecu_fn_dsa_nif.* priv/ecu_bls12_381_nif.* priv/ecu_poseidon_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target crates/fn_dsa_nif/target crates/bls12_381_nif/target crates/poseidon_nif/target
 

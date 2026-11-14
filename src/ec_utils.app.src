@@ -36,6 +36,8 @@
     ecu_bls12_381_h2c,
     ecu_bls12_381_sig,
     ecu_groth16,
+    ecu_poseidon,
+    ecu_poseidon_constants,
     ecu_compat,
     ecu_entropy,
     ecu_sha2,

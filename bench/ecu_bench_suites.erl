@@ -29,7 +29,8 @@ list_suites() ->
     hash,
     hd,
     bls12_381,
-    groth16
+    groth16,
+    poseidon
   ].
 
 -spec get_benchmarks(atom() | string() | binary()) -> [ecu_bench_runner:bench_def()].
@@ -79,7 +80,8 @@ all_benchmarks() ->
     hash_benchmarks(),
     hd_benchmarks(),
     bls12_381_benchmarks(),
-    groth16_benchmarks()
+    groth16_benchmarks(),
+    poseidon_benchmarks()
   ]).
 
 %% ===================================================================
@@ -963,3 +965,85 @@ groth16_benchmarks() ->
       run => {fun({V, Bth}) -> ecu_groth16:verify_batch(V, Bth) end, {VK, Batch}}
     }
   ].
+
+%% ===================================================================
+%% Poseidon Hash (BLS12-381 and BN254)
+%% ===================================================================
+
+poseidon_benchmarks() ->
+  A = 12345678901234567890,
+  B = 98765432109876543210,
+  BinA = <<A:256>>,
+  BinB = <<B:256>>,
+  In4 = [A, B, A + B, A * 2],
+  InBin4 = [<<X:256>> || X <- In4],
+  NifAvail =
+    case code:ensure_loaded(ecu_poseidon_nif) of
+      {module, ecu_poseidon_nif} ->
+        erlang:function_exported(ecu_poseidon_nif, is_available, 0) andalso
+          ecu_poseidon_nif:is_available();
+      _ ->
+        false
+    end,
+
+  Base = [
+    #{
+      id => poseidon_hash3_bls12_381,
+      name => <<"Poseidon Hash3 (BLS12-381, Pure Erlang)">>,
+      group => poseidon,
+      run => {fun({X, Y}) -> ecu_poseidon:hash3(bls12_381, X, Y) end, {A, B}}
+    },
+    #{
+      id => poseidon_hash3_bn254,
+      name => <<"Poseidon Hash3 (BN254, Pure Erlang)">>,
+      group => poseidon,
+      run => {fun({X, Y}) -> ecu_poseidon:hash3(bn254, X, Y) end, {A, B}}
+    },
+    #{
+      id => poseidon_hash_4_bls12_381,
+      name => <<"Poseidon Hash 4-input (BLS12-381, Pure Erlang)">>,
+      group => poseidon,
+      run => {fun(In) -> ecu_poseidon:hash(bls12_381, In) end, In4}
+    },
+    #{
+      id => poseidon_hash_4_bn254,
+      name => <<"Poseidon Hash 4-input (BN254, Pure Erlang)">>,
+      group => poseidon,
+      run => {fun(In) -> ecu_poseidon:hash(bn254, In) end, In4}
+    }
+  ],
+
+  NifBenches =
+    case NifAvail of
+      true ->
+        [
+          #{
+            id => poseidon_hash3_bls12_381_rust,
+            name => <<"Poseidon Hash3 (BLS12-381, Rust NIF)">>,
+            group => poseidon,
+            run => {fun({X, Y}) -> ecu_poseidon_nif:hash3(bls12_381, X, Y) end, {BinA, BinB}}
+          },
+          #{
+            id => poseidon_hash3_bn254_rust,
+            name => <<"Poseidon Hash3 (BN254, Rust NIF light-poseidon)">>,
+            group => poseidon,
+            run => {fun({X, Y}) -> ecu_poseidon_nif:hash3(bn254, X, Y) end, {BinA, BinB}}
+          },
+          #{
+            id => poseidon_hash_4_bls12_381_rust,
+            name => <<"Poseidon Hash 4-input (BLS12-381, Rust NIF)">>,
+            group => poseidon,
+            run => {fun(In) -> ecu_poseidon_nif:hash(bls12_381, In) end, InBin4}
+          },
+          #{
+            id => poseidon_hash_4_bn254_rust,
+            name => <<"Poseidon Hash 4-input (BN254, Rust NIF light-poseidon)">>,
+            group => poseidon,
+            run => {fun(In) -> ecu_poseidon_nif:hash(bn254, In) end, InBin4}
+          }
+        ];
+      false ->
+        []
+    end,
+
+  Base ++ NifBenches.
