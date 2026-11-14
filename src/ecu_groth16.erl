@@ -4,14 +4,17 @@
 %%%
 %%% Implements succinct non-interactive zero-knowledge proof verification
 %%% based on the Groth16 protocol (Groth, 2016) over pairing-friendly
-%%% elliptic curves (BLS12-381).
+%%% elliptic curves:
+%%%   - BLS12-381 (Filecoin, Zcash, Aeternity FATE)
+%%%   - BN254 / alt_bn128 (Ethereum EVM EIP-196/197, Circom, snarkjs)
 %%%
 %%% Features:
 %%%   - Single-proof verification (`verify/3,4')
 %%%   - Multi-scalar accumulation of public inputs in Jacobian coordinates
 %%%   - Multi-Miller loop evaluation with a single final exponentiation
 %%%   - Randomized batch verification (`verify_batch/2,3')
-%%%   - Support for compressed (48/96B), uncompressed (96/192B), and affine points
+%%%   - Support for compressed (48/96B on BLS12-381, 32/64B on BN254),
+%%%     uncompressed (96/192B on BLS12-381, 64/128B on BN254), and affine points
 %%%   - Strict subgroup validation and fail-closed security invariants
 %%%
 %%% Reference:
@@ -25,12 +28,29 @@
 
 -include("ecu_groth16.hrl").
 -include("ecu_bls12_381.hrl").
+-include("ecu_bn254.hrl").
 
 -define(BLS, ecu_bls12_381).
--define(PAIRING, ecu_bls12_381_pairing).
+-define(BLS_PAIRING, ecu_bls12_381_pairing).
+-define(BN, ecu_bn254).
+-define(BN_PAIRING, ecu_bn254_pairing).
 
--type point_g1() :: ?BLS:g1_affine() | ?BLS:g1_compressed() | ?BLS:g1_uncompressed().
--type point_g2() :: ?BLS:g2_affine() | ?BLS:g2_compressed() | ?BLS:g2_uncompressed().
+-type point_g1() ::
+  ?BLS:g1_affine()
+  | ?BLS:g1_compressed()
+  | ?BLS:g1_uncompressed()
+  | ?BN:g1_affine()
+  | ?BN:g1_compressed()
+  | ?BN:g1_uncompressed().
+
+-type point_g2() ::
+  ?BLS:g2_affine()
+  | ?BLS:g2_compressed()
+  | ?BLS:g2_uncompressed()
+  | ?BN:g2_affine()
+  | ?BN:g2_compressed()
+  | ?BN:g2_uncompressed().
+
 -type scalar() :: integer() | binary().
 
 -type proof_tuple() :: {point_g1(), point_g2(), point_g1()}.
@@ -55,7 +75,7 @@
 
 -type verification_key() :: vk_map() | vk_tuple() | #groth16_vk{}.
 
--type curve() :: bls12_381.
+-type curve() :: bls12_381 | bn254.
 
 -export_type([
   proof/0,
@@ -88,29 +108,31 @@ verify(VK, PublicInputs, Proof) ->
 
 %% @doc Verify a Groth16 proof under the specified curve.
 -spec verify(curve(), verification_key(), [scalar()], proof()) -> boolean().
-verify(bls12_381, VK, PublicInputs, Proof) ->
-  case {parse_vk(VK), parse_proof(Proof), parse_scalars(PublicInputs)} of
+verify(Curve, VK, PublicInputs, Proof) when Curve =:= bls12_381; Curve =:= bn254 ->
+  case {parse_vk(VK, Curve), parse_proof(Proof, Curve), parse_scalars(PublicInputs, Curve)} of
     {{ok, DecVK}, {ok, DecProof}, {ok, Scalars}} ->
-      do_verify_bls12_381(DecVK, Scalars, DecProof);
+      do_verify(Curve, DecVK, Scalars, DecProof);
     _ ->
       false
   end.
 
-%% @doc Verify a batch of Groth16 proofs under the same verification key.
+%% @doc Verify a batch of Groth16 proofs under the same verification key (default BLS12-381).
 -spec verify_batch(verification_key(), [{[scalar()], proof()}]) -> boolean().
 verify_batch(VK, Items) ->
   verify_batch(bls12_381, VK, Items).
 
 %% @doc Verify a batch of Groth16 proofs under the specified curve.
 -spec verify_batch(curve(), verification_key(), [{[scalar()], proof()}]) -> boolean().
-verify_batch(bls12_381, _VK, []) ->
+verify_batch(Curve, _VK, []) when Curve =:= bls12_381; Curve =:= bn254 ->
   true;
-verify_batch(bls12_381, VK, [{PublicInputs, Proof}]) ->
-  verify(bls12_381, VK, PublicInputs, Proof);
-verify_batch(bls12_381, VK, Items) when is_list(Items) ->
-  case parse_vk(VK) of
+verify_batch(Curve, VK, [{PublicInputs, Proof}]) when Curve =:= bls12_381; Curve =:= bn254 ->
+  verify(Curve, VK, PublicInputs, Proof);
+verify_batch(Curve, VK, Items) when
+  (Curve =:= bls12_381 orelse Curve =:= bn254), is_list(Items)
+->
+  case parse_vk(VK, Curve) of
     {ok, DecVK} ->
-      do_verify_batch_bls12_381(DecVK, Items);
+      do_verify_batch(Curve, DecVK, Items);
     _ ->
       false
   end.
@@ -119,22 +141,28 @@ verify_batch(bls12_381, VK, Items) when is_list(Items) ->
 %%% Internal Verification Logic
 %%%===================================================================
 
--spec do_verify_bls12_381(#groth16_vk{}, [non_neg_integer()], #groth16_proof{}) -> boolean().
-do_verify_bls12_381(#groth16_vk{ic = IC} = VK, Scalars, Proof) ->
+-spec do_verify(curve(), #groth16_vk{}, [non_neg_integer()], #groth16_proof{}) -> boolean().
+do_verify(Curve, #groth16_vk{ic = IC} = VK, Scalars, Proof) ->
   case length(IC) =:= length(Scalars) + 1 of
     false ->
       false;
     true ->
-      case compute_k_pub(IC, Scalars) of
+      case compute_k_pub(IC, Scalars, Curve) of
         {ok, KPub} ->
-          check_groth16_pairings(VK, Proof, KPub);
+          check_groth16_pairings(Curve, VK, Proof, KPub);
         error ->
           false
       end
   end.
 
--spec check_groth16_pairings(#groth16_vk{}, #groth16_proof{}, ?BLS:g1_affine()) -> boolean().
+-spec check_groth16_pairings(
+  curve(),
+  #groth16_vk{},
+  #groth16_proof{},
+  groth16_g1()
+) -> boolean().
 check_groth16_pairings(
+  bls12_381,
   #groth16_vk{alpha_g1 = Alpha, beta_g2 = Beta, gamma_g2 = Gamma, delta_g2 = Delta},
   #groth16_proof{a = A, b = B, c = C},
   KPub
@@ -146,25 +174,42 @@ check_groth16_pairings(
     {KPub, Gamma},
     {C, Delta}
   ],
-  ?PAIRING:pairing_check(Pairs).
+  ?BLS_PAIRING:pairing_check(Pairs);
+check_groth16_pairings(
+  bn254,
+  #groth16_vk{alpha_g1 = Alpha, beta_g2 = Beta, gamma_g2 = Gamma, delta_g2 = Delta},
+  #groth16_proof{a = A, b = B, c = C},
+  KPub
+) ->
+  NegA = ?BN:g1_neg(A),
+  Pairs = [
+    {NegA, B},
+    {Alpha, Beta},
+    {KPub, Gamma},
+    {C, Delta}
+  ],
+  ?BN_PAIRING:pairing_check(Pairs).
 
 %% @doc Compute public input linear combination K_pub = IC_0 + sum(x_i * IC_i).
--spec compute_k_pub([?BLS:g1_affine()], [non_neg_integer()]) ->
-  {ok, ?BLS:g1_affine()} | error.
-compute_k_pub([IC0 | RestIC], Scalars) ->
+-spec compute_k_pub([groth16_g1()], [non_neg_integer()], curve()) ->
+  {ok, groth16_g1()} | error.
+compute_k_pub([IC0 | RestIC], Scalars, bls12_381) ->
   J0 = ?BLS:g1_to_jacobian(IC0),
-  accumulate_k_pub(Scalars, RestIC, J0);
-compute_k_pub([], _) ->
+  accumulate_k_pub_bls(Scalars, RestIC, J0);
+compute_k_pub([IC0 | RestIC], Scalars, bn254) ->
+  J0 = ?BN:g1_to_jacobian(IC0),
+  accumulate_k_pub_bn(Scalars, RestIC, J0);
+compute_k_pub([], _, _) ->
   error.
 
--spec accumulate_k_pub([non_neg_integer()], [?BLS:g1_affine()], ?BLS:g1_jacobian()) ->
+-spec accumulate_k_pub_bls([non_neg_integer()], [?BLS:g1_affine()], ?BLS:g1_jacobian()) ->
   {ok, ?BLS:g1_affine()}.
-accumulate_k_pub([], [], JAcc) ->
+accumulate_k_pub_bls([], [], JAcc) ->
   {ok, ?BLS:g1_from_jacobian(JAcc)};
-accumulate_k_pub([X | RestX], [ICi | RestIC], JAcc) ->
+accumulate_k_pub_bls([X | RestX], [ICi | RestIC], JAcc) ->
   case X of
     0 ->
-      accumulate_k_pub(RestX, RestIC, JAcc);
+      accumulate_k_pub_bls(RestX, RestIC, JAcc);
     _ ->
       Term = ?BLS:g1_scalar_mul(ICi, X),
       NewJ =
@@ -172,44 +217,65 @@ accumulate_k_pub([X | RestX], [ICi | RestIC], JAcc) ->
           infinity -> JAcc;
           {_, _} -> ?BLS:g1_j_add_affine(JAcc, Term)
         end,
-      accumulate_k_pub(RestX, RestIC, NewJ)
+      accumulate_k_pub_bls(RestX, RestIC, NewJ)
   end;
-accumulate_k_pub(_, _, _JAcc) ->
+accumulate_k_pub_bls(_, _, _JAcc) ->
+  {ok, infinity}.
+
+-spec accumulate_k_pub_bn([non_neg_integer()], [?BN:g1_affine()], ?BN:g1_jacobian()) ->
+  {ok, ?BN:g1_affine()}.
+accumulate_k_pub_bn([], [], JAcc) ->
+  {ok, ?BN:g1_from_jacobian(JAcc)};
+accumulate_k_pub_bn([X | RestX], [ICi | RestIC], JAcc) ->
+  case X of
+    0 ->
+      accumulate_k_pub_bn(RestX, RestIC, JAcc);
+    _ ->
+      Term = ?BN:g1_scalar_mul(ICi, X),
+      NewJ =
+        case Term of
+          infinity -> JAcc;
+          {_, _} -> ?BN:g1_j_add_affine(JAcc, Term)
+        end,
+      accumulate_k_pub_bn(RestX, RestIC, NewJ)
+  end;
+accumulate_k_pub_bn(_, _, _JAcc) ->
   {ok, infinity}.
 
 %%%===================================================================
 %%% Batch Verification (Randomized Multi-Pairing)
 %%%===================================================================
 
--spec do_verify_batch_bls12_381(#groth16_vk{}, [{[scalar()], proof()}]) -> boolean().
-do_verify_batch_bls12_381(VK, Items) ->
-  case parse_batch_items(Items, VK#groth16_vk.ic, 1, []) of
+-spec do_verify_batch(curve(), #groth16_vk{}, [{[scalar()], proof()}]) -> boolean().
+do_verify_batch(Curve, VK, Items) ->
+  case parse_batch_items(Items, VK#groth16_vk.ic, 1, Curve, []) of
     {ok, Parsed} ->
-      execute_batch_bls12_381(VK, Parsed);
+      execute_batch(Curve, VK, Parsed);
     error ->
       false
   end.
 
 -spec parse_batch_items(
   [{[scalar()], proof()}],
-  [?BLS:g1_affine()],
+  [groth16_g1()],
   pos_integer(),
-  [{non_neg_integer(), #groth16_proof{}, ?BLS:g1_affine()}]
+  curve(),
+  [{non_neg_integer(), #groth16_proof{}, groth16_g1()}]
 ) ->
-  {ok, [{non_neg_integer(), #groth16_proof{}, ?BLS:g1_affine()}]} | error.
-parse_batch_items([], _IC, _Idx, Acc) ->
+  {ok, [{non_neg_integer(), #groth16_proof{}, groth16_g1()}]} | error.
+parse_batch_items([], _IC, _Idx, _Curve, Acc) ->
   {ok, lists:reverse(Acc)};
-parse_batch_items([{PublicInputs, Proof} | Rest], IC, Idx, Acc) ->
-  case {parse_scalars(PublicInputs), parse_proof(Proof)} of
+parse_batch_items([{PublicInputs, Proof} | Rest], IC, Idx, Curve, Acc) ->
+  case {parse_scalars(PublicInputs, Curve), parse_proof(Proof, Curve)} of
     {{ok, Scalars}, {ok, DecProof}} ->
       case length(IC) =:= length(Scalars) + 1 of
         false ->
           error;
         true ->
-          case compute_k_pub(IC, Scalars) of
+          case compute_k_pub(IC, Scalars, Curve) of
             {ok, KPub} ->
-              R = sample_batch_weight(Idx),
-              parse_batch_items(Rest, IC, Idx + 1, [{R, DecProof, KPub} | Acc]);
+              R = sample_batch_weight(Idx, Curve),
+              parse_batch_items(Rest, IC, Idx + 1, Curve, [{R, DecProof, KPub} | Acc]);
             error ->
               error
           end
@@ -218,21 +284,29 @@ parse_batch_items([{PublicInputs, Proof} | Rest], IC, Idx, Acc) ->
       error
   end.
 
--spec sample_batch_weight(pos_integer()) -> pos_integer().
-sample_batch_weight(1) ->
+-spec sample_batch_weight(pos_integer(), curve()) -> pos_integer().
+sample_batch_weight(1, _Curve) ->
   1;
-sample_batch_weight(_Idx) ->
+sample_batch_weight(_Idx, bls12_381) ->
   <<W:128>> = ecu_compat:strong_rand_bytes(16),
   case W rem ?BLS12_381_R of
     0 -> 1;
     NonZero -> NonZero
+  end;
+sample_batch_weight(_Idx, bn254) ->
+  <<W:128>> = ecu_compat:strong_rand_bytes(16),
+  case W rem ?BN254_R of
+    0 -> 1;
+    NonZero -> NonZero
   end.
 
--spec execute_batch_bls12_381(
+-spec execute_batch(
+  curve(),
   #groth16_vk{},
-  [{non_neg_integer(), #groth16_proof{}, ?BLS:g1_affine()}]
+  [{non_neg_integer(), #groth16_proof{}, groth16_g1()}]
 ) -> boolean().
-execute_batch_bls12_381(
+execute_batch(
+  bls12_381,
   #groth16_vk{alpha_g1 = Alpha, beta_g2 = Beta, gamma_g2 = Gamma, delta_g2 = Delta},
   Parsed
 ) ->
@@ -261,38 +335,69 @@ execute_batch_bls12_381(
         {K_Total, Gamma},
         {C_Total, Delta}
       ],
-  ?PAIRING:pairing_check(AllPairs).
+  ?BLS_PAIRING:pairing_check(AllPairs);
+execute_batch(
+  bn254,
+  #groth16_vk{alpha_g1 = Alpha, beta_g2 = Beta, gamma_g2 = Gamma, delta_g2 = Delta},
+  Parsed
+) ->
+  InitG1 = ?BN:g1_zero(),
+  {AB_Pairs, SumR, K_Total, C_Total} =
+    lists:foldl(
+      fun({R, #groth16_proof{a = A, b = B, c = C}, KPub}, {PairsAcc, R_Acc, K_Acc, C_Acc}) ->
+        ScaledNegA = ?BN:g1_scalar_mul(?BN:g1_neg(A), R),
+        Pair = {ScaledNegA, B},
+        NewPairs = [Pair | PairsAcc],
+        NewR_Acc = (R_Acc + R) rem ?BN254_R,
+        ScaledK = ?BN:g1_scalar_mul(KPub, R),
+        ScaledC = ?BN:g1_scalar_mul(C, R),
+        NewK_Acc = ?BN:g1_add(K_Acc, ScaledK),
+        NewC_Acc = ?BN:g1_add(C_Acc, ScaledC),
+        {NewPairs, NewR_Acc, NewK_Acc, NewC_Acc}
+      end,
+      {[], 0, InitG1, InitG1},
+      Parsed
+    ),
+  AlphaScaled = ?BN:g1_scalar_mul(Alpha, SumR),
+  AllPairs =
+    lists:reverse(AB_Pairs) ++
+      [
+        {AlphaScaled, Beta},
+        {K_Total, Gamma},
+        {C_Total, Delta}
+      ],
+  ?BN_PAIRING:pairing_check(AllPairs).
 
 %%%===================================================================
 %%% Decoders & Validators
 %%%===================================================================
 
--spec parse_proof(term()) -> {ok, #groth16_proof{}} | error.
-parse_proof({A, B, C}) ->
-  case {normalize_g1(A), normalize_g2(B), normalize_g1(C)} of
+-spec parse_proof(term(), curve()) -> {ok, #groth16_proof{}} | error.
+parse_proof({A, B, C}, Curve) ->
+  case {normalize_g1(A, Curve), normalize_g2(B, Curve), normalize_g1(C, Curve)} of
     {{ok, AffA}, {ok, AffB}, {ok, AffC}} ->
       {ok, #groth16_proof{a = AffA, b = AffB, c = AffC}};
     _ ->
       error
   end;
-parse_proof(#groth16_proof{a = A, b = B, c = C}) ->
-  parse_proof({A, B, C});
-parse_proof(#{a := A, b := B, c := C}) ->
-  parse_proof({A, B, C});
-parse_proof(#{<<"a">> := A, <<"b">> := B, <<"c">> := C}) ->
-  parse_proof({A, B, C});
-parse_proof(_) ->
+parse_proof(#groth16_proof{a = A, b = B, c = C}, Curve) ->
+  parse_proof({A, B, C}, Curve);
+parse_proof(#{a := A, b := B, c := C}, Curve) ->
+  parse_proof({A, B, C}, Curve);
+parse_proof(#{<<"a">> := A, <<"b">> := B, <<"c">> := C}, Curve) ->
+  parse_proof({A, B, C}, Curve);
+parse_proof(_, _) ->
   error.
 
--spec parse_vk(term()) -> {ok, #groth16_vk{}} | error.
-parse_vk({A, B, G, D, IC}) when is_list(IC) ->
+-spec parse_vk(term(), curve()) -> {ok, #groth16_vk{}} | error.
+parse_vk({A, B, G, D, IC}, Curve) when is_list(IC) ->
   case
     {
-      normalize_g1(A),
-      normalize_g2(B),
-      normalize_g2(G),
-      normalize_g2(D),
-      normalize_g1_list(IC)
+      normalize_g1(A, Curve),
+      normalize_g2(B, Curve),
+      normalize_g2(G, Curve),
+      normalize_g2(D, Curve),
+      normalize_g1_list(IC, Curve)
     }
   of
     {{ok, AffA}, {ok, AffB}, {ok, AffG}, {ok, AffD}, {ok, AffIC}} ->
@@ -306,77 +411,99 @@ parse_vk({A, B, G, D, IC}) when is_list(IC) ->
     _ ->
       error
   end;
-parse_vk(#groth16_vk{alpha_g1 = A, beta_g2 = B, gamma_g2 = G, delta_g2 = D, ic = IC}) when
+parse_vk(#groth16_vk{alpha_g1 = A, beta_g2 = B, gamma_g2 = G, delta_g2 = D, ic = IC}, Curve) when
   is_list(IC)
 ->
-  parse_vk({A, B, G, D, IC});
-parse_vk(#{alpha_g1 := A, beta_g2 := B, gamma_g2 := G, delta_g2 := D, ic := IC}) when
+  parse_vk({A, B, G, D, IC}, Curve);
+parse_vk(#{alpha_g1 := A, beta_g2 := B, gamma_g2 := G, delta_g2 := D, ic := IC}, Curve) when
   is_list(IC)
 ->
-  parse_vk({A, B, G, D, IC});
-parse_vk(#{alpha := A, beta := B, gamma := G, delta := D, ic := IC}) when
+  parse_vk({A, B, G, D, IC}, Curve);
+parse_vk(#{alpha := A, beta := B, gamma := G, delta := D, ic := IC}, Curve) when
   is_list(IC)
 ->
-  parse_vk({A, B, G, D, IC});
-parse_vk(#{
-  <<"alpha_g1">> := A,
-  <<"beta_g2">> := B,
-  <<"gamma_g2">> := G,
-  <<"delta_g2">> := D,
-  <<"ic">> := IC
-}) when is_list(IC) ->
-  parse_vk({A, B, G, D, IC});
-parse_vk(_) ->
+  parse_vk({A, B, G, D, IC}, Curve);
+parse_vk(
+  #{
+    <<"alpha_g1">> := A,
+    <<"beta_g2">> := B,
+    <<"gamma_g2">> := G,
+    <<"delta_g2">> := D,
+    <<"ic">> := IC
+  },
+  Curve
+) when is_list(IC) ->
+  parse_vk({A, B, G, D, IC}, Curve);
+parse_vk(_, _) ->
   error.
 
--spec parse_scalars(term()) -> {ok, [non_neg_integer()]} | error.
-parse_scalars(List) when is_list(List) ->
-  parse_scalars(List, []);
-parse_scalars(_) ->
-  error.
-
--spec parse_scalars([term()], [non_neg_integer()]) -> {ok, [non_neg_integer()]} | error.
-parse_scalars([], Acc) ->
-  {ok, lists:reverse(Acc)};
-parse_scalars([X | Rest], Acc) when is_integer(X), X >= 0, X < ?BLS12_381_R ->
-  parse_scalars(Rest, [X | Acc]);
-parse_scalars([Bin | Rest], Acc) when is_binary(Bin), byte_size(Bin) =< 32 ->
-  Val = binary:decode_unsigned(Bin),
-  case Val < ?BLS12_381_R of
-    true ->
-      parse_scalars(Rest, [Val | Acc]);
-    false ->
-      error
-  end;
+-spec parse_scalars(term(), curve()) -> {ok, [non_neg_integer()]} | error.
+parse_scalars(List, bls12_381) when is_list(List) ->
+  parse_scalars_loop(List, ?BLS12_381_R, []);
+parse_scalars(List, bn254) when is_list(List) ->
+  parse_scalars_loop(List, ?BN254_R, []);
 parse_scalars(_, _) ->
   error.
 
--spec normalize_g1(term()) -> {ok, ?BLS:g1_affine()} | error.
-normalize_g1(infinity) ->
+-spec parse_scalars_loop([term()], pos_integer(), [non_neg_integer()]) ->
+  {ok, [non_neg_integer()]} | error.
+parse_scalars_loop([], _Order, Acc) ->
+  {ok, lists:reverse(Acc)};
+parse_scalars_loop([X | Rest], Order, Acc) when is_integer(X), X >= 0, X < Order ->
+  parse_scalars_loop(Rest, Order, [X | Acc]);
+parse_scalars_loop([Bin | Rest], Order, Acc) when is_binary(Bin), byte_size(Bin) =< 32 ->
+  Val = binary:decode_unsigned(Bin),
+  case Val < Order of
+    true ->
+      parse_scalars_loop(Rest, Order, [Val | Acc]);
+    false ->
+      error
+  end;
+parse_scalars_loop(_, _, _) ->
+  error.
+
+-spec normalize_g1(term(), curve()) -> {ok, groth16_g1()} | error.
+normalize_g1(infinity, _Curve) ->
   error;
-normalize_g1({X, Y}) when is_integer(X), is_integer(Y) ->
+normalize_g1({X, Y}, bls12_381) when is_integer(X), is_integer(Y) ->
   Pt = {X, Y},
   case ?BLS:g1_on_curve(Pt) andalso ?BLS:g1_is_in_subgroup(Pt) of
     true -> {ok, Pt};
     false -> error
   end;
-normalize_g1(Bin) when is_binary(Bin), byte_size(Bin) =:= 48 ->
+normalize_g1({X, Y}, bn254) when is_integer(X), is_integer(Y) ->
+  Pt = {X, Y},
+  case ?BN:g1_on_curve(Pt) andalso ?BN:g1_is_in_subgroup(Pt) of
+    true -> {ok, Pt};
+    false -> error
+  end;
+normalize_g1(Bin, bls12_381) when is_binary(Bin), byte_size(Bin) =:= 48 ->
   case ?BLS:g1_decompress(Bin) of
     {ok, Pt} when Pt =/= infinity -> {ok, Pt};
     _ -> error
   end;
-normalize_g1(Bin) when is_binary(Bin), byte_size(Bin) =:= 96 ->
+normalize_g1(Bin, bls12_381) when is_binary(Bin), byte_size(Bin) =:= 96 ->
   case ?BLS:g1_deserialize_uncompressed(Bin) of
     {ok, Pt} when Pt =/= infinity -> {ok, Pt};
     _ -> error
   end;
-normalize_g1(_) ->
+normalize_g1(Bin, bn254) when is_binary(Bin), byte_size(Bin) =:= 32 ->
+  case ?BN:g1_decompress(Bin) of
+    {ok, Pt} when Pt =/= infinity -> {ok, Pt};
+    _ -> error
+  end;
+normalize_g1(Bin, bn254) when is_binary(Bin), byte_size(Bin) =:= 64 ->
+  case ?BN:g1_from_uncompressed(Bin) of
+    {ok, Pt} when Pt =/= infinity -> {ok, Pt};
+    _ -> error
+  end;
+normalize_g1(_, _) ->
   error.
 
--spec normalize_g2(term()) -> {ok, ?BLS:g2_affine()} | error.
-normalize_g2(infinity) ->
+-spec normalize_g2(term(), curve()) -> {ok, groth16_g2()} | error.
+normalize_g2(infinity, _Curve) ->
   error;
-normalize_g2({{X0, X1}, {Y0, Y1}}) when
+normalize_g2({{X0, X1}, {Y0, Y1}}, bls12_381) when
   is_integer(X0), is_integer(X1), is_integer(Y0), is_integer(Y1)
 ->
   Pt = {{X0, X1}, {Y0, Y1}},
@@ -384,32 +511,50 @@ normalize_g2({{X0, X1}, {Y0, Y1}}) when
     true -> {ok, Pt};
     false -> error
   end;
-normalize_g2(Bin) when is_binary(Bin), byte_size(Bin) =:= 96 ->
+normalize_g2({{X0, X1}, {Y0, Y1}}, bn254) when
+  is_integer(X0), is_integer(X1), is_integer(Y0), is_integer(Y1)
+->
+  Pt = {{X0, X1}, {Y0, Y1}},
+  case ?BN:g2_on_curve(Pt) andalso ?BN:g2_is_in_subgroup(Pt) of
+    true -> {ok, Pt};
+    false -> error
+  end;
+normalize_g2(Bin, bls12_381) when is_binary(Bin), byte_size(Bin) =:= 96 ->
   case ?BLS:g2_decompress(Bin) of
     {ok, Pt} when Pt =/= infinity -> {ok, Pt};
     _ -> error
   end;
-normalize_g2(Bin) when is_binary(Bin), byte_size(Bin) =:= 192 ->
+normalize_g2(Bin, bls12_381) when is_binary(Bin), byte_size(Bin) =:= 192 ->
   case ?BLS:g2_deserialize_uncompressed(Bin) of
     {ok, Pt} when Pt =/= infinity -> {ok, Pt};
     _ -> error
   end;
-normalize_g2(_) ->
+normalize_g2(Bin, bn254) when is_binary(Bin), byte_size(Bin) =:= 64 ->
+  case ?BN:g2_decompress(Bin) of
+    {ok, Pt} when Pt =/= infinity -> {ok, Pt};
+    _ -> error
+  end;
+normalize_g2(Bin, bn254) when is_binary(Bin), byte_size(Bin) =:= 128 ->
+  case ?BN:g2_from_uncompressed(Bin) of
+    {ok, Pt} when Pt =/= infinity -> {ok, Pt};
+    _ -> error
+  end;
+normalize_g2(_, _) ->
   error.
 
--spec normalize_g1_list([term()]) -> {ok, [?BLS:g1_affine()]} | error.
-normalize_g1_list(List) when is_list(List), List =/= [] ->
-  normalize_g1_list(List, []);
-normalize_g1_list(_) ->
+-spec normalize_g1_list([term()], curve()) -> {ok, [groth16_g1()]} | error.
+normalize_g1_list(List, Curve) when is_list(List), List =/= [] ->
+  normalize_g1_list(List, Curve, []);
+normalize_g1_list(_, _) ->
   error.
 
--spec normalize_g1_list([term()], [?BLS:g1_affine()]) -> {ok, [?BLS:g1_affine()]} | error.
-normalize_g1_list([], Acc) ->
+-spec normalize_g1_list([term()], curve(), [groth16_g1()]) -> {ok, [groth16_g1()]} | error.
+normalize_g1_list([], _Curve, Acc) ->
   {ok, lists:reverse(Acc)};
-normalize_g1_list([Item | Rest], Acc) ->
-  case normalize_g1(Item) of
+normalize_g1_list([Item | Rest], Curve, Acc) ->
+  case normalize_g1(Item, Curve) of
     {ok, Pt} ->
-      normalize_g1_list(Rest, [Pt | Acc]);
+      normalize_g1_list(Rest, Curve, [Pt | Acc]);
     error ->
       error
   end.

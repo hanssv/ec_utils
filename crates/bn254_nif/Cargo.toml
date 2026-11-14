@@ -1,0 +1,15 @@
+[package]
+name = "ecu_bn254_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ecu_bn254_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.39.0"
+ark-bn254 = "0.6.0"
+ark-ec = "0.6.0"
+ark-ff = "0.6.0"
+ark-serialize = "0.6.0"
