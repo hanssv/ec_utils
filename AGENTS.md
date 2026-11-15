@@ -40,6 +40,8 @@ Detailed style rules are defined in [`STYLE.md`](STYLE.md). Key points:
   Always wait for explicit user confirmation after proposing a plan, especially when previous actions were corrected or clarified. Do not assume approval.
 - **PR Creation & CI Follow-up**:
   When creating a pull request, always actively monitor and follow up on CI results (`gh pr checks`) until all jobs pass cleanly. Never consider the PR task complete while checks are pending or failing.
+- **Documentation Completeness**:
+  Whenever adding or modifying a feature, curve, algorithm, or protocol, always update `README.md` (and any related documentation) as an integral part of the task before proposing completion or creating a PR. This includes Quick Start usage examples, API reference summaries, curve parameter documentation, and updating top-level capability listings. Never consider a feature complete with undocumented functionality.
 - **Git Commit Messages**:
   - Subject line: strictly **≤ 50 characters** (hard ceiling 72 characters).
   - Format: Imperative mood (e.g. `Add ...`, `Fix ...`, `Document ...`), capitalized, no trailing period.
