@@ -2,11 +2,11 @@ ec_utils
 ========
 
 A pure Erlang cryptographic library implementing elliptic curve arithmetic
-(**Ed25519**, **Ed448**, **secp256k1**), digital signatures (ECDSA, EdDSA,
+(**Ed25519**, **Ed448**, **secp256k1**, **BN254 / alt_bn128**), digital signatures (ECDSA, EdDSA,
 BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
-pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **Groth16**),
+pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**),
 Hash-to-Curve (RFC 9380), hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
 mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
 
@@ -300,23 +300,49 @@ true = ecu_slh_dsa:verify(Msg, DetSig, PublicKey, Context).
 #{public := PK, secret := SK} = ecu_slh_dsa:keypair_from_seeds(slh_dsa_sha2_128f, SKSeed, SKPrf, PKSeed).
 ```
 
-### Groth16 zk-SNARK Proof Verification (BLS12-381)
+### BN254 (alt_bn128) & Optimal Ate Pairing
 
-Pure-Erlang verification of Groth16 zero-knowledge proofs over the BLS12-381 pairing-friendly curve:
+Pure-Erlang arithmetic and pairing over the BN254 curve (alt_bn128 / Ethereum EVM precompiles / Circom):
 
 ```erlang
-%% Single proof verification
+%% Point arithmetic on G1 (Fp) and G2 (Fp2)
+P1 = ecu_bn254:g1_generator(),
+P2 = ecu_bn254:g2_generator(),
+Q1 = ecu_bn254:g1_mul(P1, 42),
+Q2 = ecu_bn254:g2_mul(P2, 42),
+
+%% Optimal Ate pairing e: G1 x G2 -> GT over Fp12
+GT = ecu_bn254_pairing:pairing(P1, P2),
+
+%% Multi-pairing check: e(P1, Q2) * e(-Q1, P2) == 1
+true = ecu_bn254_pairing:pairing_check([
+    {P1, Q2},
+    {ecu_bn254:g1_neg(Q1), P2}
+]).
+```
+
+### Groth16 zk-SNARK Proof Verification (BLS12-381 & BN254)
+
+Pure-Erlang verification of Groth16 zero-knowledge proofs over BLS12-381 and BN254 (alt_bn128 / Ethereum EVM / Circom / SnarkJS):
+
+```erlang
+%% Single proof verification (default bls12_381, or explicit bn254)
 Proof = #{a => ProofA, b => ProofB, c => ProofC},
 VK = #{alpha_g1 => Alpha, beta_g2 => Beta, gamma_g2 => Gamma, delta_g2 => Delta, ic => [IC0, IC1]},
 PublicInputs = [12345],
-true = ecu_groth16:verify(VK, PublicInputs, Proof).
+
+%% Verify over BLS12-381
+true = ecu_groth16:verify(VK, PublicInputs, Proof),
+
+%% Verify over BN254 (compatible with SnarkJS / Circom / EVM test vectors)
+true = ecu_groth16:verify(bn254, VK, PublicInputs, Proof).
 
 %% Randomized batch verification of multiple Groth16 proofs in a single multi-Miller loop
 Batch = [
     {Inputs1, Proof1},
     {Inputs2, Proof2}
 ],
-true = ecu_groth16:verify_batch(VK, Batch).
+true = ecu_groth16:verify_batch(bn254, VK, Batch).
 ```
 
 ### Poseidon Algebraic Hash Function (BLS12-381 & BN254)
@@ -554,16 +580,40 @@ Supported Curves & API
   - `parameter_set/1`: Identify parameter set from public key, secret key, or signature binary size.
   - Performance: SHA-2 parameter sets (`slh_dsa_sha2_128f` ~346 ms) execute ~24× faster on the BEAM than SHAKE parameter sets due to 64-bit bignum representation in Keccak; SHA-2 is recommended for pure-Erlang environments.
 
-### Pairing-Friendly Cryptography & Groth16 zk-SNARK Verification (BLS12-381)
+### Pairing-Friendly Cryptography: BLS12-381
 
 - `ecu_bls12_381`: Group arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_q$) and $\mathbb{G}_2$ (over $\mathbb{F}_{q^2}$) with Jacobian projective coordinates, point compression, and subgroup validation.
+- `ecu_bls12_381_fp`: Pure-Erlang arithmetic across tower fields $\mathbb{F}_q, \mathbb{F}_{q^2}, \mathbb{F}_{q^6}, \mathbb{F}_{q^{12}}$.
 - `ecu_bls12_381_pairing`: Optimal Ate pairing $e: \mathbb{G}_1 \times \mathbb{G}_2 \rightarrow \mathbb{G}_T$ and multi-Miller loop accumulation over field extension $\mathbb{F}_{q^{12}}$.
 - `ecu_bls12_381_sig`: BLS signature generation, non-interactive aggregation, and verification (`min_pk` and `min_sig` ciphersuites per draft-irtf-cfrg-bls-signature).
-- `ecu_groth16`: Pure-Erlang Groth16 zero-knowledge proof verifier over BLS12-381:
-  - `verify/3,4`: Verify Groth16 proof against verification key and public inputs using a 4-pair multi-Miller loop and single final exponentiation.
-  - `verify_batch/2,3`: Randomized batch verification aggregating $N$ proofs into $N + 3$ pairings via 128-bit random weights (~2.5× higher throughput).
-  - Flexible point codecs supporting records (`#groth16_proof{}`, `#groth16_vk{}`), maps, tuples, 48B/96B compressed points, and 96B/192B uncompressed points.
-  - Strict validation: rejects points not on curve, points not in prime subgroup, points at infinity, and out-of-range scalars.
+
+### Pairing-Friendly Cryptography: BN254 (alt_bn128)
+
+- `ecu_bn254`: Group arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_p$) and $\mathbb{G}_2$ (over extension field $\mathbb{F}_{p^2}$ with $u^2 + 1 = 0$):
+  - $\mathbb{G}_1$ arithmetic: Point addition (`g1_add/2`), doubling (`g1_double/1`), scalar multiplication (`g1_mul/2`), multi-scalar multiplication (`g1_msm/2`), and negation (`g1_neg/1`) using Jacobian coordinates.
+  - $\mathbb{G}_2$ arithmetic: Point addition (`g2_add/2`), doubling (`g2_double/1`), scalar multiplication (`g2_mul/2`), multi-scalar multiplication (`g2_msm/2`), and negation (`g2_neg/1`) using Jacobian coordinates over $\mathbb{F}_{p^2}$ with $D$-type twist curve $y^2 = x^3 + 3/(u + 9)$.
+  - Point compression and serialization: 32-byte $\mathbb{G}_1$ compressed (`g1_compress/1`, `g1_decompress/1`) and 64-byte $\mathbb{G}_2$ compressed (`g2_compress/1`, `g2_decompress/1`), plus 64-byte $\mathbb{G}_1$ and 128-byte $\mathbb{G}_2$ uncompressed formats matching Ethereum EVM precompiles (`0x06`, `0x07`, `0x08` / EIP-196 & EIP-197).
+  - Validation: Complete curve equation validation (`g1_on_curve/1`, `g2_on_curve/1`), subgroup membership testing (`g1_in_subgroup/1`, `g2_in_subgroup/1`), and identity checks.
+- `ecu_bn254_fp`: Pure-Erlang arithmetic across tower extension fields:
+  - Base field $\mathbb{F}_p$ ($p = 21888242871839275222246405745257275088548364400416034343698204186575808495617$).
+  - Quadratic extension $\mathbb{F}_{p^2} = \mathbb{F}_p[u] / (u^2 + 1)$ with Karatsuba multiplication and complex squaring.
+  - Sextic extension $\mathbb{F}_{p^6} = \mathbb{F}_{p^2}[v] / (v^3 - \xi)$ where $\xi = u + 9$, utilizing Chung-Hasan SQR3 squaring.
+  - Dodecic extension $\mathbb{F}_{p^{12}} = \mathbb{F}_{p^6}[w] / (w^2 - v)$.
+  - Frobenius endomorphisms $\pi, \pi^2, \pi^3$ precomputed for fast line evaluation and final exponentiation.
+- `ecu_bn254_pairing`: Optimal Ate pairing over BN254:
+  - `pairing/2`: Compute optimal Ate pairing $e(P, Q) \in \mathbb{G}_T$ where $P \in \mathbb{G}_1, Q \in \mathbb{G}_2$.
+  - `miller_loop/2`: Miller loop with 65-iteration loop based on BN parameter $t = 4965661362426376488$ ($6t + 2$), with non-zero line evaluations in projective coordinates and Frobenius endomorphism addition steps.
+  - `final_exponentiation/1`: Fast final exponentiation $(p^{12} - 1) / r$ decomposed into easy part $((p^6 - 1)(p^2 + 1))$ and hard part via cyclotomic squaring and Frobenius automorphisms.
+  - `pairing_check/1`: Multi-pairing check $\prod_{i=1}^k e(P_i, Q_i) == 1$ accumulating all pairs in a single multi-Miller loop prior to a single final exponentiation.
+
+### Groth16 zk-SNARK Proof Verification (BLS12-381 & BN254)
+
+- `ecu_groth16`: Pure-Erlang Groth16 zero-knowledge proof verifier supporting both BLS12-381 and BN254 (alt_bn128):
+  - `verify/3,4`: Verify Groth16 proof against verification key and public inputs using a 4-pair multi-Miller loop and single final exponentiation. Accepts optional `Curve` parameter (`bls12_381` [default] or `bn254`).
+  - `verify_batch/2,3`: Randomized batch verification aggregating $N$ proofs into $N + 3$ pairings via 128-bit random weights (~2.5×–2.9× higher throughput).
+  - Flexible point codecs supporting records (`#groth16_proof{}`, `#groth16_vk{}`), maps, tuples, compressed points (48B/96B for BLS12-381; 32B/64B for BN254), and uncompressed points (96B/192B for BLS12-381; 64B/128B EVM format for BN254).
+  - Full EVM / SnarkJS / Circom compatibility: Public inputs, verification keys, and proofs exported from SnarkJS can be verified directly without conversion.
+  - Strict validation: Rejects points not on curve, points not in prime subgroup, points at infinity, and out-of-range scalars.
 - `ecu_poseidon`: Pure-Erlang implementation of the Poseidon algebraic hash function and Hades permutation:
   - `hash3/2`: Hash two elements over BLS12-381 ($t=3$, $R_F=8, R_P=57$, total 65 rounds: 4 full, 57 partial, 4 full). 100% compatible with Aeternity FATE VM opcode and `aeu_poseidon:hash3/2`.
   - `hash3/3`: Hash two elements specifying curve (`bls12_381` or `bn254`).
@@ -679,7 +729,15 @@ the library incorporates key algorithmic optimizations:
 | **slh_dsa_shake_128f sign** | 16.37 s | **8.20 s** | **2.00×** | 27.2 ms (crypto / OpenSSL) | 301× |
 | **slh_dsa_shake_128f verify** | 968 ms | **470 ms** | **2.06×** | 1.74 ms (crypto / OpenSSL) | 270× |
 | **groth16 verify (BLS12-381)** | — | **25.2 ms** | — | — | — |
-| **groth16 batch verify (4 proofs)** | — | **9.9 ms/proof** | **~2.5×** | — | — |
+| **groth16 batch verify (4 proofs, BLS12-381)** | — | **9.9 ms/proof** | **~2.5×** | — | — |
+| **bn254 G1 point add** | — | **3.10 µs** | — | 3.44 µs (Arkworks Rust NIF) | **1.11× faster** |
+| **bn254 G1 scalar mul** | — | **1.03 ms** | — | 51.0 µs (Arkworks Rust NIF) | 20.1× |
+| **bn254 G2 point add** | — | **22.2 µs** | — | 204 µs (Arkworks Rust NIF) | **9.2× faster** |
+| **bn254 G2 scalar mul** | — | **3.08 ms** | — | 335 µs (Arkworks Rust NIF) | 9.2× |
+| **bn254 optimal ate pairing** | — | **18.4 ms** | — | 679 µs (Arkworks Rust NIF) | 27.0× |
+| **groth16 verify (BN254)** | — | **26.2 ms** | — | 1.59 ms (Arkworks Rust NIF) | 16.5× |
+| **groth16 batch verify (4 proofs, BN254)** | — | **9.1 ms/proof** | **~2.9×** | — | — |
+| **poseidon hash3 (BN254)** | — | **115 µs** | — | 21.2 µs (light-poseidon Rust NIF) | 5.4× |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
@@ -687,6 +745,7 @@ the library incorporates key algorithmic optimizations:
 - *BIP-340 Schnorr, Keccak-256, and Hash-to-Curve reference benchmarks use an optional test NIF (`k256`, `sha3`, `hash2curve`) buildable via `make rustcrypto_reference`.*
 - *FROST threshold reference benchmarks use optional RFC 9591 test NIFs (Zcash Foundation `frost-core` crates) buildable via `make frost_reference`.*
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
+- *BN254 elliptic curve and Groth16 reference benchmarks use an optional Arkworks test NIF (`crates/bn254_nif`) buildable via `make reference_nifs`.*
 - *Pure Erlang SLH-DSA signing executes ~80,000 hash operations. SHA-2 parameter sets (`slh_dsa_sha2_128f` at 346 ms) are ~24× faster than SHAKE parameter sets (`slh_dsa_shake_128f` at 8.20 s) because Keccak-f[1600] operates on 64-bit uints that exceed BEAM's 60-bit `smallint` range and lack SIMD vectorization. In contrast, native OpenSSL uses multi-buffer SIMD (AVX2/AVX-512) to compute 4–8 Keccak states concurrently, reaching 27.2 ms.*
 - *All reference NIFs can be built together using `make reference_nifs`.*
 
@@ -719,7 +778,7 @@ See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cry
 - **Multi-Party & Threshold Signatures**: FROST (RFC 9591 on Ed25519, Ed448, secp256k1, BIP-340) and MuSig2 (BIP-327) `[Completed]`.
 - **HD Wallets & Mnemonics**: BIP-32, SLIP-0010, AEX-10, and BIP-39 `[Completed]`.
 - **Native Cryptographic Independence**: 100% pure-Erlang fallback for hashing, HMAC, and CSPRNG entropy via `ecu_compat` and `ecu_entropy` `[Completed]`.
-- **Pairing-Friendly Cryptography, zk-SNARKs & Poseidon (BLS12-381 & BN254)**: BLS signatures, Groth16 proof verification, and Poseidon algebraic hashing `[Phase 1 & 2 Completed]`.
+- **Pairing-Friendly Cryptography, zk-SNARKs & Poseidon (BLS12-381 & BN254)**: BLS signatures, BN254 / BLS12-381 curve arithmetic & optimal Ate pairings, Groth16 proof verification, and Poseidon algebraic hashing `[Completed]`.
 
 Security Considerations & Limitations
 -------------------------------------

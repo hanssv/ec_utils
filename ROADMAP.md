@@ -188,19 +188,20 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 13. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381) `[Phase 1 Completed]`
+## 13. Zero-Knowledge Proofs & Pairing-Friendly Curves (BLS12-381 & BN254) `[Completed]`
 
 - **Standard**: Pairing-friendly elliptic curves; [BLS Signatures RFC draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature); Groth16 zk-SNARK verification ([Groth 2016](https://eprint.iacr.org/2016/260)).
 - **Goal**: Support pairing-based cryptography, short aggregate signatures, and zero-knowledge proof verification.
-- **Features `[Phase 1 & 2 Completed]`**:
+- **Features `[Completed]`**:
   - Arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_q$) and $\mathbb{G}_2$ (over extension field $\mathbb{F}_{q^2}$) on the BLS12-381 curve (`ecu_bls12_381`, `ecu_bls12_381_fp`).
-  - Optimal Ate pairing $e: \mathbb{G}_1 \times \mathbb{G}_2 \rightarrow \mathbb{G}_T$ over field extension $\mathbb{F}_{q^{12}}$ with multi-Miller loop accumulation (`ecu_bls12_381_pairing`).
+  - Arithmetic in $\mathbb{G}_1$ (over $\mathbb{F}_p$) and $\mathbb{G}_2$ (over extension field $\mathbb{F}_{p^2}$) on the BN254 (alt_bn128) curve (`ecu_bn254`, `ecu_bn254_fp`) matching Ethereum EVM precompiles and Circom/SnarkJS.
+  - Optimal Ate pairing $e: \mathbb{G}_1 \times \mathbb{G}_2 \rightarrow \mathbb{G}_T$ over field extension $\mathbb{F}_{p^{12}} / \mathbb{F}_{q^{12}}$ with multi-Miller loop accumulation (`ecu_bls12_381_pairing`, `ecu_bn254_pairing`).
   - BLS signature generation, aggregation, and verification (`ecu_bls12_381_sig`).
-  - Groth16 zk-SNARK proof verification (`ecu_groth16`):
+  - Groth16 zk-SNARK proof verification (`ecu_groth16`) supporting both BLS12-381 and BN254:
     - Multi-pairing verification equation: $e(A, B) = e(\alpha, \beta) \cdot e(K_{pub}, \gamma) \cdot e(C, \delta)$ evaluated via a single 4-pair Miller loop and final exponentiation.
     - Public input accumulation $K_{pub} = IC_0 + \sum x_i IC_i$ in Jacobian projective coordinates.
-    - Randomized multi-proof batch verification (`verify_batch/2,3`) reducing $4N$ pairings to $N + 3$ pairings via 128-bit random weights (~2.5× throughput).
-    - Support for maps, records, tuples, 48B/96B compressed points, and 96B/192B uncompressed points.
+    - Randomized multi-proof batch verification (`verify_batch/2,3`) reducing $4N$ pairings to $N + 3$ pairings via 128-bit random weights (~2.5×–2.9× throughput).
+    - Support for maps, records, tuples, compressed points, and uncompressed EVM points.
   - Poseidon algebraic hash function over finite fields (`ecu_poseidon`, `ecu_poseidon_constants`):
     - Supports both BLS12-381 scalar field (matching Aeternity / FATE / Sophia `Crypto.poseidon`) and BN254 scalar field (matching Circomlib / Ethereum / Tornado Cash).
     - Optimized unrolled `hash3/2,3` for 2-to-1 binary tree hashing with zero heap allocations in inner loops (~90 µs/hash, >10,800 hashes/sec pure Erlang).
