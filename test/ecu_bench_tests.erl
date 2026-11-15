@@ -313,9 +313,11 @@ bench_suites_registry_test() ->
   ?assert(lists:member(ed25519, Suites)),
   ?assert(lists:member(ml_kem, Suites)),
   ?assert(lists:member(ml_dsa, Suites)),
+  ?assert(lists:member(bn254, Suites)),
 
   Ed25519Benches = ecu_bench_suites:get_benchmarks(ed25519),
   ?assert(length(Ed25519Benches) > 0),
+  ?assert(length(ecu_bench_suites:get_benchmarks(bn254)) > 0),
 
   AllBenches = ecu_bench_suites:get_benchmarks(all),
   ?assert(length(AllBenches) >= length(Ed25519Benches)).

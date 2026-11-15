@@ -10,10 +10,13 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("ecu_groth16.hrl").
 -include("ecu_bls12_381.hrl").
+-include("ecu_bn254.hrl").
 
 -define(BLS, ecu_bls12_381).
 -define(R, ?BLS12_381_R).
 -define(NIF, ecu_bls12_381_nif).
+-define(BN, ecu_bn254).
+-define(BN_NIF, ecu_bn254_nif).
 
 %%%===================================================================
 %%% Helper: Generate a mathematically valid Groth16 instance
@@ -83,6 +86,63 @@ generate_groth16_instance(Scalars, SeedOffset) ->
   CVal = (NumPos * DeltaInv) rem ?R,
 
   C = ?BLS:g1_scalar_mul(G1, CVal),
+
+  Proof = #groth16_proof{a = A, b = B, c = C},
+  {VK, Proof}.
+
+generate_groth16_bn254_instance(Scalars, SeedOffset) ->
+  R = ?BN254_R,
+  AlphaVal = (123456789123456789 + SeedOffset) rem R,
+  BetaVal = (987654321987654321 + SeedOffset * 2) rem R,
+  GammaVal = (112233445566778899 + SeedOffset * 3) rem R,
+  DeltaVal = (998877665544332211 + SeedOffset * 4) rem R,
+
+  G1 = ?BN:g1_generator(),
+  G2 = ?BN:g2_generator(),
+
+  AlphaG1 = ?BN:g1_scalar_mul(G1, AlphaVal),
+  BetaG2 = ?BN:g2_scalar_mul(G2, BetaVal),
+  GammaG2 = ?BN:g2_scalar_mul(G2, GammaVal),
+  DeltaG2 = ?BN:g2_scalar_mul(G2, DeltaVal),
+
+  NumInputs = length(Scalars),
+  ICCoeffs = [(314159265 + I * 10007 + SeedOffset) rem R || I <- lists:seq(0, NumInputs)],
+  IC = [?BN:g1_scalar_mul(G1, Coeff) || Coeff <- ICCoeffs],
+
+  VK = #groth16_vk{
+    alpha_g1 = AlphaG1,
+    beta_g2 = BetaG2,
+    gamma_g2 = GammaG2,
+    delta_g2 = DeltaG2,
+    ic = IC
+  },
+
+  AVal = (777777777 + SeedOffset * 5) rem R,
+  BVal = (888888888 + SeedOffset * 6) rem R,
+
+  A = ?BN:g1_scalar_mul(G1, AVal),
+  B = ?BN:g2_scalar_mul(G2, BVal),
+
+  [IC0_coeff | RestICCoeffs] = ICCoeffs,
+  KPubScalar =
+    lists:foldl(
+      fun({X, IC_coeff}, Acc) ->
+        (Acc + X * IC_coeff) rem R
+      end,
+      IC0_coeff,
+      lists:zip(Scalars, RestICCoeffs)
+    ),
+
+  DeltaInv = mod_inv(DeltaVal, R),
+  AB = (AVal * BVal) rem R,
+  AlphaBeta = (AlphaVal * BetaVal) rem R,
+  KPubGamma = (KPubScalar * GammaVal) rem R,
+
+  Num = (AB - AlphaBeta - KPubGamma) rem R,
+  NumPos = (Num + R) rem R,
+  CVal = (NumPos * DeltaInv) rem R,
+
+  C = ?BN:g1_scalar_mul(G1, CVal),
 
   Proof = #groth16_proof{a = A, b = B, c = C},
   {VK, Proof}.
@@ -354,6 +414,182 @@ differential_blst_oracle_test() ->
       ?assertNot(ecu_groth16:verify(VK, Inputs, BadProofC)),
       ?assertNot(
         ?NIF:groth16_verify(AlphaBin, BetaBin, GammaBin, DeltaBin, ICBins, InputBins, ABin, BBin, BadC)
+      );
+    false ->
+      ok
+  end.
+
+bn254_valid_single_proof_test() ->
+  PublicInputs = [42, 100, 2026],
+  {VK, Proof} = generate_groth16_bn254_instance(PublicInputs, 1),
+  ?assert(ecu_groth16:verify(bn254, VK, PublicInputs, Proof)),
+  %% Tampered input fails
+  ?assertNot(ecu_groth16:verify(bn254, VK, [43, 100, 2026], Proof)),
+  %% Tampered proof fails
+  G1 = ?BN:g1_generator(),
+  BadProof = Proof#groth16_proof{a = ?BN:g1_add(Proof#groth16_proof.a, G1)},
+  ?assertNot(ecu_groth16:verify(bn254, VK, PublicInputs, BadProof)).
+
+bn254_format_flexibility_test() ->
+  PublicInputs = [123, 456],
+  {VK, Proof} = generate_groth16_bn254_instance(PublicInputs, 2),
+
+  %% 1. Map format
+  VKMap = #{
+    alpha_g1 => VK#groth16_vk.alpha_g1,
+    beta_g2 => VK#groth16_vk.beta_g2,
+    gamma_g2 => VK#groth16_vk.gamma_g2,
+    delta_g2 => VK#groth16_vk.delta_g2,
+    ic => VK#groth16_vk.ic
+  },
+  ProofMap = #{
+    a => Proof#groth16_proof.a,
+    b => Proof#groth16_proof.b,
+    c => Proof#groth16_proof.c
+  },
+  ?assert(ecu_groth16:verify(bn254, VKMap, PublicInputs, ProofMap)),
+
+  %% 2. Tuple format
+  VKTuple = {
+    VK#groth16_vk.alpha_g1,
+    VK#groth16_vk.beta_g2,
+    VK#groth16_vk.gamma_g2,
+    VK#groth16_vk.delta_g2,
+    VK#groth16_vk.ic
+  },
+  ProofTuple = {
+    Proof#groth16_proof.a,
+    Proof#groth16_proof.b,
+    Proof#groth16_proof.c
+  },
+  ?assert(ecu_groth16:verify(bn254, VKTuple, PublicInputs, ProofTuple)),
+
+  %% 3. Compressed points (32 bytes for G1, 64 bytes for G2)
+  VKComp = #{
+    alpha_g1 => ?BN:g1_compress(VK#groth16_vk.alpha_g1),
+    beta_g2 => ?BN:g2_compress(VK#groth16_vk.beta_g2),
+    gamma_g2 => ?BN:g2_compress(VK#groth16_vk.gamma_g2),
+    delta_g2 => ?BN:g2_compress(VK#groth16_vk.delta_g2),
+    ic => [?BN:g1_compress(Pt) || Pt <- VK#groth16_vk.ic]
+  },
+  ProofComp = #{
+    a => ?BN:g1_compress(Proof#groth16_proof.a),
+    b => ?BN:g2_compress(Proof#groth16_proof.b),
+    c => ?BN:g1_compress(Proof#groth16_proof.c)
+  },
+  ?assert(ecu_groth16:verify(bn254, VKComp, PublicInputs, ProofComp)),
+
+  %% 4. Uncompressed points (64 bytes for G1, 128 bytes for G2)
+  VKUncomp = #{
+    alpha_g1 => ?BN:g1_to_uncompressed(VK#groth16_vk.alpha_g1),
+    beta_g2 => ?BN:g2_to_uncompressed(VK#groth16_vk.beta_g2),
+    gamma_g2 => ?BN:g2_to_uncompressed(VK#groth16_vk.gamma_g2),
+    delta_g2 => ?BN:g2_to_uncompressed(VK#groth16_vk.delta_g2),
+    ic => [?BN:g1_to_uncompressed(Pt) || Pt <- VK#groth16_vk.ic]
+  },
+  ProofUncomp = #{
+    a => ?BN:g1_to_uncompressed(Proof#groth16_proof.a),
+    b => ?BN:g2_to_uncompressed(Proof#groth16_proof.b),
+    c => ?BN:g1_to_uncompressed(Proof#groth16_proof.c)
+  },
+  ?assert(ecu_groth16:verify(bn254, VKUncomp, PublicInputs, ProofUncomp)).
+
+bn254_batch_verification_test() ->
+  Inputs1 = [11, 22, 33],
+  Inputs2 = [44, 55, 66],
+  Inputs3 = [77, 88, 99],
+
+  {VK, Proof1} = generate_groth16_bn254_instance(Inputs1, 10),
+  NumInputs = length(Inputs1),
+  G1 = ?BN:g1_generator(),
+  G2 = ?BN:g2_generator(),
+  R = ?BN254_R,
+
+  GenProofForVK = fun(Inputs, Seed) ->
+    AVal = (777777777 + Seed * 5) rem R,
+    BVal = (888888888 + Seed * 6) rem R,
+    A = ?BN:g1_scalar_mul(G1, AVal),
+    B = ?BN:g2_scalar_mul(G2, BVal),
+
+    AlphaVal = (123456789123456789 + 10) rem R,
+    BetaVal = (987654321987654321 + 10 * 2) rem R,
+    GammaVal = (112233445566778899 + 10 * 3) rem R,
+    DeltaVal = (998877665544332211 + 10 * 4) rem R,
+
+    ICCoeffs = [(314159265 + I * 10007 + 10) rem R || I <- lists:seq(0, NumInputs)],
+    [IC0_coeff | RestICCoeffs] = ICCoeffs,
+    KPubScalar =
+      lists:foldl(
+        fun({X, IC_coeff}, Acc) ->
+          (Acc + X * IC_coeff) rem R
+        end,
+        IC0_coeff,
+        lists:zip(Inputs, RestICCoeffs)
+      ),
+
+    DeltaInv = mod_inv(DeltaVal, R),
+    AB = (AVal * BVal) rem R,
+    AlphaBeta = (AlphaVal * BetaVal) rem R,
+    KPubGamma = (KPubScalar * GammaVal) rem R,
+    Num = (AB - AlphaBeta - KPubGamma) rem R,
+    NumPos = (Num + R) rem R,
+    CVal = (NumPos * DeltaInv) rem R,
+    C = ?BN:g1_scalar_mul(G1, CVal),
+    #groth16_proof{a = A, b = B, c = C}
+  end,
+
+  Proof2 = GenProofForVK(Inputs2, 20),
+  Proof3 = GenProofForVK(Inputs3, 30),
+
+  Batch = [
+    {Inputs1, Proof1},
+    {Inputs2, Proof2},
+    {Inputs3, Proof3}
+  ],
+
+  ?assert(ecu_groth16:verify_batch(bn254, VK, Batch)),
+  %% Batch with tampered item fails
+  BadBatch = [
+    {Inputs1, Proof1},
+    {[45, 55, 66], Proof2},
+    {Inputs3, Proof3}
+  ],
+  ?assertNot(ecu_groth16:verify_batch(bn254, VK, BadBatch)).
+
+differential_bn254_nif_oracle_test() ->
+  case ?BN_NIF:is_loaded() of
+    true ->
+      Inputs = [42, 84, 126],
+      {VK, Proof} = generate_groth16_bn254_instance(Inputs, 888),
+      ?assert(ecu_groth16:verify(bn254, VK, Inputs, Proof)),
+
+      #groth16_vk{alpha_g1 = Alpha, beta_g2 = Beta, gamma_g2 = Gamma, delta_g2 = Delta, ic = IC} = VK,
+      #groth16_proof{a = A, b = B, c = C} = Proof,
+
+      AlphaBin = ?BN:g1_to_uncompressed(Alpha),
+      BetaBin = ?BN:g2_to_uncompressed(Beta),
+      GammaBin = ?BN:g2_to_uncompressed(Gamma),
+      DeltaBin = ?BN:g2_to_uncompressed(Delta),
+      ICBins = [?BN:g1_to_uncompressed(Pt) || Pt <- IC],
+      InputBins = [<<X:256/big>> || X <- Inputs],
+      ABin = ?BN:g1_to_uncompressed(A),
+      BBin = ?BN:g2_to_uncompressed(B),
+      CBin = ?BN:g1_to_uncompressed(C),
+
+      ?assert(
+        ?BN_NIF:groth16_verify(
+          AlphaBin, BetaBin, GammaBin, DeltaBin, ICBins, InputBins, ABin, BBin, CBin
+        )
+      ),
+
+      %% Tampered input -> both reject
+      TamperedInputs = [43, 84, 126],
+      TamperedInputBins = [<<X:256/big>> || X <- TamperedInputs],
+      ?assertNot(ecu_groth16:verify(bn254, VK, TamperedInputs, Proof)),
+      ?assertNot(
+        ?BN_NIF:groth16_verify(
+          AlphaBin, BetaBin, GammaBin, DeltaBin, ICBins, TamperedInputBins, ABin, BBin, CBin
+        )
       );
     false ->
       ok

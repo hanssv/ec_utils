@@ -29,6 +29,7 @@ list_suites() ->
     hash,
     hd,
     bls12_381,
+    bn254,
     groth16,
     poseidon
   ].
@@ -80,6 +81,7 @@ all_benchmarks() ->
     hash_benchmarks(),
     hd_benchmarks(),
     bls12_381_benchmarks(),
+    bn254_benchmarks(),
     groth16_benchmarks(),
     poseidon_benchmarks()
   ]).
@@ -910,6 +912,109 @@ bls12_381_benchmarks() ->
     }
   ].
 
+%% ===================================================================
+%% BN254
+%% ===================================================================
+
+bn254_benchmarks() ->
+  case code:ensure_loaded(ecu_bn254) of
+    {module, ecu_bn254} ->
+      Scalar =
+        16#123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0 rem (ecu_bn254:r() - 1) + 1,
+      ScalarBin = <<Scalar:256/big>>,
+      G1Gen = ecu_bn254:g1_generator(),
+      G2Gen = ecu_bn254:g2_generator(),
+      G1Pt = ecu_bn254:g1_scalar_mul(G1Gen, 3),
+      G2Pt = ecu_bn254:g2_scalar_mul(G2Gen, 3),
+      G1GenBin = ecu_bn254:g1_to_uncompressed(G1Gen),
+      G1PtBin = ecu_bn254:g1_to_uncompressed(G1Pt),
+      G2GenBin = ecu_bn254:g2_to_uncompressed(G2Gen),
+      G2PtBin = ecu_bn254:g2_to_uncompressed(G2Pt),
+
+      NifAvail =
+        case code:ensure_loaded(ecu_bn254_nif) of
+          {module, ecu_bn254_nif} ->
+            erlang:function_exported(ecu_bn254_nif, is_available, 0) andalso
+              ecu_bn254_nif:is_available();
+          _ ->
+            false
+        end,
+
+      Base = [
+        #{
+          id => bn254_g1_point_add,
+          name => <<"BN254 G1 Point Add">>,
+          group => bn254,
+          run => {fun({A, B}) -> ecu_bn254:g1_add(A, B) end, {G1Gen, G1Pt}}
+        },
+        #{
+          id => bn254_g1_scalar_mul,
+          name => <<"BN254 G1 ScalarMul">>,
+          group => bn254,
+          run => {fun({P, S}) -> ecu_bn254:g1_scalar_mul(P, S) end, {G1Gen, Scalar}}
+        },
+        #{
+          id => bn254_g2_point_add,
+          name => <<"BN254 G2 Point Add">>,
+          group => bn254,
+          run => {fun({A, B}) -> ecu_bn254:g2_add(A, B) end, {G2Gen, G2Pt}}
+        },
+        #{
+          id => bn254_g2_scalar_mul,
+          name => <<"BN254 G2 ScalarMul">>,
+          group => bn254,
+          run => {fun({P, S}) -> ecu_bn254:g2_scalar_mul(P, S) end, {G2Gen, Scalar}}
+        },
+        #{
+          id => bn254_pairing,
+          name => <<"BN254 Optimal Ate Pairing">>,
+          group => bn254,
+          run => {fun({P, Q}) -> ecu_bn254_pairing:pairing(P, Q) end, {G1Gen, G2Gen}}
+        }
+      ],
+      NifBenches =
+        case NifAvail of
+          true ->
+            [
+              #{
+                id => bn254_g1_point_add_rust,
+                name => <<"BN254 G1 Point Add (Rust NIF arkworks)">>,
+                group => bn254,
+                run => {fun({A, B}) -> ecu_bn254_nif:g1_add(A, B) end, {G1GenBin, G1PtBin}}
+              },
+              #{
+                id => bn254_g1_scalar_mul_rust,
+                name => <<"BN254 G1 ScalarMul (Rust NIF arkworks)">>,
+                group => bn254,
+                run => {fun({P, S}) -> ecu_bn254_nif:g1_mult(P, S) end, {G1GenBin, ScalarBin}}
+              },
+              #{
+                id => bn254_g2_point_add_rust,
+                name => <<"BN254 G2 Point Add (Rust NIF arkworks)">>,
+                group => bn254,
+                run => {fun({A, B}) -> ecu_bn254_nif:g2_add(A, B) end, {G2GenBin, G2PtBin}}
+              },
+              #{
+                id => bn254_g2_scalar_mul_rust,
+                name => <<"BN254 G2 ScalarMul (Rust NIF arkworks)">>,
+                group => bn254,
+                run => {fun({P, S}) -> ecu_bn254_nif:g2_mult(P, S) end, {G2GenBin, ScalarBin}}
+              },
+              #{
+                id => bn254_pairing_rust,
+                name => <<"BN254 Optimal Ate Pairing (Rust NIF arkworks)">>,
+                group => bn254,
+                run => {fun({P, Q}) -> ecu_bn254_nif:pairing(P, Q) end, {G1GenBin, G2GenBin}}
+              }
+            ];
+          false ->
+            []
+        end,
+      Base ++ NifBenches;
+    _ ->
+      []
+  end.
+
 groth16_benchmarks() ->
   Inputs = [12345, 67890],
   AlphaVal = 123456789123456789,
@@ -951,7 +1056,8 @@ groth16_benchmarks() ->
   C = ecu_bls12_381:g1_scalar_mul(G1, CVal),
   Proof = #{a => A, b => B, c => C},
   Batch = [{Inputs, Proof}, {Inputs, Proof}, {Inputs, Proof}, {Inputs, Proof}],
-  [
+
+  BLSBenches = [
     #{
       id => groth16_verify,
       name => <<"Groth16 Verify (BLS12-381)">>,
@@ -960,11 +1066,114 @@ groth16_benchmarks() ->
     },
     #{
       id => groth16_verify_batch_4,
-      name => <<"Groth16 Batch Verify (4 proofs)">>,
+      name => <<"Groth16 Batch Verify (4 proofs, BLS12-381)">>,
       group => groth16,
       run => {fun({V, Bth}) -> ecu_groth16:verify_batch(V, Bth) end, {VK, Batch}}
     }
-  ].
+  ],
+
+  BNBenches =
+    case code:ensure_loaded(ecu_bn254) of
+      {module, ecu_bn254} ->
+        BN_G1 = ecu_bn254:g1_generator(),
+        BN_G2 = ecu_bn254:g2_generator(),
+        BN_R = ecu_bn254:r(),
+        BN_AlphaVal = AlphaVal rem BN_R,
+        BN_BetaVal = BetaVal rem BN_R,
+        BN_GammaVal = GammaVal rem BN_R,
+        BN_DeltaVal = DeltaVal rem BN_R,
+        BN_AlphaG1 = ecu_bn254:g1_scalar_mul(BN_G1, BN_AlphaVal),
+        BN_BetaG2 = ecu_bn254:g2_scalar_mul(BN_G2, BN_BetaVal),
+        BN_GammaG2 = ecu_bn254:g2_scalar_mul(BN_G2, BN_GammaVal),
+        BN_DeltaG2 = ecu_bn254:g2_scalar_mul(BN_G2, BN_DeltaVal),
+        BN_IC = [
+          ecu_bn254:g1_scalar_mul(BN_G1, 314159265 rem BN_R),
+          ecu_bn254:g1_scalar_mul(BN_G1, 314169272 rem BN_R),
+          ecu_bn254:g1_scalar_mul(BN_G1, 314179279 rem BN_R)
+        ],
+        BN_VK = #{
+          alpha_g1 => BN_AlphaG1,
+          beta_g2 => BN_BetaG2,
+          gamma_g2 => BN_GammaG2,
+          delta_g2 => BN_DeltaG2,
+          ic => BN_IC
+        },
+        BN_AVal = AVal rem BN_R,
+        BN_BVal = BVal rem BN_R,
+        BN_A = ecu_bn254:g1_scalar_mul(BN_G1, BN_AVal),
+        BN_B = ecu_bn254:g2_scalar_mul(BN_G2, BN_BVal),
+        BN_KPubScalar = (314159265 + 12345 * 314169272 + 67890 * 314179279) rem BN_R,
+        BN_DeltaInv =
+          case ecu_misc:eea(BN_DeltaVal, BN_R) of
+            {1, XInv, _} -> (XInv rem BN_R + BN_R) rem BN_R
+          end,
+        BN_Num =
+          ((BN_AVal * BN_BVal) - (BN_AlphaVal * BN_BetaVal) - (BN_KPubScalar * BN_GammaVal)) rem BN_R,
+        BN_CVal = (((BN_Num rem BN_R + BN_R) rem BN_R) * BN_DeltaInv) rem BN_R,
+        BN_C = ecu_bn254:g1_scalar_mul(BN_G1, BN_CVal),
+        BN_Proof = #{a => BN_A, b => BN_B, c => BN_C},
+        BN_Batch = [{Inputs, BN_Proof}, {Inputs, BN_Proof}, {Inputs, BN_Proof}, {Inputs, BN_Proof}],
+
+        BN_NifAvail =
+          case code:ensure_loaded(ecu_bn254_nif) of
+            {module, ecu_bn254_nif} ->
+              erlang:function_exported(ecu_bn254_nif, is_available, 0) andalso
+                ecu_bn254_nif:is_available();
+            _ ->
+              false
+          end,
+
+        BNBaseBenches = [
+          #{
+            id => groth16_verify_bn254,
+            name => <<"Groth16 Verify (BN254)">>,
+            group => groth16,
+            run => {
+              fun({V, In, P}) -> ecu_groth16:verify(bn254, V, In, P) end, {BN_VK, Inputs, BN_Proof}
+            }
+          },
+          #{
+            id => groth16_verify_batch_4_bn254,
+            name => <<"Groth16 Batch Verify (4 proofs, BN254)">>,
+            group => groth16,
+            run => {fun({V, Bth}) -> ecu_groth16:verify_batch(bn254, V, Bth) end, {BN_VK, BN_Batch}}
+          }
+        ],
+        BNNifBenches =
+          case BN_NifAvail of
+            true ->
+              AlphaBin = ecu_bn254:g1_to_uncompressed(BN_AlphaG1),
+              BetaBin = ecu_bn254:g2_to_uncompressed(BN_BetaG2),
+              GammaBin = ecu_bn254:g2_to_uncompressed(BN_GammaG2),
+              DeltaBin = ecu_bn254:g2_to_uncompressed(BN_DeltaG2),
+              ICBins = [ecu_bn254:g1_to_uncompressed(Pt) || Pt <- BN_IC],
+              InputBins = [<<X:256/big>> || X <- Inputs],
+              ABin = ecu_bn254:g1_to_uncompressed(BN_A),
+              BBin = ecu_bn254:g2_to_uncompressed(BN_B),
+              CBin = ecu_bn254:g1_to_uncompressed(BN_C),
+              NifArgs = {AlphaBin, BetaBin, GammaBin, DeltaBin, ICBins, InputBins, ABin, BBin, CBin},
+              [
+                #{
+                  id => groth16_verify_bn254_rust,
+                  name => <<"Groth16 Verify (BN254, Rust NIF arkworks)">>,
+                  group => groth16,
+                  run =>
+                    {
+                      fun({A1, B1, Gam1, D1, IC1, In1, PA, PB, PC}) ->
+                        ecu_bn254_nif:groth16_verify(A1, B1, Gam1, D1, IC1, In1, PA, PB, PC)
+                      end,
+                      NifArgs
+                    }
+                }
+              ];
+            false ->
+              []
+          end,
+        BNBaseBenches ++ BNNifBenches;
+      _ ->
+        []
+    end,
+  BLSBenches ++ BNBenches.
 
 %% ===================================================================
 %% Poseidon Hash (BLS12-381 and BN254)

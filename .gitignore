@@ -27,4 +27,5 @@ priv/ecu_musig2_nif.*
 priv/ecu_fn_dsa_nif.*
 priv/ecu_bls12_381_nif.*
 priv/ecu_poseidon_nif.*
+priv/ecu_bn254_nif.*
 doc/
