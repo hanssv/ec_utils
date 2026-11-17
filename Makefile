@@ -111,9 +111,20 @@ bn254_reference:
 		cp crates/bn254_nif/target/release/ecu_bn254_nif.dll priv/ecu_bn254_nif.dll; \
 	fi
 
-reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference bn254_reference
+vrf_reference:
+	mkdir -p priv
+	cd crates/vrf_nif && cargo build --release
+	@if [ -f crates/vrf_nif/target/release/libecu_vrf_nif.dylib ]; then \
+		cp crates/vrf_nif/target/release/libecu_vrf_nif.dylib priv/ecu_vrf_nif.so; \
+	elif [ -f crates/vrf_nif/target/release/libecu_vrf_nif.so ]; then \
+		cp crates/vrf_nif/target/release/libecu_vrf_nif.so priv/ecu_vrf_nif.so; \
+	elif [ -f crates/vrf_nif/target/release/ecu_vrf_nif.dll ]; then \
+		cp crates/vrf_nif/target/release/ecu_vrf_nif.dll priv/ecu_vrf_nif.dll; \
+	fi
+
+reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference bn254_reference vrf_reference
 
 clean:
 	rebar3 clean
-	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* priv/ecu_fn_dsa_nif.* priv/ecu_bls12_381_nif.* priv/ecu_poseidon_nif.* priv/ecu_bn254_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target crates/fn_dsa_nif/target crates/bls12_381_nif/target crates/poseidon_nif/target crates/bn254_nif/target
+	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* priv/ecu_fn_dsa_nif.* priv/ecu_bls12_381_nif.* priv/ecu_poseidon_nif.* priv/ecu_bn254_nif.* priv/ecu_vrf_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target crates/fn_dsa_nif/target crates/bls12_381_nif/target crates/poseidon_nif/target crates/bn254_nif/target crates/vrf_nif/target
 
