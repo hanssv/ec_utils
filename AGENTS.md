@@ -48,10 +48,13 @@ Detailed style rules are defined in [`STYLE.md`](STYLE.md). Key points:
   - Body: Wrap explanatory body text at **72 characters**, separated from subject by a blank line.
 - **Direct Responses**:
   Never use terminal `echo` commands to announce task completion; provide direct, concise markdown responses instead.
-- **Benchmark Reporting Format**:
-  Always present benchmark results in the standard comparative table format:
-  `| Operation | Pure Erlang | Reference (Rust NIF) | vs Reference |`
-  with execution times in `µs` (or `ms`) and the explicit speed ratio factor (e.g. `1.93×`). Never dump raw Ops/sec without this comparative table.
+- **Benchmark Reporting & Requirements for New Features**:
+  - Every new feature, curve, or protocol must include benchmarks in `bench/ecu_bench_suites.erl`.
+  - Always use **non-random, deterministic inputs** in benchmark suites to avoid timing fluctuations.
+  - When reference NIFs exist, include comparative benchmarks and present results in the standard format:
+    `| Operation | Pure Erlang | Reference (Rust NIF) | vs Reference |`
+    with execution times in `µs` (or `ms`) and the explicit speed ratio factor (e.g. `1.93×`). Never dump raw Ops/sec without this comparative table.
+  - **CI Baseline Compatibility**: CI benchmark jobs copy `bench/` to check out and test against base branches (e.g. `master`). Benchmarks for newly introduced modules in `bench/ecu_bench_suites.erl` MUST be guarded with `case code:ensure_loaded(NewModule) of {module, NewModule} -> ...; _ -> [] end` so older branches without the module do not crash with `undefined function`.
 - **Tooling & Command Transparency**:
   NEVER use ad-hoc Python (`python3 -c '...'`, scripts) or arbitrary host runtime one-liners to read files, parse logs, or inspect transcripts. Use dedicated file-reading tools (`read_file`), standard transparent CLI tools (`jq`, `grep`, `sed`), committed named scripts, or Erlang project tools (`rebar3`, `escript`).
 

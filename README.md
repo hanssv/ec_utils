@@ -7,7 +7,8 @@ BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signa
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
 pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**),
-Hash-to-Curve (RFC 9380), hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
+Hash-to-Curve (RFC 9380), Verifiable Random Functions (VRF / RFC 9381),
+hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
 mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
 
 This library has **zero external C or third-party dependencies** in production
@@ -237,6 +238,30 @@ true = ecu_ed25519:on_curve(PtNU).
 %% Hash to edwards448 (SHAKE256 XOF + Elligator 2 + 4-isogeny)
 Pt448 = ecu_h2c:hash_to_curve(edwards448_xof_shake256_ell2_ro, <<"high-security-payload">>),
 true = ecu_ed448:on_curve(Pt448).
+```
+
+### Verifiable Random Functions (VRF / RFC 9381)
+
+Pure-Erlang implementation of Elliptic Curve Verifiable Random Functions (ECVRF) supporting both Ed25519 (Elligator 2 and Try-and-Increment) and secp256k1 (Try-and-Increment and Simplified SWU):
+
+```erlang
+%% ECVRF-EDWARDS25519-SHA512-ELL2 (RFC 9381 Suite 0x04)
+{PK, SK} = ecu_vrf:keypair(edwards25519_sha512_ell2),
+Alpha = <<"entropy-seed-for-leader-election">>,
+
+%% Prover generates deterministic proof Pi
+{ok, Proof} = ecu_vrf:prove(edwards25519_sha512_ell2, SK, Alpha),
+
+%% Verifier verifies proof and extracts deterministic VRF output hash Beta
+{ok, Beta} = ecu_vrf:verify(edwards25519_sha512_ell2, PK, Proof, Alpha),
+
+%% Deterministic VRF hash can also be evaluated directly from proof
+{ok, Beta} = ecu_vrf:proof_to_hash(edwards25519_sha512_ell2, Proof).
+
+%% ECVRF-SECP256K1-SHA256-TAI (Suite 0xFE, RFC 6979 deterministic nonces)
+{SecpPK, SecpSK} = ecu_vrf:keypair(secp256k1_sha256_tai),
+{ok, SecpProof} = ecu_vrf:prove(secp256k1_sha256_tai, SecpSK, Alpha),
+{ok, SecpBeta} = ecu_vrf:verify(secp256k1_sha256_tai, SecpPK, SecpProof, Alpha).
 ```
 
 ### Quantum-Resistant Key Encapsulation (ML-KEM / FIPS 203) & Hybrid Key Exchange
@@ -542,6 +567,20 @@ Supported Curves & API
   - `map_to_curve/2`: Direct field-to-curve point mapping.
   - `clear_cofactor/2`: Curve-specific cofactor clearing ($h_{\text{eff}}$ scalar multiplication).
 
+### Verifiable Random Functions (RFC 9381)
+
+- `ecu_vrf`: Pure-Erlang Elliptic Curve Verifiable Random Functions (RFC 9381):
+  - Supported Ciphersuites:
+    - `edwards25519_sha512_ell2`: RFC 9381 Suite 0x04 using RFC 9380 Elligator 2 mapping and RFC 8032 nonces.
+    - `edwards25519_sha512_tai`: RFC 9381 Suite 0x03 using Try-and-Increment point hunting.
+    - `secp256k1_sha256_tai`: Suite 0xFE with Try-and-Increment and RFC 6979 deterministic nonces.
+    - `secp256k1_sha256_sswu`: Suite 0xFE with Simplified SWU mapping and RFC 6979 deterministic nonces.
+  - `keypair/1`: Generate fresh public/secret keypair for a given suite.
+  - `derive_public_key/2`: Deterministically derive public key point string from secret key.
+  - `prove/3,4`: Generate deterministic VRF proof $\pi$ for input message $\alpha$ (with optional custom salt).
+  - `verify/4,5`: Cryptographically verify proof $\pi$ against public key and input message, returning `{ok, Beta}` or `{error, Reason}` (supports optional public key validation bypass).
+  - `proof_to_hash/2`: Deterministically extract VRF hash output $\beta$ directly from proof $\pi$.
+
 ### ML-KEM (FIPS 203) & Hybrid Post-Quantum Key Exchange
 
 - `ecu_ml_kem`: Pure-Erlang implementation of the NIST Module-Lattice-Based Key-Encapsulation Mechanism Standard (FIPS 203):
@@ -738,6 +777,12 @@ the library incorporates key algorithmic optimizations:
 | **groth16 verify (BN254)** | — | **26.2 ms** | — | 1.59 ms (Arkworks Rust NIF) | 16.5× |
 | **groth16 batch verify (4 proofs, BN254)** | — | **9.1 ms/proof** | **~2.9×** | — | — |
 | **poseidon hash3 (BN254)** | — | **115 µs** | — | 21.2 µs (light-poseidon Rust NIF) | 5.4× |
+| **vrf prove (Ed25519 Elligator 2)** | — | **1.88 ms** | — | 111 µs (vrf-rfc9381 Rust NIF) | 16.9× |
+| **vrf verify (Ed25519 Elligator 2)** | — | **2.12 ms** | — | 137 µs (vrf-rfc9381 Rust NIF) | 15.5× |
+| **vrf prove (secp256k1 TAI)** | — | **933 µs** | — | 179 µs (vrf_fun Rust NIF) | 5.2× |
+| **vrf verify (secp256k1 TAI)** | — | **1.72 ms** | — | 144 µs (vrf_fun Rust NIF) | 12.0× |
+| **vrf prove (secp256k1 SSWU)** | — | **926 µs** | — | — | — |
+| **vrf verify (secp256k1 SSWU)** | — | **1.73 ms** | — | — | — |
 
 *Notes:*
 - *Pure Erlang point addition is faster than `enacl` because calling the NIF incurs marshalling and point decompression overhead.*
@@ -746,6 +791,7 @@ the library incorporates key algorithmic optimizations:
 - *FROST threshold reference benchmarks use optional RFC 9591 test NIFs (Zcash Foundation `frost-core` crates) buildable via `make frost_reference`.*
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
 - *BN254 elliptic curve and Groth16 reference benchmarks use an optional Arkworks test NIF (`crates/bn254_nif`) buildable via `make reference_nifs`.*
+- *VRF (RFC 9381) reference benchmarks use an optional Rust test NIF (`crates/vrf_nif`) wrapping `vrf-rfc9381` and `vrf_fun`, buildable via `make vrf_reference`.*
 - *Pure Erlang SLH-DSA signing executes ~80,000 hash operations. SHA-2 parameter sets (`slh_dsa_sha2_128f` at 346 ms) are ~24× faster than SHAKE parameter sets (`slh_dsa_shake_128f` at 8.20 s) because Keccak-f[1600] operates on 64-bit uints that exceed BEAM's 60-bit `smallint` range and lack SIMD vectorization. In contrast, native OpenSSL uses multi-buffer SIMD (AVX2/AVX-512) to compute 4–8 Keccak states concurrently, reaching 27.2 ms.*
 - *All reference NIFs can be built together using `make reference_nifs`.*
 
@@ -776,6 +822,7 @@ Roadmap
 See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cryptographic extensions, including:
 - **Quantum-Resistant Cryptography**: ML-KEM (FIPS 203), ML-DSA (FIPS 204), and SLH-DSA (FIPS 205) `[Completed]`.
 - **Multi-Party & Threshold Signatures**: FROST (RFC 9591 on Ed25519, Ed448, secp256k1, BIP-340) and MuSig2 (BIP-327) `[Completed]`.
+- **Hash-to-Curve & Verifiable Random Functions**: RFC 9380 curve hashing & RFC 9381 ECVRF on Ed25519 and secp256k1 `[Completed]`.
 - **HD Wallets & Mnemonics**: BIP-32, SLIP-0010, AEX-10, and BIP-39 `[Completed]`.
 - **Native Cryptographic Independence**: 100% pure-Erlang fallback for hashing, HMAC, and CSPRNG entropy via `ecu_compat` and `ecu_entropy` `[Completed]`.
 - **Pairing-Friendly Cryptography, zk-SNARKs & Poseidon (BLS12-381 & BN254)**: BLS signatures, BN254 / BLS12-381 curve arithmetic & optimal Ate pairings, Groth16 proof verification, and Poseidon algebraic hashing `[Completed]`.

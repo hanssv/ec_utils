@@ -83,7 +83,8 @@ all_benchmarks() ->
     bls12_381_benchmarks(),
     bn254_benchmarks(),
     groth16_benchmarks(),
-    poseidon_benchmarks()
+    poseidon_benchmarks(),
+    vrf_benchmarks()
   ]).
 
 %% ===================================================================
@@ -1256,3 +1257,173 @@ poseidon_benchmarks() ->
     end,
 
   Base ++ NifBenches.
+
+%% ===================================================================
+%% VRF (RFC 9381)
+%% ===================================================================
+
+vrf_benchmarks() ->
+  case code:ensure_loaded(ecu_vrf) of
+    {module, ecu_vrf} ->
+      SK_Ed = <<1:256>>,
+      PK_Ed_Ell2 = ecu_vrf:derive_public_key(edwards25519_sha512_ell2, SK_Ed),
+      PK_Ed_Tai = ecu_vrf:derive_public_key(edwards25519_sha512_tai, SK_Ed),
+
+      SK_Secp = <<1:256>>,
+      PK_Secp = ecu_vrf:derive_public_key(secp256k1_sha256_tai, SK_Secp),
+
+      Msg = <<"Verifiable Random Function non-random benchmark input message payload">>,
+
+      {ok, Proof_Ed_Ell2} = ecu_vrf:prove(edwards25519_sha512_ell2, SK_Ed, Msg),
+      {ok, Proof_Ed_Tai} = ecu_vrf:prove(edwards25519_sha512_tai, SK_Ed, Msg),
+      {ok, Proof_Secp_Tai} = ecu_vrf:prove(secp256k1_sha256_tai, SK_Secp, Msg),
+      {ok, Proof_Secp_Sswu} = ecu_vrf:prove(secp256k1_sha256_sswu, SK_Secp, Msg),
+
+      Base = [
+        #{
+          id => vrf_prove_ed25519_ell2,
+          name => <<"VRF Prove (Ed25519 Elligator 2)">>,
+          group => vrf,
+          run => {fun({S, K, M}) -> ecu_vrf:prove(S, K, M) end, {edwards25519_sha512_ell2, SK_Ed, Msg}}
+        },
+        #{
+          id => vrf_verify_ed25519_ell2,
+          name => <<"VRF Verify (Ed25519 Elligator 2)">>,
+          group => vrf,
+          run =>
+            {
+              fun({S, P, Pr, M}) -> ecu_vrf:verify(S, P, Pr, M) end,
+              {edwards25519_sha512_ell2, PK_Ed_Ell2, Proof_Ed_Ell2, Msg}
+            }
+        },
+        #{
+          id => vrf_prove_ed25519_tai,
+          name => <<"VRF Prove (Ed25519 Try-and-Increment)">>,
+          group => vrf,
+          run => {fun({S, K, M}) -> ecu_vrf:prove(S, K, M) end, {edwards25519_sha512_tai, SK_Ed, Msg}}
+        },
+        #{
+          id => vrf_verify_ed25519_tai,
+          name => <<"VRF Verify (Ed25519 Try-and-Increment)">>,
+          group => vrf,
+          run =>
+            {
+              fun({S, P, Pr, M}) -> ecu_vrf:verify(S, P, Pr, M) end,
+              {edwards25519_sha512_tai, PK_Ed_Tai, Proof_Ed_Tai, Msg}
+            }
+        },
+        #{
+          id => vrf_prove_secp256k1_tai,
+          name => <<"VRF Prove (secp256k1 Try-and-Increment)">>,
+          group => vrf,
+          run => {fun({S, K, M}) -> ecu_vrf:prove(S, K, M) end, {secp256k1_sha256_tai, SK_Secp, Msg}}
+        },
+        #{
+          id => vrf_verify_secp256k1_tai,
+          name => <<"VRF Verify (secp256k1 Try-and-Increment)">>,
+          group => vrf,
+          run =>
+            {
+              fun({S, P, Pr, M}) -> ecu_vrf:verify(S, P, Pr, M) end,
+              {secp256k1_sha256_tai, PK_Secp, Proof_Secp_Tai, Msg}
+            }
+        },
+        #{
+          id => vrf_prove_secp256k1_sswu,
+          name => <<"VRF Prove (secp256k1 Simplified SWU)">>,
+          group => vrf,
+          run => {fun({S, K, M}) -> ecu_vrf:prove(S, K, M) end, {secp256k1_sha256_sswu, SK_Secp, Msg}}
+        },
+        #{
+          id => vrf_verify_secp256k1_sswu,
+          name => <<"VRF Verify (secp256k1 Simplified SWU)">>,
+          group => vrf,
+          run =>
+            {
+              fun({S, P, Pr, M}) -> ecu_vrf:verify(S, P, Pr, M) end,
+              {secp256k1_sha256_sswu, PK_Secp, Proof_Secp_Sswu, Msg}
+            }
+        }
+      ],
+
+      NifAvail =
+        case code:ensure_loaded(ecu_vrf_nif) of
+          {module, ecu_vrf_nif} ->
+            erlang:function_exported(ecu_vrf_nif, is_available, 0) andalso
+              ecu_vrf_nif:is_available();
+          _ ->
+            false
+        end,
+
+      NifBenches =
+        case NifAvail of
+          true ->
+            [
+              #{
+                id => vrf_prove_ed25519_ell2_rust,
+                name => <<"VRF Prove (Ed25519 Elligator 2) (Rust NIF)">>,
+                group => vrf,
+                run =>
+                  {
+                    fun({S, K, M}) -> ecu_vrf_nif:prove(S, K, M) end,
+                    {edwards25519_sha512_ell2, SK_Ed, Msg}
+                  }
+              },
+              #{
+                id => vrf_verify_ed25519_ell2_rust,
+                name => <<"VRF Verify (Ed25519 Elligator 2) (Rust NIF)">>,
+                group => vrf,
+                run =>
+                  {
+                    fun({S, P, Pr, M}) -> ecu_vrf_nif:verify(S, P, Pr, M) end,
+                    {edwards25519_sha512_ell2, PK_Ed_Ell2, Proof_Ed_Ell2, Msg}
+                  }
+              },
+              #{
+                id => vrf_prove_ed25519_tai_rust,
+                name => <<"VRF Prove (Ed25519 Try-and-Increment) (Rust NIF)">>,
+                group => vrf,
+                run =>
+                  {
+                    fun({S, K, M}) -> ecu_vrf_nif:prove(S, K, M) end,
+                    {edwards25519_sha512_tai, SK_Ed, Msg}
+                  }
+              },
+              #{
+                id => vrf_verify_ed25519_tai_rust,
+                name => <<"VRF Verify (Ed25519 Try-and-Increment) (Rust NIF)">>,
+                group => vrf,
+                run =>
+                  {
+                    fun({S, P, Pr, M}) -> ecu_vrf_nif:verify(S, P, Pr, M) end,
+                    {edwards25519_sha512_tai, PK_Ed_Tai, Proof_Ed_Tai, Msg}
+                  }
+              },
+              #{
+                id => vrf_prove_secp256k1_tai_rust,
+                name => <<"VRF Prove (secp256k1 Try-and-Increment) (Rust NIF)">>,
+                group => vrf,
+                run =>
+                  {
+                    fun({S, K, M}) -> ecu_vrf_nif:prove(S, K, M) end,
+                    {secp256k1_sha256_tai, SK_Secp, Msg}
+                  }
+              },
+              #{
+                id => vrf_verify_secp256k1_tai_rust,
+                name => <<"VRF Verify (secp256k1 Try-and-Increment) (Rust NIF)">>,
+                group => vrf,
+                run =>
+                  {
+                    fun({S, P, Pr, M}) -> ecu_vrf_nif:verify(S, P, Pr, M) end,
+                    {secp256k1_sha256_tai, PK_Secp, Proof_Secp_Tai, Msg}
+                  }
+              }
+            ];
+          false ->
+            []
+        end,
+      Base ++ NifBenches;
+    _ ->
+      []
+  end.

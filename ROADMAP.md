@@ -130,13 +130,18 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 9. Hash-to-Curve (RFC 9380) `[Completed]` & Verifiable Random Functions (VRF / RFC 9381)
+## 9. Hash-to-Curve (RFC 9380) `[Completed]` & Verifiable Random Functions (VRF / RFC 9381) `[Completed]`
 
 - **Standard**: [RFC 9380](https://datatracker.ietf.org/doc/html/rfc9380) (Hashing to Elliptic Curves) and [RFC 9381](https://datatracker.ietf.org/doc/html/rfc9381) (Verifiable Random Functions).
 - **Goal**: Map arbitrary byte strings deterministically to curve points and evaluate verifiable pseudorandom proofs.
-- **Features**:
-  - `ecu_h2c` `[Completed]`: Simplified SWU on 3-isogenous curve with rational map (secp256k1), Elligator 2 on Montgomery Curve25519 with cofactor clearing (edwards25519), and Elligator 2 on Montgomery Curve448 with degree-4 isogeny (edwards448).
-  - ECVRF-EDWARDS25519-SHA512-ELL2 and ECVRF-SECP256K1-SHA256 evaluation and verification.
+- **Features `[Completed]`**:
+  - `ecu_h2c`: Simplified SWU on 3-isogenous curve with rational map (secp256k1), Elligator 2 on Montgomery Curve25519 with cofactor clearing (edwards25519), and Elligator 2 on Montgomery Curve448 with degree-4 isogeny (edwards448).
+  - `ecu_vrf`: Pure-Erlang RFC 9381 Elliptic Curve Verifiable Random Functions:
+    - `ECVRF-EDWARDS25519-SHA512-ELL2` (Suite 0x04) using RFC 9380 Elligator 2 hash-to-curve.
+    - `ECVRF-EDWARDS25519-SHA512-TAI` (Suite 0x03) using Try-and-Increment hash-to-curve.
+    - `ECVRF-SECP256K1-SHA256-TAI` (Suite 0xFE) and `ECVRF-SECP256K1-SHA256-SSWU` using RFC 6979 deterministic nonce generation.
+    - Deterministic proof generation (`prove/3,4`), verification (`verify/4,5`), and VRF hash derivation (`proof_to_hash/2`).
+    - 100% verified against official RFC 9381 Appendix B test vectors (Examples 16–21) and QuickCheck properties (`vrf_eqc.erl`).
 
 ---
 

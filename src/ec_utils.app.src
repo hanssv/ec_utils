@@ -47,7 +47,8 @@
     ecu_ripemd160,
     ecu_hmac,
     ecu_hkdf,
-    ecu_pbkdf2
+    ecu_pbkdf2,
+    ecu_vrf
   ]},
   {licenses, ["MIT"]},
   {links, []}

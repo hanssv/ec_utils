@@ -1,0 +1,19 @@
+[package]
+name = "ecu_vrf_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ecu_vrf_nif"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rustler = "0.39.0"
+vrf-rfc9381 = { version = "0.0.7", features = ["edwards25519"] }
+vrf_fun = { version = "0.12.1", features = ["bincode"] }
+secp256kfun = { version = "0.12.1", features = ["bincode"] }
+sigma_fun = { version = "0.9.0", features = ["bincode"] }
+bincode = "2.0.1"
+sha2 = "0.10.8"
+generic-array = "0.14.7"
+curve25519-dalek = "5.0.0"
