@@ -248,3 +248,88 @@ This document outlines planned enhancements, cryptographic extensions, and archi
   - 100% codebase unification: Every module in `src/` routes external cryptographic and entropy calls exclusively through `ecu_compat`.
   - Comprehensive unit testing (`ecu_compat_tests.erl`) cross-verifying pure-Erlang vs OTP implementations across all primitives.
 
+---
+
+## 17. In-Circuit Native Curves: BabyJubjub & Jubjub (Circom & ZoKrates Core)
+
+- **Standard**: BabyJubjub (twisted Edwards curve over BN254 $\mathbb{F}_r$, Circomlib / EIP-2494) and Jubjub (twisted Edwards curve over BLS12-381 $\mathbb{F}_r$, Zcash / ZoKrates).
+- **Goal**: Provide native support for elliptic curve operations, EdDSA signatures, and Pedersen commitments that execute natively inside zk-SNARK circuits without expensive non-native field emulation.
+- **Features**:
+  - Complete twisted Edwards arithmetic ($a x^2 + y^2 = 1 + d x^2 y^2$) in projective coordinates over the scalar fields of BN254 and BLS12-381.
+  - BabyJubjub curve parameters: $a = 168700$, $d = 168696$, subgroup order $r_{bjj}$.
+  - Point compression and decompression (32-byte format matching `circomlibjs` and SnarkJS).
+  - Birational map to Montgomery form for Montgomery ladder scalar multiplication.
+  - BabyJubjub EdDSA signing and verification compatible with Circom `EdDSAPoseidonVerifier.circom` and ZoKrates.
+  - In-circuit Pedersen hash and commitment generation using precomputed generator tables matching `circomlib`.
+  - Jubjub arithmetic over BLS12-381 $\mathbb{F}_r$ for Zcash-style circuits.
+
+---
+
+## 18. KZG Polynomial Commitments & EIP-4844 (BLS12-381)
+
+- **Standard**: [Kate, Zaverucha, Goldberg (2010)](https://www.iacr.org/archive/asiacrypt2010/6477178/6477178.pdf) / [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844) (Proto-Danksharding).
+- **Goal**: Enable constant-sized polynomial commitments, opening evaluation proofs, and fast batch verification on BLS12-381.
+- **Features**:
+  - Finite field polynomial arithmetic over BLS12-381 $\mathbb{F}_r$ (addition, multiplication, evaluation, and synthetic division $Q(x) = \frac{P(x) - y}{x - z}$).
+  - Commitment: Commit to degree-$d$ polynomial $P(x)$ as a single group element $C = [P(\tau)]_1 \in \mathbb{G}_1$ using structured reference string (SRS / Powers of Tau).
+  - Evaluation Proofs: Opening proof $\pi = [Q(\tau)]_1$ showing $P(z) = y$.
+  - Verification: Single pairing check $e(C - [y]_1, [1]_2) = e(\pi, [\tau - z]_2)$.
+  - Batching: Multi-point opening proofs and randomized multi-polynomial batch verification.
+  - Ethereum Blob Verification: Point evaluation precompile format matching EIP-4844 specifications.
+
+---
+
+## 19. Circom & ZoKrates Circuit / Witness Tooling
+
+- **Standard**: Circom 2 R1CS binary format and binary witness (`.wtns`) format.
+- **Goal**: Bridge BEAM applications directly with Circom and ZoKrates artifacts without external Node.js or Rust runtimes.
+- **Features**:
+  - Pure-Erlang parser for `.r1cs` binary constraint files.
+  - Constraint satisfaction validator: verifies whether witness vector $w$ satisfies $(A \cdot w) \circ (B \cdot w) = C \cdot w$ over $\mathbb{F}_r$.
+  - Binary parser and serializer for Circom `.wtns` witness files.
+  - Public input formatter bridging Erlang terms directly to `ecu_groth16:verify/3`.
+
+---
+
+## 20. Universal zk-SNARKs: PLONK Verifier (BN254 & BLS12-381)
+
+- **Standard**: [PLONK](https://eprint.iacr.org/2019/953) (Permutations over Lagrange-bases for Oecumenical Non-interactive arguments of Knowledge).
+- **Goal**: Support universal (non-circuit-specific) SNARK verification on the BEAM.
+- **Features**:
+  - Verification of standard PLONK proofs exported by SnarkJS and ZoKrates.
+  - Universal verification key evaluation using universal Powers of Tau.
+  - Wire and permutation polynomial evaluation using KZG commitment verification.
+
+---
+
+## 21. BIP-352: Silent Payments (secp256k1)
+
+- **Standard**: [BIP-352](https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki) (Silent Payments).
+- **Goal**: Implement private, reusable Bitcoin stealth addresses with zero on-chain linkability.
+- **Features**:
+  - Silent payment address encoding/decoding (`sp1...` bech32m format).
+  - Sender key aggregation, shared secret derivation ($k \cdot (A_{scan} + B_{scan})$), and output tweak generation.
+  - Receiver scanning algorithm for detecting incoming transactions across UTXO sets without revealing public keys.
+
+---
+
+## 22. Post-Quantum Hybrid Handshake: PQXDH (Signal)
+
+- **Standard**: [Signal PQXDH Specification](https://signal.org/docs/specifications/pqxdh/) (Post-Quantum Extended Diffie-Hellman).
+- **Goal**: Quantum-resistant asynchronous authenticated key agreement combining classical X25519 ECDH and ML-KEM-768.
+- **Features**:
+  - Prekey bundle encoding with both classical Curve25519 and ML-KEM-768 encapsulation keys.
+  - Four-part shared secret derivation with post-quantum security guarantees against "harvest now, decrypt later" attacks.
+
+---
+
+## 23. Schnorr Adaptor Signatures (Scriptless Scripts)
+
+- **Standard**: Scriptless Scripts / BIP-340 Schnorr Adaptor Signatures.
+- **Goal**: Enable conditional atomic transactions and cross-chain swaps without on-chain smart contract complexity.
+- **Features**:
+  - Pre-signature generation with point encryption $Y = y \cdot G$.
+  - Adaptor verification without knowledge of witness secret $y$.
+  - Adaptor completion into valid BIP-340 signature and witness extraction upon broadcast.
+
+
