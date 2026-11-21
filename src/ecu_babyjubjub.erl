@@ -1,0 +1,445 @@
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Pure-Erlang implementation of the BabyJubjub elliptic curve (EIP-2494)
+%%% and Circom-compatible EdDSA signatures with Poseidon.
+%%%
+%%% BabyJubjub is a twisted Edwards curve birationally equivalent to a
+%%% Montgomery curve, defined over the scalar field of BN254 (alt_bn128).
+%%% It is specifically designed to execute with minimal constraint count
+%%% inside zk-SNARK circuits.
+%%%
+%%% Curve equation: a * x^2 + y^2 = 1 + d * x^2 * y^2 (mod q)
+%%% where:
+%%%   q = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+%%%   a = 168700
+%%%   d = 168696
+%%% @end
+%%%-------------------------------------------------------------------
+-module(ecu_babyjubjub).
+
+-typing([eqwalizer]).
+
+-export([
+  q/0,
+  a/0,
+  d/0,
+  order/0,
+  suborder/0,
+  cofactor/0,
+  base8/0,
+  generator/0,
+  identity/0,
+
+  is_on_curve/1,
+  is_in_subgroup/1,
+  add/2,
+  double/1,
+  neg/1,
+  mul/2,
+  mul_base8/1,
+  compress/1,
+  decompress/1,
+
+  keypair/0,
+  keypair/1,
+  derive_public_key/1,
+  sign/2,
+  verify/3
+]).
+
+-export_type([
+  point/0,
+  projective_point/0
+]).
+
+%%%-------------------------------------------------------------------
+%%% Curve Constants & Definitions
+%%%-------------------------------------------------------------------
+
+-define(Q, 16#30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001).
+-define(A_COEFF, 168700).
+-define(D_COEFF, 168696).
+
+%% Curve order N = 8 * L
+-define(ORDER, 21888242871839275222246405745257275088614511777268538073601725287587578984328).
+%% Prime subgroup order L
+-define(SUBORDER, 2736030358979909402780800718157159386076813972158567259200215660948447373041).
+-define(COFACTOR, 8).
+
+%% Subgroup generator Base8
+-define(BASE8_X, 5299619240641551281634865583518297030282874472190772894086521144482721001553).
+-define(BASE8_Y, 16950150798460657717958625567821834550301663161624707787222815936182638968203).
+
+%% Full curve generator G
+-define(GEN_X, 995203441582195749578291179787384436505546430278305826713579947235728471134).
+-define(GEN_Y, 5472060717959818805561601436314318772137091100104008585924551046643952123905).
+
+%% Tonelli-Shanks constants for Q = 2^28 * S + 1
+-define(TS_E, 28).
+-define(TS_S, 81540058820840996586704275553141814055101440848469862132140264610111).
+-define(TS_G, 19103219067921713944291392827692070036145651957329286315305642004821462161904).
+
+-type point() :: {non_neg_integer(), non_neg_integer()}.
+-type projective_point() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
+
+%%%-------------------------------------------------------------------
+%%% API: Parameters
+%%%-------------------------------------------------------------------
+
+-spec q() -> non_neg_integer().
+q() ->
+  ?Q.
+
+-spec a() -> non_neg_integer().
+a() ->
+  ?A_COEFF.
+
+-spec d() -> non_neg_integer().
+d() ->
+  ?D_COEFF.
+
+-spec order() -> non_neg_integer().
+order() ->
+  ?ORDER.
+
+-spec suborder() -> non_neg_integer().
+suborder() ->
+  ?SUBORDER.
+
+-spec cofactor() -> pos_integer().
+cofactor() ->
+  ?COFACTOR.
+
+-spec base8() -> point().
+base8() ->
+  {?BASE8_X, ?BASE8_Y}.
+
+-spec generator() -> point().
+generator() ->
+  {?GEN_X, ?GEN_Y}.
+
+-spec identity() -> point().
+identity() ->
+  {0, 1}.
+
+%%%-------------------------------------------------------------------
+%%% API: Curve Arithmetic
+%%%-------------------------------------------------------------------
+
+%% @doc Check whether an affine point lies on the BabyJubjub curve.
+-spec is_on_curve(point()) -> boolean().
+is_on_curve({X, Y}) when X >= 0, X < ?Q, Y >= 0, Y < ?Q ->
+  X2 = (X * X) rem ?Q,
+  Y2 = (Y * Y) rem ?Q,
+  Left = (?A_COEFF * X2 + Y2) rem ?Q,
+  Right = (1 + ?D_COEFF * X2 rem ?Q * Y2) rem ?Q,
+  Left =:= Right;
+is_on_curve(_) ->
+  false.
+
+%% @doc Check whether a point belongs to the prime-order subgroup of size L.
+-spec is_in_subgroup(point()) -> boolean().
+is_in_subgroup(Point) ->
+  is_on_curve(Point) andalso (mul(Point, ?SUBORDER) =:= identity()).
+
+%% @doc Point negation: -(x, y) = (q - x, y).
+-spec neg(point()) -> point().
+neg({0, Y}) ->
+  {0, Y};
+neg({X, Y}) when X > 0, X < ?Q, Y >= 0, Y < ?Q ->
+  {?Q - X, Y};
+neg(_) ->
+  error(badarg).
+
+%% @doc Double a point on the curve.
+-spec double(point() | projective_point()) -> point().
+double({X, Y}) ->
+  to_affine(proj_add({X, Y, 1}, {X, Y, 1}));
+double({X, Y, Z}) ->
+  to_affine(proj_add({X, Y, Z}, {X, Y, Z})).
+
+%% @doc Add two points on the twisted Edwards curve.
+-spec add(point() | projective_point(), point() | projective_point()) -> point().
+add(P1, P2) ->
+  P1Proj = to_proj(P1),
+  P2Proj = to_proj(P2),
+  to_affine(proj_add(P1Proj, P2Proj)).
+
+%% @doc Scalar multiplication k * P.
+-spec mul(point() | projective_point(), integer()) -> point().
+mul(_Point, 0) ->
+  identity();
+mul(Point, K) when K < 0 ->
+  mul(neg(to_affine(Point)), -K);
+mul(Point, K) when is_integer(K) ->
+  PProj = to_proj(Point),
+  to_affine(scalar_mul_proj(PProj, K)).
+
+%% @doc Fast scalar multiplication for the standard subgroup base point Base8.
+-spec mul_base8(integer()) -> point().
+mul_base8(K) ->
+  mul(base8(), K).
+
+%% @doc Compress an affine point into a 32-byte binary per EIP-2494 / Circom.
+-spec compress(point()) -> <<_:256>>.
+compress({X, Y}) when X >= 0, X < ?Q, Y >= 0, Y < ?Q ->
+  <<Y0:248/little, YLast:8>> = <<Y:256/little>>,
+  SignBit =
+    if
+      X > (?Q bsr 1) -> 16#80;
+      true -> 0
+    end,
+  <<Y0:248/little, (YLast bor SignBit):8>>;
+compress(_) ->
+  error(badarg).
+
+%% @doc Decompress a 32-byte binary into an affine point.
+-spec decompress(binary()) -> {ok, point()} | {error, term()}.
+decompress(<<Y0:248/little, YLast:8>>) ->
+  Sign = (YLast band 16#80) =/= 0,
+  Y = binary:decode_unsigned(<<Y0:248/little, (YLast band 16#7F):8>>, little),
+  if
+    Y >= ?Q ->
+      {error, y_outside_field};
+    true ->
+      Y2 = (Y * Y) rem ?Q,
+      Num = (1 - Y2 + ?Q) rem ?Q,
+      Den = (?A_COEFF - ?D_COEFF * Y2 rem ?Q + ?Q) rem ?Q,
+      case Den of
+        0 ->
+          {error, zero_denominator};
+        _ ->
+          DenInv = ecu_misc:exp_mod(Den, ?Q - 2, ?Q),
+          X2 = (Num * DenInv) rem ?Q,
+          case mod_sqrt(X2) of
+            {ok, XRoot} ->
+              X =
+                if
+                  Sign andalso (XRoot =< (?Q bsr 1)) -> ?Q - XRoot;
+                  (not Sign) andalso (XRoot > (?Q bsr 1)) -> ?Q - XRoot;
+                  true -> XRoot
+                end,
+              {ok, {X, Y}};
+            error ->
+              {error, not_on_curve}
+          end
+      end
+  end;
+decompress(_) ->
+  {error, bad_length}.
+
+%%%-------------------------------------------------------------------
+%%% API: Circom EdDSA (Poseidon)
+%%%-------------------------------------------------------------------
+
+%% @doc Generate a new random EdDSA keypair on BabyJubjub.
+-spec keypair() -> {binary(), <<_:256>>}.
+keypair() ->
+  Seed = ecu_compat:strong_rand_bytes(32),
+  keypair(Seed).
+
+%% @doc Derive EdDSA keypair from a 32-byte secret seed.
+-spec keypair(binary()) -> {binary(), <<_:256>>}.
+keypair(Seed) when is_binary(Seed), byte_size(Seed) =:= 32 ->
+  PK = derive_public_key(Seed),
+  {Seed, PK};
+keypair(_) ->
+  error(badarg).
+
+%% @doc Derive 32-byte compressed public key from a 32-byte secret seed.
+-spec derive_public_key(binary()) -> <<_:256>>.
+derive_public_key(Seed) when is_binary(Seed), byte_size(Seed) =:= 32 ->
+  H = ecu_blake512:hash(Seed),
+  <<H0_31:32/binary, _/binary>> = H,
+  Scalar = prune_to_scalar(H0_31),
+  PK = mul_base8(Scalar),
+  compress(PK);
+derive_public_key(_) ->
+  error(badarg).
+
+%% @doc Sign a field element message using Circom-compatible Poseidon EdDSA.
+-spec sign(binary(), non_neg_integer() | binary()) -> <<_:512>>.
+sign(Seed, Msg) when is_binary(Seed), byte_size(Seed) =:= 32 ->
+  MsgInt = to_field_element(Msg),
+  H = ecu_blake512:hash(Seed),
+  <<H0_31:32/binary, H32_63:32/binary>> = H,
+  ScalarKey = prune_to_scalar(H0_31),
+  PK = mul_base8(ScalarKey),
+  {PK_X, PK_Y} = PK,
+
+  MsgLE = <<MsgInt:256/little>>,
+  RHash = ecu_blake512:hash(<<H32_63/binary, MsgLE/binary>>),
+  RNum = binary:decode_unsigned(RHash, little) rem ?SUBORDER,
+  R8 = mul_base8(RNum),
+  {R8_X, R8_Y} = R8,
+
+  HM = ecu_poseidon:hash(bn254, [R8_X, R8_Y, PK_X, PK_Y, MsgInt]),
+  S = (RNum + HM * (ScalarKey bsl 3)) rem ?SUBORDER,
+
+  R8Comp = compress(R8),
+  <<R8Comp/binary, S:256/little>>;
+sign(_, _) ->
+  error(badarg).
+
+%% @doc Verify an EdDSA signature against public key and message.
+-spec verify(binary() | point(), binary(), non_neg_integer() | binary()) -> boolean().
+verify(PK, Sig, Msg) when is_binary(Sig), byte_size(Sig) =:= 64 ->
+  try
+    PKPoint =
+      case PK of
+        {X, Y} when is_integer(X), is_integer(Y) -> {X, Y};
+        <<_:32/binary>> ->
+          case decompress(PK) of
+            {ok, P} -> P;
+            _ -> throw(bad_pk)
+          end;
+        _ ->
+          throw(bad_pk)
+      end,
+    MsgInt = to_field_element(Msg),
+    <<R8Comp:32/binary, S:256/little>> = Sig,
+    if
+      S >= ?SUBORDER ->
+        false;
+      true ->
+        case decompress(R8Comp) of
+          {ok, R8} ->
+            {R8_X, R8_Y} = R8,
+            {PK_X, PK_Y} = PKPoint,
+            HM = ecu_poseidon:hash(bn254, [R8_X, R8_Y, PK_X, PK_Y, MsgInt]),
+            L = mul_base8(S),
+            HMTimes8 = (HM * 8) rem ?SUBORDER,
+            HM_PK = mul(PKPoint, HMTimes8),
+            R = add(R8, HM_PK),
+            L =:= R;
+          _ ->
+            false
+        end
+    end
+  catch
+    _:_ ->
+      false
+  end;
+verify(_, _, _) ->
+  false.
+
+%%%-------------------------------------------------------------------
+%%% Internal Helpers: Projective Arithmetic
+%%%-------------------------------------------------------------------
+
+-compile({inline, [to_proj/1, to_affine/1, proj_add/2]}).
+
+-spec to_proj(point() | projective_point()) -> projective_point().
+to_proj({X, Y}) ->
+  {X, Y, 1};
+to_proj({X, Y, Z}) ->
+  {X, Y, Z}.
+
+-spec to_affine(point() | projective_point()) -> point().
+to_affine({X, Y}) ->
+  {X, Y};
+to_affine({0, _Y, _Z}) ->
+  {0, 1};
+to_affine({_X, 0, _Z}) ->
+  identity();
+to_affine({X, Y, 1}) ->
+  {X, Y};
+to_affine({X, Y, Z}) ->
+  ZInv = ecu_misc:exp_mod(Z, ?Q - 2, ?Q),
+  {(X * ZInv) rem ?Q, (Y * ZInv) rem ?Q}.
+
+%% @doc Complete projective addition formula for twisted Edwards curves (BBJLP).
+-spec proj_add(projective_point(), projective_point()) -> projective_point().
+proj_add({X1, Y1, Z1}, {X2, Y2, Z2}) ->
+  A = (Z1 * Z2) rem ?Q,
+  B = (A * A) rem ?Q,
+  C = (X1 * X2) rem ?Q,
+  D = (Y1 * Y2) rem ?Q,
+  E = (?D_COEFF * C rem ?Q * D) rem ?Q,
+  F = (B - E + ?Q) rem ?Q,
+  G = (B + E) rem ?Q,
+  Aux = (((X1 + Y1) * (X2 + Y2) - C - D) rem ?Q + 2 * ?Q) rem ?Q,
+  X3 = (A * F rem ?Q * Aux) rem ?Q,
+  Dac = (D - ?A_COEFF * C rem ?Q + ?A_COEFF * ?Q) rem ?Q,
+  Y3 = (A * G rem ?Q * Dac) rem ?Q,
+  Z3 = (F * G) rem ?Q,
+  {X3, Y3, Z3}.
+
+-spec scalar_mul_proj(projective_point(), non_neg_integer()) -> projective_point().
+scalar_mul_proj(_P, 0) ->
+  {0, 1, 1};
+scalar_mul_proj(P, 1) ->
+  P;
+scalar_mul_proj(P, K) ->
+  scalar_mul_loop(K, P, {0, 1, 1}).
+
+-spec scalar_mul_loop(non_neg_integer(), projective_point(), projective_point()) ->
+  projective_point().
+scalar_mul_loop(0, _Exp, Acc) ->
+  Acc;
+scalar_mul_loop(N, Exp, Acc) ->
+  Acc1 =
+    if
+      (N band 1) =:= 1 -> proj_add(Acc, Exp);
+      true -> Acc
+    end,
+  scalar_mul_loop(N bsr 1, proj_add(Exp, Exp), Acc1).
+
+%%%-------------------------------------------------------------------
+%%% Internal Helpers: Tonelli-Shanks Square Root
+%%%-------------------------------------------------------------------
+
+-spec mod_sqrt(non_neg_integer()) -> {ok, non_neg_integer()} | error.
+mod_sqrt(0) ->
+  {ok, 0};
+mod_sqrt(A) ->
+  case ecu_misc:exp_mod(A, (?Q - 1) div 2, ?Q) of
+    1 ->
+      Y0 = ecu_misc:exp_mod(A, (?TS_S + 1) div 2, ?Q),
+      B0 = ecu_misc:exp_mod(A, ?TS_S, ?Q),
+      ts_loop(Y0, B0, ?TS_G, ?TS_E);
+    _ ->
+      error
+  end.
+
+-spec ts_loop(non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ->
+  {ok, non_neg_integer()}.
+ts_loop(Y, 1, _GCur, _R) ->
+  {ok, Y};
+ts_loop(Y, B, GCur, R) ->
+  M = find_order((B * B) rem ?Q, 1),
+  Shift = R - M - 1,
+  G2 = ecu_misc:exp_mod(GCur, 1 bsl Shift, ?Q),
+  NewY = (Y * G2) rem ?Q,
+  NewGCur = (G2 * G2) rem ?Q,
+  NewB = (B * NewGCur) rem ?Q,
+  ts_loop(NewY, NewB, NewGCur, M).
+
+-spec find_order(non_neg_integer(), non_neg_integer()) -> non_neg_integer().
+find_order(1, M) ->
+  M;
+find_order(T, M) ->
+  find_order((T * T) rem ?Q, M + 1).
+
+%%%-------------------------------------------------------------------
+%%% Internal Helpers: Key Parsing & Pruning
+%%%-------------------------------------------------------------------
+
+-spec prune_to_scalar(<<_:256>>) -> non_neg_integer().
+prune_to_scalar(<<B0:8, Mid:30/binary, B31:8>>) ->
+  PB0 = B0 band 16#F8,
+  PB31 = (B31 band 16#7F) bor 16#40,
+  Pruned = <<PB0:8, Mid/binary, PB31:8>>,
+  binary:decode_unsigned(Pruned, little) bsr 3.
+
+-spec to_field_element(non_neg_integer() | binary()) -> non_neg_integer().
+to_field_element(Msg) when is_integer(Msg), Msg >= 0, Msg < ?Q ->
+  Msg;
+to_field_element(Msg) when is_binary(Msg), byte_size(Msg) =< 32 ->
+  Val = binary:decode_unsigned(Msg, little),
+  if
+    Val < ?Q -> Val;
+    true -> error(badarg)
+  end;
+to_field_element(_) ->
+  error(badarg).
