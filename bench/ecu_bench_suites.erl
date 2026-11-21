@@ -84,7 +84,8 @@ all_benchmarks() ->
     bn254_benchmarks(),
     groth16_benchmarks(),
     poseidon_benchmarks(),
-    vrf_benchmarks()
+    vrf_benchmarks(),
+    babyjubjub_benchmarks()
   ]).
 
 %% ===================================================================
@@ -1418,6 +1419,118 @@ vrf_benchmarks() ->
                     fun({S, P, Pr, M}) -> ecu_vrf_nif:verify(S, P, Pr, M) end,
                     {secp256k1_sha256_tai, PK_Secp, Proof_Secp_Tai, Msg}
                   }
+              }
+            ];
+          false ->
+            []
+        end,
+      Base ++ NifBenches;
+    _ ->
+      []
+  end.
+
+%% ===================================================================
+%% BabyJubjub
+%% ===================================================================
+
+babyjubjub_benchmarks() ->
+  case code:ensure_loaded(ecu_babyjubjub) of
+    {module, ecu_babyjubjub} ->
+      SK =
+        <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0,
+          1>>,
+      P1 = ecu_babyjubjub:base8(),
+      P2 = ecu_babyjubjub:double(P1),
+      P1Comp = ecu_babyjubjub:compress(P1),
+      P2Comp = ecu_babyjubjub:compress(P2),
+      Scalar = 12345678901234567890,
+      ScalarBE = <<Scalar:256/big>>,
+      Msg = 987654321012345,
+      MsgBE = <<Msg:256/big>>,
+      PK = ecu_babyjubjub:derive_public_key(SK),
+      Sig = ecu_babyjubjub:sign(SK, Msg),
+
+      Base = [
+        #{
+          id => babyjubjub_point_add,
+          name => <<"BabyJubjub Point Addition">>,
+          group => babyjubjub,
+          run => {fun({A, B}) -> ecu_babyjubjub:add(A, B) end, {P1, P2}}
+        },
+        #{
+          id => babyjubjub_scalar_mul,
+          name => <<"BabyJubjub Scalar Multiplication">>,
+          group => babyjubjub,
+          run => {fun({P, K}) -> ecu_babyjubjub:mul(P, K) end, {P1, Scalar}}
+        },
+        #{
+          id => babyjubjub_compress,
+          name => <<"BabyJubjub Point Compress">>,
+          group => babyjubjub,
+          run => {fun(P) -> ecu_babyjubjub:compress(P) end, P1}
+        },
+        #{
+          id => babyjubjub_decompress,
+          name => <<"BabyJubjub Point Decompress">>,
+          group => babyjubjub,
+          run => {fun(C) -> ecu_babyjubjub:decompress(C) end, P1Comp}
+        },
+        #{
+          id => babyjubjub_eddsa_sign,
+          name => <<"BabyJubjub EdDSA Sign (Poseidon)">>,
+          group => babyjubjub,
+          run => {fun({K, M}) -> ecu_babyjubjub:sign(K, M) end, {SK, Msg}}
+        },
+        #{
+          id => babyjubjub_eddsa_verify,
+          name => <<"BabyJubjub EdDSA Verify (Poseidon)">>,
+          group => babyjubjub,
+          run => {fun({P, S, M}) -> ecu_babyjubjub:verify(P, S, M) end, {PK, Sig, Msg}}
+        }
+      ],
+
+      NifAvail =
+        case code:ensure_loaded(ecu_babyjubjub_nif) of
+          {module, ecu_babyjubjub_nif} ->
+            erlang:function_exported(ecu_babyjubjub_nif, is_available, 0) andalso
+              ecu_babyjubjub_nif:is_available();
+          _ ->
+            false
+        end,
+
+      NifBenches =
+        case NifAvail of
+          true ->
+            [
+              #{
+                id => babyjubjub_point_add_rust,
+                name => <<"BabyJubjub Point Addition (Rust NIF)">>,
+                group => babyjubjub,
+                run => {fun({A, B}) -> ecu_babyjubjub_nif:point_add(A, B) end, {P1Comp, P2Comp}}
+              },
+              #{
+                id => babyjubjub_scalar_mul_rust,
+                name => <<"BabyJubjub Scalar Multiplication (Rust NIF)">>,
+                group => babyjubjub,
+                run => {fun({P, K}) -> ecu_babyjubjub_nif:point_mul(P, K) end, {P1Comp, ScalarBE}}
+              },
+              #{
+                id => babyjubjub_decompress_rust,
+                name => <<"BabyJubjub Point Decompress (Rust NIF)">>,
+                group => babyjubjub,
+                run => {fun(C) -> ecu_babyjubjub_nif:decompress_point(C) end, P1Comp}
+              },
+              #{
+                id => babyjubjub_eddsa_sign_rust,
+                name => <<"BabyJubjub EdDSA Sign (Poseidon) (Rust NIF)">>,
+                group => babyjubjub,
+                run => {fun({K, M}) -> ecu_babyjubjub_nif:eddsa_sign(K, M) end, {SK, MsgBE}}
+              },
+              #{
+                id => babyjubjub_eddsa_verify_rust,
+                name => <<"BabyJubjub EdDSA Verify (Poseidon) (Rust NIF)">>,
+                group => babyjubjub,
+                run => {fun({P, S, M}) -> ecu_babyjubjub_nif:eddsa_verify(P, S, M) end, {PK, Sig, MsgBE}}
               }
             ];
           false ->

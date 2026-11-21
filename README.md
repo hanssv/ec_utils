@@ -6,7 +6,7 @@ A pure Erlang cryptographic library implementing elliptic curve arithmetic
 BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
-pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**),
+pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **BabyJubjub**),
 Hash-to-Curve (RFC 9380), Verifiable Random Functions (VRF / RFC 9381),
 hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
 mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
@@ -388,6 +388,28 @@ MultiHash = ecu_poseidon:hash(bls12_381, [1, 2, 3, 4]).
 BinHash = ecu_poseidon:hash_binary(bn254, [<<1:256>>, <<2:256>>]).
 ```
 
+### BabyJubjub & Circom EdDSA (Poseidon)
+
+Pure-Erlang BabyJubjub twisted Edwards curve arithmetic (EIP-2494) and Circom-compatible EdDSA signatures with Poseidon:
+
+```erlang
+%% Key generation (random or from 32-byte seed)
+{SecretSeed, PublicKey} = ecu_babyjubjub:keypair(),
+
+%% Circom-compatible EdDSA signing with Poseidon
+Msg = 123456789,
+Signature = ecu_babyjubjub:sign(SecretSeed, Msg),
+
+%% Verification (compatible with Circom EdDSAPoseidonVerifier.circom and circomlibjs)
+true = ecu_babyjubjub:verify(PublicKey, Signature, Msg).
+
+%% Curve operations
+Base8 = ecu_babyjubjub:base8(),
+P2 = ecu_babyjubjub:double(Base8),
+Compressed = ecu_babyjubjub:compress(P2),
+{ok, P2} = ecu_babyjubjub:decompress(Compressed).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -661,6 +683,13 @@ Supported Curves & API
   - `permute/2`: Evaluate the Hades permutation on full state vectors.
   - Optimized implementation: Unrolled constants table, register-allocated tail-recursive loop, zero heap allocations for `hash3/2,3` (~90 µs/hash, >10,800 hashes/sec in pure Erlang).
 - `ecu_poseidon_constants`: Precomputed round constants and MDS matrices for BLS12-381 (from canonical Grain LFSR) and BN254 (matching Circomlib).
+- `ecu_babyjubjub`: Pure-Erlang implementation of the BabyJubjub twisted Edwards curve (EIP-2494) and Poseidon EdDSA signatures:
+  - `add/2`, `double/1`, `neg/1`, `mul/2`, `mul_base8/1`: Complete twisted Edwards arithmetic in projective coordinates over the scalar field of BN254.
+  - `compress/1`, `decompress/1`: 32-byte point compression and decompression with Tonelli-Shanks modular square root.
+  - `is_on_curve/1`, `is_in_subgroup/1`: Curve equation validation and prime-order subgroup membership checks.
+  - `keypair/0,1`, `derive_public_key/1`: Key generation and derivation matching Circom / SnarkJS conventions.
+  - `sign/2`, `verify/3`: Circom-compatible EdDSA signing and verification with Poseidon hash (`EdDSAPoseidonVerifier.circom`).
+- `ecu_blake512`: Pure-Erlang implementation of the BLAKE-512 cryptographic hash function used for BabyJubjub key expansion and nonces.
 
 Performance & Benchmarks
 ------------------------
@@ -777,6 +806,12 @@ the library incorporates key algorithmic optimizations:
 | **groth16 verify (BN254)** | — | **26.2 ms** | — | 1.59 ms (Arkworks Rust NIF) | 16.5× |
 | **groth16 batch verify (4 proofs, BN254)** | — | **9.1 ms/proof** | **~2.9×** | — | — |
 | **poseidon hash3 (BN254)** | — | **115 µs** | — | 21.2 µs (light-poseidon Rust NIF) | 5.4× |
+| **babyjubjub point add** | — | **14.5 µs** | — | 1.31 ms (babyjubjub-rs Rust NIF)* | **90× faster** |
+| **babyjubjub scalar mul** | — | **259 µs** | — | 684 µs (babyjubjub-rs Rust NIF) | **2.64× faster** |
+| **babyjubjub point compress** | — | **0.09 µs** | — | — | — |
+| **babyjubjub point decompress** | — | **137 µs** | — | 645 µs (babyjubjub-rs Rust NIF) | **4.71× faster** |
+| **babyjubjub eddsa sign (Poseidon)** | — | **2.64 ms** | — | 276 µs (babyjubjub-rs Rust NIF) | 9.57× |
+| **babyjubjub eddsa verify (Poseidon)** | — | **2.74 ms** | — | 1.56 ms (babyjubjub-rs Rust NIF) | 1.76× |
 | **vrf prove (Ed25519 Elligator 2)** | — | **1.88 ms** | — | 111 µs (vrf-rfc9381 Rust NIF) | 16.9× |
 | **vrf verify (Ed25519 Elligator 2)** | — | **2.12 ms** | — | 137 µs (vrf-rfc9381 Rust NIF) | 15.5× |
 | **vrf prove (secp256k1 TAI)** | — | **933 µs** | — | 179 µs (vrf_fun Rust NIF) | 5.2× |
@@ -791,6 +826,7 @@ the library incorporates key algorithmic optimizations:
 - *FROST threshold reference benchmarks use optional RFC 9591 test NIFs (Zcash Foundation `frost-core` crates) buildable via `make frost_reference`.*
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
 - *BN254 elliptic curve and Groth16 reference benchmarks use an optional Arkworks test NIF (`crates/bn254_nif`) buildable via `make reference_nifs`.*
+- *BabyJubjub and Circom EdDSA reference benchmarks use an optional Rust test NIF (`crates/babyjubjub_nif`) wrapping `babyjubjub-rs`, buildable via `make babyjubjub_reference`.*
 - *VRF (RFC 9381) reference benchmarks use an optional Rust test NIF (`crates/vrf_nif`) wrapping `vrf-rfc9381` and `vrf_fun`, buildable via `make vrf_reference`.*
 - *Pure Erlang SLH-DSA signing executes ~80,000 hash operations. SHA-2 parameter sets (`slh_dsa_sha2_128f` at 346 ms) are ~24× faster than SHAKE parameter sets (`slh_dsa_shake_128f` at 8.20 s) because Keccak-f[1600] operates on 64-bit uints that exceed BEAM's 60-bit `smallint` range and lack SIMD vectorization. In contrast, native OpenSSL uses multi-buffer SIMD (AVX2/AVX-512) to compute 4–8 Keccak states concurrently, reaching 27.2 ms.*
 - *All reference NIFs can be built together using `make reference_nifs`.*

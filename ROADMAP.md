@@ -250,16 +250,21 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 17. In-Circuit Native Curves: BabyJubjub & Jubjub (Circom & ZoKrates Core)
+## 17. In-Circuit Native Curves: BabyJubjub & Jubjub (Circom & ZoKrates Core) `[BabyJubjub Completed]`
 
 - **Standard**: BabyJubjub (twisted Edwards curve over BN254 $\mathbb{F}_r$, Circomlib / EIP-2494) and Jubjub (twisted Edwards curve over BLS12-381 $\mathbb{F}_r$, Zcash / ZoKrates).
 - **Goal**: Provide native support for elliptic curve operations, EdDSA signatures, and Pedersen commitments that execute natively inside zk-SNARK circuits without expensive non-native field emulation.
-- **Features**:
-  - Complete twisted Edwards arithmetic ($a x^2 + y^2 = 1 + d x^2 y^2$) in projective coordinates over the scalar fields of BN254 and BLS12-381.
-  - BabyJubjub curve parameters: $a = 168700$, $d = 168696$, subgroup order $r_{bjj}$.
-  - Point compression and decompression (32-byte format matching `circomlibjs` and SnarkJS).
+- **Features `[BabyJubjub Completed]`**:
+  - `ecu_babyjubjub`: Pure-Erlang implementation of BabyJubjub twisted Edwards arithmetic ($a x^2 + y^2 = 1 + d x^2 y^2$ with $a = 168700, d = 168696$) in projective coordinates over the scalar field of BN254.
+  - Complete twisted Edwards group operations (`add/2`, `double/1`, `neg/1`, `mul/2`, `mul_base8/1`).
+  - 32-byte point compression (`compress/1`) and decompression (`decompress/1`) with Tonelli-Shanks modular square root, fully compatible with `circomlibjs` and SnarkJS.
+  - Subgroup and curve membership verification (`is_on_curve/1`, `is_in_subgroup/1`).
+  - Circom-compatible EdDSA signatures with Poseidon algebraic hashing (`keypair/0,1`, `derive_public_key/1`, `sign/2`, `verify/3`), matching `EdDSAPoseidonVerifier.circom`.
+  - `ecu_blake512`: Pure-Erlang RFC-compliant BLAKE-512 implementation for Circom private key expansion and deterministic nonce generation.
+  - Rust reference test NIF (`crates/babyjubjub_nif`) wrapping `babyjubjub-rs` for differential fuzzing and cross-verification.
+  - Comprehensive unit tests (`babyjubjub_tests.erl`) and QuickCheck properties (`babyjubjub_eqc.erl`).
+- **Remaining Features**:
   - Birational map to Montgomery form for Montgomery ladder scalar multiplication.
-  - BabyJubjub EdDSA signing and verification compatible with Circom `EdDSAPoseidonVerifier.circom` and ZoKrates.
   - In-circuit Pedersen hash and commitment generation using precomputed generator tables matching `circomlib`.
   - Jubjub arithmetic over BLS12-381 $\mathbb{F}_r$ for Zcash-style circuits.
 

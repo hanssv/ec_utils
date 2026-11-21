@@ -29,4 +29,5 @@ priv/ecu_bls12_381_nif.*
 priv/ecu_poseidon_nif.*
 priv/ecu_bn254_nif.*
 priv/ecu_vrf_nif.*
+priv/ecu_babyjubjub_nif.*
 doc/

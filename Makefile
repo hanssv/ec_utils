@@ -122,9 +122,20 @@ vrf_reference:
 		cp crates/vrf_nif/target/release/ecu_vrf_nif.dll priv/ecu_vrf_nif.dll; \
 	fi
 
-reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference bn254_reference vrf_reference
+babyjubjub_reference:
+	mkdir -p priv
+	cd crates/babyjubjub_nif && cargo build --release
+	@if [ -f crates/babyjubjub_nif/target/release/libecu_babyjubjub_nif.dylib ]; then \
+		cp crates/babyjubjub_nif/target/release/libecu_babyjubjub_nif.dylib priv/ecu_babyjubjub_nif.so; \
+	elif [ -f crates/babyjubjub_nif/target/release/libecu_babyjubjub_nif.so ]; then \
+		cp crates/babyjubjub_nif/target/release/libecu_babyjubjub_nif.so priv/ecu_babyjubjub_nif.so; \
+	elif [ -f crates/babyjubjub_nif/target/release/ecu_babyjubjub_nif.dll ]; then \
+		cp crates/babyjubjub_nif/target/release/ecu_babyjubjub_nif.dll priv/ecu_babyjubjub_nif.dll; \
+	fi
+
+reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference bn254_reference vrf_reference babyjubjub_reference
 
 clean:
 	rebar3 clean
-	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* priv/ecu_fn_dsa_nif.* priv/ecu_bls12_381_nif.* priv/ecu_poseidon_nif.* priv/ecu_bn254_nif.* priv/ecu_vrf_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target crates/fn_dsa_nif/target crates/bls12_381_nif/target crates/poseidon_nif/target crates/bn254_nif/target crates/vrf_nif/target
+	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* priv/ecu_fn_dsa_nif.* priv/ecu_bls12_381_nif.* priv/ecu_poseidon_nif.* priv/ecu_bn254_nif.* priv/ecu_vrf_nif.* priv/ecu_babyjubjub_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target crates/fn_dsa_nif/target crates/bls12_381_nif/target crates/poseidon_nif/target crates/bn254_nif/target crates/vrf_nif/target crates/babyjubjub_nif/target
 
