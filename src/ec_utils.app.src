@@ -50,7 +50,9 @@
     ecu_pbkdf2,
     ecu_vrf,
     ecu_babyjubjub,
-    ecu_blake512
+    ecu_blake512,
+    ecu_poly,
+    ecu_kzg
   ]},
   {licenses, ["MIT"]},
   {links, []}

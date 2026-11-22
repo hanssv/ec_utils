@@ -270,17 +270,24 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 18. KZG Polynomial Commitments & EIP-4844 (BLS12-381)
+## 18. KZG Polynomial Commitments & EIP-4844 (BLS12-381) `[Completed]`
 
 - **Standard**: [Kate, Zaverucha, Goldberg (2010)](https://www.iacr.org/archive/asiacrypt2010/6477178/6477178.pdf) / [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844) (Proto-Danksharding).
 - **Goal**: Enable constant-sized polynomial commitments, opening evaluation proofs, and fast batch verification on BLS12-381.
-- **Features**:
-  - Finite field polynomial arithmetic over BLS12-381 $\mathbb{F}_r$ (addition, multiplication, evaluation, and synthetic division $Q(x) = \frac{P(x) - y}{x - z}$).
-  - Commitment: Commit to degree-$d$ polynomial $P(x)$ as a single group element $C = [P(\tau)]_1 \in \mathbb{G}_1$ using structured reference string (SRS / Powers of Tau).
-  - Evaluation Proofs: Opening proof $\pi = [Q(\tau)]_1$ showing $P(z) = y$.
-  - Verification: Single pairing check $e(C - [y]_1, [1]_2) = e(\pi, [\tau - z]_2)$.
-  - Batching: Multi-point opening proofs and randomized multi-polynomial batch verification.
-  - Ethereum Blob Verification: Point evaluation precompile format matching EIP-4844 specifications.
+- **Features `[Completed]`**:
+  - `ecu_poly`: Finite field polynomial arithmetic over prime fields:
+    - Dense polynomial evaluation using Horner's method (`eval/2,3`) in $O(d)$.
+    - Dense arithmetic: addition, subtraction, scalar multiplication, and polynomial convolution.
+    - Synthetic division / Ruffini's rule (`divide_by_linear/2,3`) computing $Q(x) = \frac{P(x) - y}{x - z}$ in $O(d)$.
+  - `ecu_kzg`: Pure-Erlang Kate-Zaverucha-Goldberg polynomial commitment scheme on BLS12-381:
+    - Structured Reference String (SRS / Powers of Tau) setup (`setup/2`) for $\mathbb{G}_1$ and $\mathbb{G}_2$.
+    - Linear-time polynomial commitment $C = [P(\tau)]_1 \in \mathbb{G}_1$ (`commit/2`, `commit_compressed/2`) using windowed Straus multi-scalar multiplication (~217 µs for degree 16).
+    - Evaluation proof creation $\pi = [Q(\tau)]_1$ (`create_proof/3`, `create_proof_compressed/3`) showing $P(z) = y$.
+    - Proof verification (`verify/5`, `verify_compressed/5`) via a single 2-pair Miller loop and final exponentiation: $e(C - [y]_1, [1]_2) = e(\pi, [\tau]_2 - [z]_2)$.
+    - Randomized batch verification (`verify_batch/2`) combining $N$ evaluation proofs into a single 2-pairing check using 128-bit random weights (~8.9 ms/proof for 4 proofs).
+    - Ethereum EIP-4844 Point Evaluation Precompile interface (`point_evaluation/2`) matching standard 192-byte consensus format and versioned hash verification.
+  - Rust reference test oracle (`crates/bls12_381_nif`) wrapping Supranational `blst` for differential fuzzing and cross-verification.
+  - Comprehensive unit tests (`kzg_tests.erl`) and QuickCheck properties (`kzg_eqc.erl`).
 
 ---
 
