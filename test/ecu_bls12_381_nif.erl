@@ -18,6 +18,11 @@
   pairing/2,
   pairing_check/1,
   groth16_verify/9,
+  kzg_commit/2,
+  kzg_create_proof/3,
+  kzg_verify/6,
+  kzg_batch_verify/3,
+  kzg_eip4844_point_eval/3,
   min_pk_keygen/1,
   min_pk_sign/3,
   min_pk_verify/4,
@@ -107,6 +112,21 @@ groth16_verify(
   _B,
   _C
 ) ->
+  erlang:nif_error(not_loaded).
+
+kzg_commit(_Points, _Scalars) ->
+  erlang:nif_error(not_loaded).
+
+kzg_create_proof(_SrsPoints, _PolyCoeffs, _Z) ->
+  erlang:nif_error(not_loaded).
+
+kzg_verify(_Commitment, _Z, _Y, _Proof, _G2Gen, _TauG2) ->
+  erlang:nif_error(not_loaded).
+
+kzg_batch_verify(_Tuples, _G2Gen, _TauG2) ->
+  erlang:nif_error(not_loaded).
+
+kzg_eip4844_point_eval(_Input, _G2Gen, _TauG2) ->
   erlang:nif_error(not_loaded).
 
 min_pk_keygen(_IKM) ->

@@ -410,6 +410,32 @@ Compressed = ecu_babyjubjub:compress(P2),
 {ok, P2} = ecu_babyjubjub:decompress(Compressed).
 ```
 
+### KZG Polynomial Commitments & EIP-4844 (BLS12-381)
+
+Pure-Erlang constant-sized KZG polynomial commitments, evaluation proofs, and Ethereum EIP-4844 point evaluation precompile:
+
+```erlang
+%% Structured Reference String (SRS / Powers of Tau)
+SRS = ecu_kzg:setup(16, 1234567890987654321),
+
+%% Commit to polynomial P(x) = 5 + 3x + 7x^2
+Poly = [5, 3, 7],
+Commitment = ecu_kzg:commit(SRS, Poly),
+
+%% Create opening proof for P(42) = Y
+Z = 42,
+{Proof, Y} = ecu_kzg:create_proof(SRS, Poly, Z),
+
+%% Verify proof in a single 2-pair Miller loop and final exponentiation
+true = ecu_kzg:verify(SRS, Commitment, Z, Y, Proof),
+
+%% Randomized batch verification of N proofs in a single 2-pairing check
+true = ecu_kzg:verify_batch(SRS, [{Commitment, Z, Y, Proof}]),
+
+%% EIP-4844 Point Evaluation Precompile (192-byte standard consensus format)
+{ok, <<4096:256/big, _Modulus:256/big>>} = ecu_kzg:point_evaluation(SRS, Input192Bytes).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -690,6 +716,17 @@ Supported Curves & API
   - `keypair/0,1`, `derive_public_key/1`: Key generation and derivation matching Circom / SnarkJS conventions.
   - `sign/2`, `verify/3`: Circom-compatible EdDSA signing and verification with Poseidon hash (`EdDSAPoseidonVerifier.circom`).
 - `ecu_blake512`: Pure-Erlang implementation of the BLAKE-512 cryptographic hash function used for BabyJubjub key expansion and nonces.
+- `ecu_poly`: Finite field polynomial arithmetic over prime fields (defaulting to BLS12-381 $r$):
+  - `eval/2,3`: Horner's method polynomial evaluation in $O(d)$.
+  - `add/2,3`, `sub/2,3`, `mul_scalar/2,3`, `mul/2,3`: Dense polynomial arithmetic and convolution.
+  - `divide_by_linear/2,3`: Ruffini's rule / synthetic division computing $Q(x) = \frac{P(x) - y}{x - z}$ in $O(d)$.
+- `ecu_kzg`: Pure-Erlang Kate-Zaverucha-Goldberg (KZG) polynomial commitment scheme and EIP-4844 point evaluation:
+  - `setup/2`: Structured Reference String (SRS / Powers of Tau) generator in $\mathbb{G}_1$ and $\mathbb{G}_2$.
+  - `commit/2`, `commit_compressed/2`: Linear-combination polynomial commitment $C = [P(\tau)]_1 \in \mathbb{G}_1$ using windowed Straus multi-scalar multiplication.
+  - `create_proof/3`, `create_proof_compressed/3`: Evaluation opening proof $\pi = [Q(\tau)]_1$ showing $P(z) = y$.
+  - `verify/5`, `verify_compressed/5`: Single evaluation proof verification via 2-pair Miller loop: $e(C - [y]_1, [1]_2) = e(\pi, [\tau]_2 - [z]_2)$.
+  - `verify_batch/2`: Randomized batch verification aggregating $N$ proofs into a single 2-pairing check using 128-bit random weights.
+  - `point_evaluation/2`: Ethereum EIP-4844 Point Evaluation Precompile interface (address `0x0A`, 192-byte input).
 
 Performance & Benchmarks
 ------------------------
@@ -812,6 +849,13 @@ the library incorporates key algorithmic optimizations:
 | **babyjubjub point decompress** | — | **137 µs** | — | 645 µs (babyjubjub-rs Rust NIF) | **4.71× faster** |
 | **babyjubjub eddsa sign (Poseidon)** | — | **2.64 ms** | — | 276 µs (babyjubjub-rs Rust NIF) | 9.57× |
 | **babyjubjub eddsa verify (Poseidon)** | — | **2.74 ms** | — | 1.56 ms (babyjubjub-rs Rust NIF) | 1.76× |
+| **poly eval (deg 16, Horner)** | — | **1.41 µs** | — | — | — |
+| **poly synthetic division (deg 16, Ruffini)** | — | **1.49 µs** | — | — | — |
+| **kzg commit (deg 16, G1)** | — | **213 µs** | — | 502 µs (blst Rust NIF)* | **2.36× faster** |
+| **kzg create proof (deg 16)** | — | **3.93 ms** | — | 479 µs (blst Rust NIF) | 8.21× |
+| **kzg verify proof (BLS12-381)** | — | **21.7 ms** | — | 948 µs (blst Rust NIF) | 22.9× |
+| **kzg batch verify (4 proofs, BLS12-381)** | — | **8.83 ms/proof** | **~2.45×** | 524 µs/proof (blst Rust NIF) | 16.9× |
+| **kzg eip4844 point evaluation (192B)** | — | **21.8 ms** | — | 951 µs (blst Rust NIF) | 22.9× |
 | **vrf prove (Ed25519 Elligator 2)** | — | **1.88 ms** | — | 111 µs (vrf-rfc9381 Rust NIF) | 16.9× |
 | **vrf verify (Ed25519 Elligator 2)** | — | **2.12 ms** | — | 137 µs (vrf-rfc9381 Rust NIF) | 15.5× |
 | **vrf prove (secp256k1 TAI)** | — | **933 µs** | — | 179 µs (vrf_fun Rust NIF) | 5.2× |
@@ -827,6 +871,7 @@ the library incorporates key algorithmic optimizations:
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
 - *BN254 elliptic curve and Groth16 reference benchmarks use an optional Arkworks test NIF (`crates/bn254_nif`) buildable via `make reference_nifs`.*
 - *BabyJubjub and Circom EdDSA reference benchmarks use an optional Rust test NIF (`crates/babyjubjub_nif`) wrapping `babyjubjub-rs`, buildable via `make babyjubjub_reference`.*
+- *KZG polynomial commitment reference benchmarks use an optional test NIF (`crates/bls12_381_nif`) wrapping Supranational `blst`, buildable via `make bls12_381_reference`.*
 - *VRF (RFC 9381) reference benchmarks use an optional Rust test NIF (`crates/vrf_nif`) wrapping `vrf-rfc9381` and `vrf_fun`, buildable via `make vrf_reference`.*
 - *Pure Erlang SLH-DSA signing executes ~80,000 hash operations. SHA-2 parameter sets (`slh_dsa_sha2_128f` at 346 ms) are ~24× faster than SHAKE parameter sets (`slh_dsa_shake_128f` at 8.20 s) because Keccak-f[1600] operates on 64-bit uints that exceed BEAM's 60-bit `smallint` range and lack SIMD vectorization. In contrast, native OpenSSL uses multi-buffer SIMD (AVX2/AVX-512) to compute 4–8 Keccak states concurrently, reaching 27.2 ms.*
 - *All reference NIFs can be built together using `make reference_nifs`.*

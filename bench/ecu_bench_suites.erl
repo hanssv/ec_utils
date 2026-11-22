@@ -85,7 +85,8 @@ all_benchmarks() ->
     groth16_benchmarks(),
     poseidon_benchmarks(),
     vrf_benchmarks(),
-    babyjubjub_benchmarks()
+    babyjubjub_benchmarks(),
+    kzg_benchmarks()
   ]).
 
 %% ===================================================================
@@ -1533,6 +1534,225 @@ babyjubjub_benchmarks() ->
                 run => {fun({P, S, M}) -> ecu_babyjubjub_nif:eddsa_verify(P, S, M) end, {PK, Sig, MsgBE}}
               }
             ];
+          false ->
+            []
+        end,
+      Base ++ NifBenches;
+    _ ->
+      []
+  end.
+
+%% ===================================================================
+%% KZG Polynomial Commitments & EIP-4844
+%% ===================================================================
+
+kzg_benchmarks() ->
+  case code:ensure_loaded(ecu_kzg) of
+    {module, ecu_kzg} ->
+      SecretTau = 1234567890987654321,
+      SRS = ecu_kzg:setup(16, SecretTau),
+      Poly = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+      Z = 12345,
+      C = ecu_kzg:commit(SRS, Poly),
+      CompC = ecu_kzg:commit_compressed(SRS, Poly),
+      {Proof, Y} = ecu_kzg:create_proof(SRS, Poly, Z),
+      CompProof = ecu_bls12_381:g1_compress(Proof),
+
+      BatchTuples =
+        lists:map(
+          fun(I) ->
+            P = [I, I * 2, I * 3, I * 4, I * 5, I * 6, I * 7, I * 8],
+            Comm = ecu_kzg:commit(SRS, P),
+            PtZ = I * 100 + 7,
+            {Prf, ValY} = ecu_kzg:create_proof(SRS, P, PtZ),
+            {Comm, PtZ, ValY, Prf}
+          end,
+          [1, 2, 3, 4]
+        ),
+
+      Sha = ecu_compat:hash(sha256, CompC),
+      <<_:8, RestSha:31/binary>> = Sha,
+      VersionedHash = <<16#01:8, RestSha:31/binary>>,
+      Eip4844Input =
+        <<VersionedHash:32/binary, Z:256/big, Y:256/big, CompC:48/binary, CompProof:48/binary>>,
+
+      Base = [
+        #{
+          id => poly_eval,
+          name => <<"Polynomial Evaluation (deg 16, Horner)">>,
+          group => kzg,
+          run => {fun({P, X}) -> ecu_poly:eval(P, X) end, {Poly, Z}}
+        },
+        #{
+          id => poly_divide_linear,
+          name => <<"Polynomial Synthetic Division (deg 16, Ruffini)">>,
+          group => kzg,
+          run => {fun({P, X}) -> ecu_poly:divide_by_linear(P, X) end, {Poly, Z}}
+        },
+        #{
+          id => kzg_commit,
+          name => <<"KZG Commitment (deg 16, G1)">>,
+          group => kzg,
+          run => {fun({S, P}) -> ecu_kzg:commit(S, P) end, {SRS, Poly}}
+        },
+        #{
+          id => kzg_create_proof,
+          name => <<"KZG Proof Creation (deg 16)">>,
+          group => kzg,
+          run => {fun({S, P, Pt}) -> ecu_kzg:create_proof(S, P, Pt) end, {SRS, Poly, Z}}
+        },
+        #{
+          id => kzg_verify,
+          name => <<"KZG Proof Verification (Pure Erlang)">>,
+          group => kzg,
+          run =>
+            {
+              fun({S, Comm, Pt, Val, Prf}) -> ecu_kzg:verify(S, Comm, Pt, Val, Prf) end,
+              {SRS, C, Z, Y, Proof}
+            }
+        },
+        #{
+          id => kzg_verify_batch,
+          name => <<"KZG Batch Verification (4 proofs, Pure Erlang)">>,
+          group => kzg,
+          run => {fun({S, Tuples}) -> ecu_kzg:verify_batch(S, Tuples) end, {SRS, BatchTuples}}
+        },
+        #{
+          id => kzg_eip4844_point_eval,
+          name => <<"EIP-4844 Point Evaluation (192 bytes, Pure Erlang)">>,
+          group => kzg,
+          run => {fun({S, In}) -> ecu_kzg:point_evaluation(S, In) end, {SRS, Eip4844Input}}
+        }
+      ],
+
+      NifAvail =
+        case code:ensure_loaded(ecu_bls12_381_nif) of
+          {module, ecu_bls12_381_nif} ->
+            erlang:function_exported(ecu_bls12_381_nif, is_available, 0) andalso
+              ecu_bls12_381_nif:is_available() andalso
+              erlang:function_exported(ecu_bls12_381_nif, kzg_verify, 6);
+          _ ->
+            false
+        end,
+
+      NifBenches =
+        case NifAvail of
+          true ->
+            [G2Gen, TauG2] = ecu_kzg:srs_g2(SRS),
+            CompG2Gen = ecu_bls12_381:g2_compress(G2Gen),
+            CompTauG2 = ecu_bls12_381:g2_compress(TauG2),
+            ZBin = <<Z:256/big>>,
+            YBin = <<Y:256/big>>,
+            G1Bins = [ecu_bls12_381:g1_compress(Pt) || Pt <- ecu_kzg:srs_g1(SRS)],
+            PolyBins = [<<Coeff:256/big>> || Coeff <- Poly],
+            BatchTuplesBin =
+              [
+                {
+                  ecu_bls12_381:g1_compress(Comm),
+                  <<PtZ:256/big>>,
+                  <<ValY:256/big>>,
+                  ecu_bls12_381:g1_compress(Prf)
+                }
+               || {Comm, PtZ, ValY, Prf} <- BatchTuples
+              ],
+            CommitBenches =
+              case erlang:function_exported(ecu_bls12_381_nif, kzg_commit, 2) of
+                true ->
+                  [
+                    #{
+                      id => kzg_commit_rust,
+                      name => <<"KZG Commitment (deg 16, Rust blst NIF)">>,
+                      group => kzg,
+                      run =>
+                        {
+                          fun({Points, Scalars}) ->
+                            ecu_bls12_381_nif:kzg_commit(Points, Scalars)
+                          end,
+                          {G1Bins, PolyBins}
+                        }
+                    }
+                  ];
+                false ->
+                  []
+              end,
+            ProofBenches =
+              case erlang:function_exported(ecu_bls12_381_nif, kzg_create_proof, 3) of
+                true ->
+                  [
+                    #{
+                      id => kzg_create_proof_rust,
+                      name => <<"KZG Proof Creation (deg 16, Rust blst NIF)">>,
+                      group => kzg,
+                      run =>
+                        {
+                          fun({Points, Scalars, Pt}) ->
+                            ecu_bls12_381_nif:kzg_create_proof(Points, Scalars, Pt)
+                          end,
+                          {G1Bins, PolyBins, ZBin}
+                        }
+                    }
+                  ];
+                false ->
+                  []
+              end,
+            BatchBenches =
+              case erlang:function_exported(ecu_bls12_381_nif, kzg_batch_verify, 3) of
+                true ->
+                  [
+                    #{
+                      id => kzg_verify_batch_rust,
+                      name => <<"KZG Batch Verification (4 proofs, Rust blst NIF)">>,
+                      group => kzg,
+                      run =>
+                        {
+                          fun({Tuples, G2G, TauG}) ->
+                            ecu_bls12_381_nif:kzg_batch_verify(Tuples, G2G, TauG)
+                          end,
+                          {BatchTuplesBin, CompG2Gen, CompTauG2}
+                        }
+                    }
+                  ];
+                false ->
+                  []
+              end,
+            PointEvalBenches =
+              case erlang:function_exported(ecu_bls12_381_nif, kzg_eip4844_point_eval, 3) of
+                true ->
+                  [
+                    #{
+                      id => kzg_eip4844_point_eval_rust,
+                      name => <<"EIP-4844 Point Evaluation (192 bytes, Rust blst NIF)">>,
+                      group => kzg,
+                      run =>
+                        {
+                          fun({Input, G2G, TauG}) ->
+                            ecu_bls12_381_nif:kzg_eip4844_point_eval(Input, G2G, TauG)
+                          end,
+                          {Eip4844Input, CompG2Gen, CompTauG2}
+                        }
+                    }
+                  ];
+                false ->
+                  []
+              end,
+            CommitBenches ++
+              ProofBenches ++
+              [
+                #{
+                  id => kzg_verify_rust,
+                  name => <<"KZG Proof Verification (Rust blst NIF)">>,
+                  group => kzg,
+                  run =>
+                    {
+                      fun({Comm, Pt, Val, Prf, G2G, TauG}) ->
+                        ecu_bls12_381_nif:kzg_verify(Comm, Pt, Val, Prf, G2G, TauG)
+                      end,
+                      {CompC, ZBin, YBin, CompProof, CompG2Gen, CompTauG2}
+                    }
+                }
+              ] ++
+              BatchBenches ++
+              PointEvalBenches;
           false ->
             []
         end,
