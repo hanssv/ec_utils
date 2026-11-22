@@ -52,7 +52,8 @@
     ecu_babyjubjub,
     ecu_blake512,
     ecu_poly,
-    ecu_kzg
+    ecu_kzg,
+    ecu_circom
   ]},
   {licenses, ["MIT"]},
   {links, []}

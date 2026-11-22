@@ -291,15 +291,17 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 19. Circom & ZoKrates Circuit / Witness Tooling
+## 19. Circom & ZoKrates Circuit / Witness Tooling `[Completed]`
 
-- **Standard**: Circom 2 R1CS binary format and binary witness (`.wtns`) format.
+- **Standard**: Circom 2 R1CS binary format (version 1) and binary witness (`.wtns`, version 2) format.
 - **Goal**: Bridge BEAM applications directly with Circom and ZoKrates artifacts without external Node.js or Rust runtimes.
 - **Features**:
-  - Pure-Erlang parser for `.r1cs` binary constraint files.
-  - Constraint satisfaction validator: verifies whether witness vector $w$ satisfies $(A \cdot w) \circ (B \cdot w) = C \cdot w$ over $\mathbb{F}_r$.
-  - Binary parser and serializer for Circom `.wtns` witness files.
-  - Public input formatter bridging Erlang terms directly to `ecu_groth16:verify/3`.
+  - `ecu_circom`: Pure-Erlang parser and serializer for Circom 2 `.r1cs` binary files (`parse_r1cs/1`, `serialize_r1cs/1`).
+  - Constraint satisfaction validator (`check_constraints/2`, `is_satisfied/2`): verifies whether witness vector $W$ satisfies $(A \cdot W) \times (B \cdot W) \equiv (C \cdot W) \pmod q$ with fast $O(1)$ wire lookup.
+  - Binary parser and serializer for Circom `.wtns` witness files (`parse_wtns/1`, `serialize_wtns/1,2,3`).
+  - Public input formatter (`extract_public_inputs/2`, `extract_public_inputs_map/2`) bridging witness signals directly to `ecu_groth16:verify/3,4`.
+  - Rust reference test oracle (`crates/circom_nif`) wrapping official `r1cs-file` and `wtns-file` crates for differential fuzzing and cross-verification.
+  - Comprehensive EUnit tests (`circom_tests.erl`), QuickCheck properties (`circom_eqc.erl`), and benchmarks (`bench/ecu_bench_suites.erl`).
 
 ---
 
