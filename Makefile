@@ -144,7 +144,18 @@ circom_reference:
 		cp crates/circom_nif/target/release/ecu_circom_nif.dll priv/ecu_circom_nif.dll; \
 	fi
 
-reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference bn254_reference vrf_reference babyjubjub_reference circom_reference
+plonk_reference:
+	mkdir -p priv
+	cd crates/plonk_nif && cargo build --release
+	@if [ -f crates/plonk_nif/target/release/libecu_plonk_nif.dylib ]; then \
+		cp crates/plonk_nif/target/release/libecu_plonk_nif.dylib priv/ecu_plonk_nif.so; \
+	elif [ -f crates/plonk_nif/target/release/libecu_plonk_nif.so ]; then \
+		cp crates/plonk_nif/target/release/libecu_plonk_nif.so priv/ecu_plonk_nif.so; \
+	elif [ -f crates/plonk_nif/target/release/ecu_plonk_nif.dll ]; then \
+		cp crates/plonk_nif/target/release/ecu_plonk_nif.dll priv/ecu_plonk_nif.dll; \
+	fi
+
+reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference bn254_reference vrf_reference babyjubjub_reference circom_reference plonk_reference
 
 clean:
 	rebar3 clean

@@ -38,6 +38,8 @@ Detailed style rules are defined in [`STYLE.md`](STYLE.md). Key points:
   When the user asks for an opinion or discusses an idea, **stop immediately after answering**. Do not proceed to implementation until the user explicitly instructs you to do so.
 - **Plans & Confirmation**:
   Always wait for explicit user confirmation after proposing a plan, especially when previous actions were corrected or clarified. Do not assume approval.
+- **The Git Barrier (Strict Commit Gating)**:
+  NEVER execute `git add`, `git commit`, `git push`, or `gh pr create` in the same turn or thought sequence as running tests, benchmarks, or edits. The verification phase MUST end strictly with presenting the summary report, benchmark table, and proposed commit message, then stopping completely. Committing is a separate, gated phase: you may ONLY stage and commit when the immediately preceding user prompt explicitly commands committing (e.g. "commit", "stage and commit", "proceed with commit"). If a user message contains mixed feedback, questions, or frustration, address them in text first—never attempt to run git commands in that turn.
 - **PR Creation & CI Follow-up**:
   When creating a pull request, always actively monitor and follow up on CI results (`gh pr checks`) until all jobs pass cleanly. Never consider the PR task complete while checks are pending or failing.
 - **Documentation Completeness**:
