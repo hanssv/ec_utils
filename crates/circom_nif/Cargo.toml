@@ -1,0 +1,16 @@
+[package]
+name = "ecu_circom_nif"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ecu_circom_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.39.0"
+r1cs-file = "0.3.0"
+wtns-file = "0.1.5"
+byteorder = "1.5"
+num-bigint = "0.4"
+num-traits = "0.2"

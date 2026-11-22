@@ -31,7 +31,11 @@ list_suites() ->
     bls12_381,
     bn254,
     groth16,
-    poseidon
+    poseidon,
+    vrf,
+    babyjubjub,
+    kzg,
+    circom
   ].
 
 -spec get_benchmarks(atom() | string() | binary()) -> [ecu_bench_runner:bench_def()].
@@ -86,7 +90,8 @@ all_benchmarks() ->
     poseidon_benchmarks(),
     vrf_benchmarks(),
     babyjubjub_benchmarks(),
-    kzg_benchmarks()
+    kzg_benchmarks(),
+    circom_benchmarks()
   ]).
 
 %% ===================================================================
@@ -1760,3 +1765,136 @@ kzg_benchmarks() ->
     _ ->
       []
   end.
+
+%% ===================================================================
+%% Circom R1CS & WTNS Tooling
+%% ===================================================================
+
+circom_benchmarks() ->
+  case code:ensure_loaded(ecu_circom) of
+    {module, ecu_circom} ->
+      Prime = ecu_circom:default_prime(bn254),
+      NGates = 100,
+      {R1CS, WTNS} = create_bench_circom_circuit(NGates, Prime),
+      R1CSBin = ecu_circom:serialize_r1cs(R1CS),
+      WTNSBin = ecu_circom:serialize_wtns(WTNS),
+      Base = [
+        #{
+          id => circom_r1cs_parse,
+          name => <<"Circom R1CS Parse (100 constraints, pure Erlang)">>,
+          group => circom,
+          run => {fun(Bin) -> ecu_circom:parse_r1cs(Bin) end, R1CSBin}
+        },
+        #{
+          id => circom_r1cs_serialize,
+          name => <<"Circom R1CS Serialize (100 constraints, pure Erlang)">>,
+          group => circom,
+          run => {fun(R) -> ecu_circom:serialize_r1cs(R) end, R1CS}
+        },
+        #{
+          id => circom_wtns_parse,
+          name => <<"Circom WTNS Parse (104 wires, pure Erlang)">>,
+          group => circom,
+          run => {fun(Bin) -> ecu_circom:parse_wtns(Bin) end, WTNSBin}
+        },
+        #{
+          id => circom_wtns_serialize,
+          name => <<"Circom WTNS Serialize (104 wires, pure Erlang)">>,
+          group => circom,
+          run => {fun(W) -> ecu_circom:serialize_wtns(W) end, WTNS}
+        },
+        #{
+          id => circom_check_constraints,
+          name => <<"Circom Check Constraints (100 constraints, pure Erlang)">>,
+          group => circom,
+          run => {fun({R, W}) -> ecu_circom:check_constraints(R, W) end, {R1CS, WTNS}}
+        }
+      ],
+      NifBenches =
+        case code:ensure_loaded(ecu_circom_nif) of
+          {module, ecu_circom_nif} ->
+            case ecu_circom_nif:is_available() of
+              true ->
+                [
+                  #{
+                    id => circom_r1cs_parse_rust,
+                    name => <<"Circom R1CS Parse (100 constraints, Rust r1cs-file NIF)">>,
+                    group => circom,
+                    run => {fun(Bin) -> ecu_circom_nif:r1cs_info(Bin) end, R1CSBin}
+                  },
+                  #{
+                    id => circom_r1cs_roundtrip_rust,
+                    name => <<"Circom R1CS Roundtrip (100 constraints, Rust r1cs-file NIF)">>,
+                    group => circom,
+                    run => {fun(Bin) -> ecu_circom_nif:r1cs_roundtrip(Bin) end, R1CSBin}
+                  },
+                  #{
+                    id => circom_wtns_parse_rust,
+                    name => <<"Circom WTNS Parse (104 wires, Rust wtns-file NIF)">>,
+                    group => circom,
+                    run => {fun(Bin) -> ecu_circom_nif:wtns_info(Bin) end, WTNSBin}
+                  },
+                  #{
+                    id => circom_wtns_roundtrip_rust,
+                    name => <<"Circom WTNS Roundtrip (104 wires, Rust wtns-file NIF)">>,
+                    group => circom,
+                    run => {fun(Bin) -> ecu_circom_nif:wtns_roundtrip(Bin) end, WTNSBin}
+                  },
+                  #{
+                    id => circom_check_constraints_rust,
+                    name => <<"Circom Check Constraints (100 constraints, Rust NIF)">>,
+                    group => circom,
+                    run =>
+                      {
+                        fun({RBin, WBin}) ->
+                          ecu_circom_nif:check_constraints(RBin, WBin)
+                        end,
+                        {R1CSBin, WTNSBin}
+                      }
+                  }
+                ];
+              false ->
+                []
+            end;
+          _ ->
+            []
+        end,
+      Base ++ NifBenches;
+    _ ->
+      []
+  end.
+
+create_bench_circom_circuit(NGates, Prime) ->
+  Inputs = [2, 3, 5],
+  InitialWitness = [1 | Inputs],
+  build_bench_gates(NGates, InitialWitness, [], Prime).
+
+build_bench_gates(0, Witness, Constraints, Prime) ->
+  NWires = length(Witness),
+  Header = #{
+    field_size => 32,
+    prime => Prime,
+    n_wires => NWires,
+    n_pub_out => 1,
+    n_pub_in => 2,
+    n_prvt_in => 1,
+    n_labels => NWires,
+    n_constraints => length(Constraints)
+  },
+  R1CS = ecu_circom:new_r1cs(Header, lists:reverse(Constraints)),
+  WTNS = ecu_circom:new_wtns(Witness, Prime, 32),
+  {R1CS, WTNS};
+build_bench_gates(Remaining, Witness, Constraints, Prime) ->
+  WireA = (length(Witness) - 1) rem length(Witness),
+  WireB = (length(Witness) - 2) rem length(Witness),
+  ValA = lists:nth(WireA + 1, Witness),
+  ValB = lists:nth(WireB + 1, Witness),
+  OutWire = length(Witness),
+  OutVal = (ValA * ValB + 1) rem Prime,
+  NewWitness = Witness ++ [OutVal],
+  NewConstraint = {
+    [{WireA, 1}],
+    [{WireB, 1}],
+    [{OutWire, 1}, {0, -1}]
+  },
+  build_bench_gates(Remaining - 1, NewWitness, [NewConstraint | Constraints], Prime).

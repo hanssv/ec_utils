@@ -6,7 +6,7 @@ A pure Erlang cryptographic library implementing elliptic curve arithmetic
 BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
-pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **BabyJubjub**),
+pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **BabyJubjub**, **KZG / EIP-4844**, **Circom / ZoKrates R1CS & WTNS**),
 Hash-to-Curve (RFC 9380), Verifiable Random Functions (VRF / RFC 9381),
 hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
 mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
@@ -436,6 +436,24 @@ true = ecu_kzg:verify_batch(SRS, [{Commitment, Z, Y, Proof}]),
 {ok, <<4096:256/big, _Modulus:256/big>>} = ecu_kzg:point_evaluation(SRS, Input192Bytes).
 ```
 
+### Circom 2 & ZoKrates Circuit Tooling (R1CS & WTNS)
+
+Pure-Erlang binary parsing, serialization, constraint satisfaction checking, and Groth16 public input extraction for Circom `.r1cs` and `.wtns` files:
+
+```erlang
+%% Parse Circom 2 .r1cs and .wtns witness files
+{ok, R1CS} = ecu_circom:parse_r1cs("circuit.r1cs"),
+{ok, WTNS} = ecu_circom:parse_wtns("witness.wtns"),
+
+%% Validate constraint satisfaction: (A * W) * (B * W) = (C * W) (mod q)
+ok = ecu_circom:check_constraints(R1CS, WTNS),
+true = ecu_circom:is_satisfied(R1CS, WTNS),
+
+%% Extract public inputs vector formatted directly for ecu_groth16:verify/3,4
+PublicInputs = ecu_circom:extract_public_inputs(WTNS, R1CS),
+true = ecu_groth16:verify(bn254, VK, PublicInputs, Proof).
+```
+
 Supported Curves & API
 ----------------------
 
@@ -727,6 +745,14 @@ Supported Curves & API
   - `verify/5`, `verify_compressed/5`: Single evaluation proof verification via 2-pair Miller loop: $e(C - [y]_1, [1]_2) = e(\pi, [\tau]_2 - [z]_2)$.
   - `verify_batch/2`: Randomized batch verification aggregating $N$ proofs into a single 2-pairing check using 128-bit random weights.
   - `point_evaluation/2`: Ethereum EIP-4844 Point Evaluation Precompile interface (address `0x0A`, 192-byte input).
+- `ecu_circom`: Pure-Erlang Circom 2 and ZoKrates R1CS & Witness Tooling:
+  - `parse_r1cs/1`, `serialize_r1cs/1`: Parse and serialize Circom 2 `.r1cs` binary format (header, constraints, wire-to-label map, custom sections).
+  - `parse_wtns/1`, `serialize_wtns/1,2,3`: Parse and serialize Circom `.wtns` witness binary format.
+  - `check_constraints/2`, `is_satisfied/2`: Verify witness vectors against all R1CS constraints with $O(1)$ wire lookups: $(A \cdot W) \times (B \cdot W) \equiv (C \cdot W) \pmod q$.
+  - `eval_lc/3`: Modular evaluation of linear combinations.
+  - `extract_public_inputs/2`, `extract_public_inputs_map/2`: Extract public inputs and outputs formatted directly for `ecu_groth16:verify/3,4`.
+  - `new_r1cs/2,3`, `new_wtns/2,3`: Programmatic constructors for circuits and witnesses.
+  - `default_prime/0,1`: Circuit field modulus accessors for BN254 and BLS12-381 scalar fields.
 
 Performance & Benchmarks
 ------------------------
@@ -856,6 +882,11 @@ the library incorporates key algorithmic optimizations:
 | **kzg verify proof (BLS12-381)** | — | **21.7 ms** | — | 948 µs (blst Rust NIF) | 22.9× |
 | **kzg batch verify (4 proofs, BLS12-381)** | — | **8.83 ms/proof** | **~2.45×** | 524 µs/proof (blst Rust NIF) | 16.9× |
 | **kzg eip4844 point evaluation (192B)** | — | **21.8 ms** | — | 951 µs (blst Rust NIF) | 22.9× |
+| **circom r1cs parse (100 constraints)** | — | **29.8 µs** | — | 14.8 µs (r1cs-file Rust NIF) | 2.01× |
+| **circom r1cs serialize (100 constraints)** | — | **29.1 µs** | — | 17.3 µs (r1cs-file Rust NIF) | 1.68× |
+| **circom wtns parse (104 wires)** | — | **5.82 µs** | — | 0.68 µs (wtns-file Rust NIF) | 8.56× |
+| **circom wtns serialize (104 wires)** | — | **3.96 µs** | — | 1.32 µs (wtns-file Rust NIF) | 3.00× |
+| **circom check constraints (100 constraints)** | — | **29.9 µs** | — | 94.0 µs (Rust NIF) | **3.14× faster** |
 | **vrf prove (Ed25519 Elligator 2)** | — | **1.88 ms** | — | 111 µs (vrf-rfc9381 Rust NIF) | 16.9× |
 | **vrf verify (Ed25519 Elligator 2)** | — | **2.12 ms** | — | 137 µs (vrf-rfc9381 Rust NIF) | 15.5× |
 | **vrf prove (secp256k1 TAI)** | — | **933 µs** | — | 179 µs (vrf_fun Rust NIF) | 5.2× |
@@ -872,6 +903,7 @@ the library incorporates key algorithmic optimizations:
 - *BN254 elliptic curve and Groth16 reference benchmarks use an optional Arkworks test NIF (`crates/bn254_nif`) buildable via `make reference_nifs`.*
 - *BabyJubjub and Circom EdDSA reference benchmarks use an optional Rust test NIF (`crates/babyjubjub_nif`) wrapping `babyjubjub-rs`, buildable via `make babyjubjub_reference`.*
 - *KZG polynomial commitment reference benchmarks use an optional test NIF (`crates/bls12_381_nif`) wrapping Supranational `blst`, buildable via `make bls12_381_reference`.*
+- *Circom R1CS and WTNS reference benchmarks use an optional test NIF (`crates/circom_nif`) wrapping official `r1cs-file` and `wtns-file` crates, buildable via `make circom_reference`.*
 - *VRF (RFC 9381) reference benchmarks use an optional Rust test NIF (`crates/vrf_nif`) wrapping `vrf-rfc9381` and `vrf_fun`, buildable via `make vrf_reference`.*
 - *Pure Erlang SLH-DSA signing executes ~80,000 hash operations. SHA-2 parameter sets (`slh_dsa_sha2_128f` at 346 ms) are ~24× faster than SHAKE parameter sets (`slh_dsa_shake_128f` at 8.20 s) because Keccak-f[1600] operates on 64-bit uints that exceed BEAM's 60-bit `smallint` range and lack SIMD vectorization. In contrast, native OpenSSL uses multi-buffer SIMD (AVX2/AVX-512) to compute 4–8 Keccak states concurrently, reaching 27.2 ms.*
 - *All reference NIFs can be built together using `make reference_nifs`.*
