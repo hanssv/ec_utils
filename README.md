@@ -6,7 +6,7 @@ A pure Erlang cryptographic library implementing elliptic curve arithmetic
 BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
-pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **BabyJubjub**, **KZG / EIP-4844**, **Circom / ZoKrates R1CS & WTNS**),
+pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **PLONK**, **BabyJubjub**, **KZG / EIP-4844**, **Circom / ZoKrates R1CS & WTNS**),
 Hash-to-Curve (RFC 9380), Verifiable Random Functions (VRF / RFC 9381),
 hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
 mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
@@ -368,6 +368,29 @@ Batch = [
     {Inputs2, Proof2}
 ],
 true = ecu_groth16:verify_batch(bn254, VK, Batch).
+```
+
+### PLONK Universal zk-SNARK Verification (BN254 & BLS12-381)
+
+Pure-Erlang universal zero-knowledge proof verification based on the PLONK protocol (Gabizon et al., 2019) supporting both BN254 (Ethereum EVM / SnarkJS) and BLS12-381:
+
+```erlang
+%% Single proof verification from JSON files (SnarkJS / Circom)
+{ok, VKJson} = file:read_file("verification_key.json"),
+{ok, ProofJson} = file:read_file("proof.json"),
+{ok, PubJson} = file:read_file("public.json"),
+
+%% Verify directly from JSON binaries
+true = ecu_plonk:verify(VKJson, PubJson, ProofJson),
+
+%% Or parse into strongly typed records (#plonk_vk{}, #plonk_proof{})
+{ok, VK} = ecu_plonk:parse_vk(VKJson, bn254),
+{ok, Proof} = ecu_plonk:parse_proof(ProofJson, bn254),
+{ok, Pub} = ecu_plonk:parse_public_inputs(PubJson, bn254),
+
+%% Verify over BN254 or BLS12-381
+true = ecu_plonk:verify(bn254, VK, Pub, Proof),
+true = ecu_plonk:verify(bls12_381, BLS12_VK, BLS12_Pub, BLS12_Proof).
 ```
 
 ### Poseidon Algebraic Hash Function (BLS12-381 & BN254)
@@ -753,6 +776,11 @@ Supported Curves & API
   - `extract_public_inputs/2`, `extract_public_inputs_map/2`: Extract public inputs and outputs formatted directly for `ecu_groth16:verify/3,4`.
   - `new_r1cs/2,3`, `new_wtns/2,3`: Programmatic constructors for circuits and witnesses.
   - `default_prime/0,1`: Circuit field modulus accessors for BN254 and BLS12-381 scalar fields.
+- `ecu_plonk`: Pure-Erlang Universal PLONK zk-SNARK verifier:
+  - `verify/3,4`: Universal proof verification over BN254 and BLS12-381.
+  - `parse_vk/1,2`, `parse_proof/1,2`, `parse_public_inputs/1,2`: Parsers supporting records, JSON maps, and binaries.
+  - Strict subgroup validation on all G1 commitments and G2 SRS key $X_2$.
+  - Keccak-256 Fiat-Shamir transcript generation, Lagrange and public input evaluations, linearized polynomial accumulation, and single 2-pairing check.
 
 Performance & Benchmarks
 ------------------------
@@ -887,6 +915,7 @@ the library incorporates key algorithmic optimizations:
 | **circom wtns parse (104 wires)** | — | **5.82 µs** | — | 0.68 µs (wtns-file Rust NIF) | 8.56× |
 | **circom wtns serialize (104 wires)** | — | **3.96 µs** | — | 1.32 µs (wtns-file Rust NIF) | 3.00× |
 | **circom check constraints (100 constraints)** | — | **29.9 µs** | — | 94.0 µs (Rust NIF) | **3.14× faster** |
+| **plonk verify (BN254)** | — | **40.3 ms** | — | 1.92 ms (arkworks Rust NIF) | 20.96× |
 | **vrf prove (Ed25519 Elligator 2)** | — | **1.88 ms** | — | 111 µs (vrf-rfc9381 Rust NIF) | 16.9× |
 | **vrf verify (Ed25519 Elligator 2)** | — | **2.12 ms** | — | 137 µs (vrf-rfc9381 Rust NIF) | 15.5× |
 | **vrf prove (secp256k1 TAI)** | — | **933 µs** | — | 179 µs (vrf_fun Rust NIF) | 5.2× |
@@ -904,6 +933,7 @@ the library incorporates key algorithmic optimizations:
 - *BabyJubjub and Circom EdDSA reference benchmarks use an optional Rust test NIF (`crates/babyjubjub_nif`) wrapping `babyjubjub-rs`, buildable via `make babyjubjub_reference`.*
 - *KZG polynomial commitment reference benchmarks use an optional test NIF (`crates/bls12_381_nif`) wrapping Supranational `blst`, buildable via `make bls12_381_reference`.*
 - *Circom R1CS and WTNS reference benchmarks use an optional test NIF (`crates/circom_nif`) wrapping official `r1cs-file` and `wtns-file` crates, buildable via `make circom_reference`.*
+- *PLONK universal zk-SNARK reference benchmarks use an optional Arkworks test NIF (`crates/plonk_nif`) buildable via `make plonk_reference`.*
 - *VRF (RFC 9381) reference benchmarks use an optional Rust test NIF (`crates/vrf_nif`) wrapping `vrf-rfc9381` and `vrf_fun`, buildable via `make vrf_reference`.*
 - *Pure Erlang SLH-DSA signing executes ~80,000 hash operations. SHA-2 parameter sets (`slh_dsa_sha2_128f` at 346 ms) are ~24× faster than SHAKE parameter sets (`slh_dsa_shake_128f` at 8.20 s) because Keccak-f[1600] operates on 64-bit uints that exceed BEAM's 60-bit `smallint` range and lack SIMD vectorization. In contrast, native OpenSSL uses multi-buffer SIMD (AVX2/AVX-512) to compute 4–8 Keccak states concurrently, reaching 27.2 ms.*
 - *All reference NIFs can be built together using `make reference_nifs`.*

@@ -53,7 +53,8 @@
     ecu_blake512,
     ecu_poly,
     ecu_kzg,
-    ecu_circom
+    ecu_circom,
+    ecu_plonk
   ]},
   {licenses, ["MIT"]},
   {links, []}

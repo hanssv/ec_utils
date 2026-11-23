@@ -305,14 +305,20 @@ This document outlines planned enhancements, cryptographic extensions, and archi
 
 ---
 
-## 20. Universal zk-SNARKs: PLONK Verifier (BN254 & BLS12-381)
+## 20. Universal zk-SNARKs: PLONK Verifier (BN254 & BLS12-381) `[Completed]`
 
 - **Standard**: [PLONK](https://eprint.iacr.org/2019/953) (Permutations over Lagrange-bases for Oecumenical Non-interactive arguments of Knowledge).
 - **Goal**: Support universal (non-circuit-specific) SNARK verification on the BEAM.
-- **Features**:
-  - Verification of standard PLONK proofs exported by SnarkJS and ZoKrates.
-  - Universal verification key evaluation using universal Powers of Tau.
-  - Wire and permutation polynomial evaluation using KZG commitment verification.
+- **Features `[Completed]`**:
+  - `ecu_plonk`: Pure-Erlang PLONK verifier supporting both BN254 / alt_bn128 (Ethereum EVM / SnarkJS) and BLS12-381 curves (`verify/3,4`).
+  - Parsers for `#plonk_vk{}`, `#plonk_proof{}`, JSON maps, and binaries (`parse_vk/1,2`, `parse_proof/1,2`, `parse_public_inputs/1,2`).
+  - Strict subgroup validation and on-curve checks for all G1 commitments and G2 SRS trapdoor key $X_2$.
+  - Fiat-Shamir transcript generation with Keccak-256 matching SnarkJS.
+  - Lagrange polynomial evaluations, public input combination, and linearization scalar $r_0$.
+  - Linearized commitment $D$ and combined commitments $F$ and $E$.
+  - Batched multi-point KZG evaluation proof via single 2-pairing check: $e(-A_1, X_2) \cdot e(B_1, G_{2, gen}) == 1$.
+  - Rust reference test oracle (`crates/plonk_nif` & `test/ecu_plonk_nif.erl`) wrapping Arkworks `ark-bn254` for differential fuzzing and cross-verification.
+  - Comprehensive EUnit tests (`plonk_tests.erl`), QuickCheck property tests (`plonk_eqc.erl`), and benchmarks (`bench/ecu_bench_suites.erl`).
 
 ---
 

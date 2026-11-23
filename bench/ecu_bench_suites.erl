@@ -35,7 +35,8 @@ list_suites() ->
     vrf,
     babyjubjub,
     kzg,
-    circom
+    circom,
+    plonk
   ].
 
 -spec get_benchmarks(atom() | string() | binary()) -> [ecu_bench_runner:bench_def()].
@@ -91,7 +92,8 @@ all_benchmarks() ->
     vrf_benchmarks(),
     babyjubjub_benchmarks(),
     kzg_benchmarks(),
-    circom_benchmarks()
+    circom_benchmarks(),
+    plonk_benchmarks()
   ]).
 
 %% ===================================================================
@@ -1898,3 +1900,119 @@ build_bench_gates(Remaining, Witness, Constraints, Prime) ->
     [{OutWire, 1}, {0, -1}]
   },
   build_bench_gates(Remaining - 1, NewWitness, [NewConstraint | Constraints], Prime).
+
+%% ===================================================================
+%% PLONK zk-SNARK Verification
+%% ===================================================================
+
+plonk_benchmarks() ->
+  case code:ensure_loaded(ecu_plonk) of
+    {module, ecu_plonk} ->
+      DataDir =
+        case filelib:is_regular("test/data/plonk_bn254_vk.json") of
+          true -> "test/data";
+          false -> filename:join([code:lib_dir(ec_utils), "test", "data"])
+        end,
+      VKPath = filename:join(DataDir, "plonk_bn254_vk.json"),
+      ProofPath = filename:join(DataDir, "plonk_bn254_proof.json"),
+      PubPath = filename:join(DataDir, "plonk_bn254_public.json"),
+      case
+        filelib:is_regular(VKPath) andalso filelib:is_regular(ProofPath) andalso
+          filelib:is_regular(PubPath)
+      of
+        true ->
+          {ok, VKJson} = file:read_file(VKPath),
+          {ok, ProofJson} = file:read_file(ProofPath),
+          {ok, PubJson} = file:read_file(PubPath),
+          VKMap = json:decode(VKJson),
+          ProofMap = json:decode(ProofJson),
+          PubList = [binary_to_integer(P) || P <- json:decode(PubJson)],
+          Base = [
+            #{
+              id => plonk_verify_bn254,
+              name => <<"PLONK Verify BN254 (Pure Erlang)">>,
+              group => plonk,
+              run => {
+                fun({V, P, Pr}) -> ecu_plonk:verify(bn254, V, P, Pr) end, {VKMap, PubList, ProofMap}
+              }
+            }
+          ],
+          NifBenches =
+            case code:ensure_loaded(ecu_plonk_nif) of
+              {module, ecu_plonk_nif} ->
+                case ecu_plonk_nif:is_loaded() of
+                  true ->
+                    ParseG1 = fun([XB, YB | _]) ->
+                      X = binary_to_integer(XB),
+                      Y = binary_to_integer(YB),
+                      <<X:256/big, Y:256/big>>
+                    end,
+                    ParseG2 = fun([[X0B, X1B | _], [Y0B, Y1B | _] | _]) ->
+                      X0 = binary_to_integer(X0B),
+                      X1 = binary_to_integer(X1B),
+                      Y0 = binary_to_integer(Y0B),
+                      Y1 = binary_to_integer(Y1B),
+                      <<X1:256/big, X0:256/big, Y1:256/big, Y0:256/big>>
+                    end,
+                    EncSc = fun(S) -> <<S:256/big>> end,
+                    Power = maps:get(<<"power">>, VKMap),
+                    K1 = binary_to_integer(maps:get(<<"k1">>, VKMap)),
+                    K2 = binary_to_integer(maps:get(<<"k2">>, VKMap)),
+                    W = binary_to_integer(maps:get(<<"w">>, VKMap)),
+                    NifArgs = {
+                      Power,
+                      EncSc(K1),
+                      EncSc(K2),
+                      EncSc(W),
+                      ParseG1(maps:get(<<"Qm">>, VKMap)),
+                      ParseG1(maps:get(<<"Ql">>, VKMap)),
+                      ParseG1(maps:get(<<"Qr">>, VKMap)),
+                      ParseG1(maps:get(<<"Qo">>, VKMap)),
+                      ParseG1(maps:get(<<"Qc">>, VKMap)),
+                      ParseG1(maps:get(<<"S1">>, VKMap)),
+                      ParseG1(maps:get(<<"S2">>, VKMap)),
+                      ParseG1(maps:get(<<"S3">>, VKMap)),
+                      ParseG2(maps:get(<<"X_2">>, VKMap)),
+                      [EncSc(P) || P <- PubList],
+                      ParseG1(maps:get(<<"A">>, ProofMap)),
+                      ParseG1(maps:get(<<"B">>, ProofMap)),
+                      ParseG1(maps:get(<<"C">>, ProofMap)),
+                      ParseG1(maps:get(<<"Z">>, ProofMap)),
+                      ParseG1(maps:get(<<"T1">>, ProofMap)),
+                      ParseG1(maps:get(<<"T2">>, ProofMap)),
+                      ParseG1(maps:get(<<"T3">>, ProofMap)),
+                      EncSc(binary_to_integer(maps:get(<<"eval_a">>, ProofMap))),
+                      EncSc(binary_to_integer(maps:get(<<"eval_b">>, ProofMap))),
+                      EncSc(binary_to_integer(maps:get(<<"eval_c">>, ProofMap))),
+                      EncSc(binary_to_integer(maps:get(<<"eval_s1">>, ProofMap))),
+                      EncSc(binary_to_integer(maps:get(<<"eval_s2">>, ProofMap))),
+                      EncSc(binary_to_integer(maps:get(<<"eval_zw">>, ProofMap))),
+                      ParseG1(maps:get(<<"Wxi">>, ProofMap)),
+                      ParseG1(maps:get(<<"Wxiw">>, ProofMap))
+                    },
+                    [
+                      #{
+                        id => plonk_verify_bn254_nif,
+                        name => <<"PLONK Verify BN254 (Rust NIF Arkworks)">>,
+                        group => plonk,
+                        run => {
+                          fun(Args) ->
+                            apply(ecu_plonk_nif, verify_bn254, tuple_to_list(Args))
+                          end,
+                          NifArgs
+                        }
+                      }
+                    ];
+                  false ->
+                    []
+                end;
+              _ ->
+                []
+            end,
+          Base ++ NifBenches;
+        false ->
+          []
+      end;
+    _ ->
+      []
+  end.
