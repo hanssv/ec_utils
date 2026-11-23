@@ -79,7 +79,13 @@ decompress_invalid_test() ->
   ?assertEqual({error, bad_length}, ecu_babyjubjub:decompress(<<0:248>>)),
   Q = ecu_babyjubjub:q(),
   TooBig = <<(Q + 5):256/little>>,
-  ?assertEqual({error, y_outside_field}, ecu_babyjubjub:decompress(TooBig)).
+  ?assertEqual({error, y_outside_field}, ecu_babyjubjub:decompress(TooBig)),
+  %% Non-canonical sign bit for X = 0 points (Y = 1 and Y = Q - 1)
+  NonCanonicalId = <<1:248/little, 16#80:8>>,
+  ?assertEqual({error, non_canonical}, ecu_babyjubjub:decompress(NonCanonicalId)),
+  <<Y0_neg:248/little, YLast_neg:8>> = <<(Q - 1):256/little>>,
+  NonCanonicalNegId = <<Y0_neg:248/little, (YLast_neg bor 16#80):8>>,
+  ?assertEqual({error, non_canonical}, ecu_babyjubjub:decompress(NonCanonicalNegId)).
 
 blake512_test() ->
   Msg =
@@ -157,6 +163,70 @@ nif_differential_test() ->
       ErlMul = ecu_babyjubjub:compress(ecu_babyjubjub:mul(ecu_babyjubjub:base8(), Scalar)),
       {ok, NifMul} = ecu_babyjubjub_nif:point_mul(P1, ScalarBE),
       ?assertEqual(ErlMul, NifMul);
+    false ->
+      ok
+  end.
+
+montgomery_conversion_and_ladder_test() ->
+  ?assertEqual(168698, ecu_babyjubjub:montgomery_a()),
+  ?assertEqual(1, ecu_babyjubjub:montgomery_b()),
+  ?assertEqual(42174, ecu_babyjubjub:montgomery_a24()),
+
+  %% Identity maps to infinity and back
+  Id = ecu_babyjubjub:identity(),
+  ?assertEqual(infinity, ecu_babyjubjub:edwards_to_montgomery(Id)),
+  ?assertEqual(Id, ecu_babyjubjub:montgomery_to_edwards(infinity)),
+  ?assert(ecu_babyjubjub:is_on_montgomery(infinity)),
+
+  %% Point (0, q-1) maps to (0, 0) and back
+  Q = ecu_babyjubjub:q(),
+  P_0_minus1 = {0, Q - 1},
+  ?assert(ecu_babyjubjub:is_on_curve(P_0_minus1)),
+  ?assertEqual({0, 0}, ecu_babyjubjub:edwards_to_montgomery(P_0_minus1)),
+  ?assertEqual(P_0_minus1, ecu_babyjubjub:montgomery_to_edwards({0, 0})),
+  ?assert(ecu_babyjubjub:is_on_montgomery({0, 0})),
+
+  %% Generator and Base8 round-trip
+  Gen = ecu_babyjubjub:generator(),
+  MGen = ecu_babyjubjub:edwards_to_montgomery(Gen),
+  ?assert(ecu_babyjubjub:is_on_montgomery(MGen)),
+  ?assertEqual(Gen, ecu_babyjubjub:montgomery_to_edwards(MGen)),
+
+  Base8 = ecu_babyjubjub:base8(),
+  MBase8 = ecu_babyjubjub:edwards_to_montgomery(Base8),
+  ?assert(ecu_babyjubjub:is_on_montgomery(MBase8)),
+  ?assertEqual(Base8, ecu_babyjubjub:montgomery_to_edwards(MBase8)),
+
+  %% Montgomery ladder consistency with Edwards scalar multiplication
+  {U_Base8, _} = MBase8,
+  lists:foreach(
+    fun(K) ->
+      EdK = ecu_babyjubjub:mul(Base8, K),
+      case ecu_babyjubjub:edwards_to_montgomery(EdK) of
+        infinity ->
+          ?assertEqual(0, ecu_babyjubjub:montgomery_ladder(K, U_Base8));
+        {UK, _VK} ->
+          ?assertEqual(UK, ecu_babyjubjub:montgomery_ladder(K, U_Base8))
+      end
+    end,
+    [1, 2, 3, 5, 7, 16, 100, 123456789]
+  ),
+
+  %% Binary ladder encoding
+  K_bin = <<123456789:256/little>>,
+  U_bin = <<U_Base8:256/little>>,
+  ResBin =
+    case ecu_babyjubjub:montgomery_ladder(K_bin, U_bin) of
+      B when is_binary(B) -> B
+    end,
+  ?assertEqual(32, byte_size(ResBin)),
+  <<ResInt:256/little>> = ResBin,
+  ?assertEqual(ecu_babyjubjub:montgomery_ladder(123456789, U_Base8), ResInt),
+
+  %% Reference NIF differential
+  case ecu_babyjubjub_nif:is_available() of
+    true ->
+      ?assertEqual({ok, ResBin}, ecu_babyjubjub_nif:montgomery_ladder(K_bin, U_bin));
     false ->
       ok
   end.

@@ -155,9 +155,20 @@ plonk_reference:
 		cp crates/plonk_nif/target/release/ecu_plonk_nif.dll priv/ecu_plonk_nif.dll; \
 	fi
 
-reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference bn254_reference vrf_reference babyjubjub_reference circom_reference plonk_reference
+jubjub_reference:
+	mkdir -p priv
+	cd crates/jubjub_nif && cargo build --release
+	@if [ -f crates/jubjub_nif/target/release/libecu_jubjub_nif.dylib ]; then \
+		cp crates/jubjub_nif/target/release/libecu_jubjub_nif.dylib priv/ecu_jubjub_nif.so; \
+	elif [ -f crates/jubjub_nif/target/release/libecu_jubjub_nif.so ]; then \
+		cp crates/jubjub_nif/target/release/libecu_jubjub_nif.so priv/ecu_jubjub_nif.so; \
+	elif [ -f crates/jubjub_nif/target/release/ecu_jubjub_nif.dll ]; then \
+		cp crates/jubjub_nif/target/release/ecu_jubjub_nif.dll priv/ecu_jubjub_nif.dll; \
+	fi
+
+reference_nifs: rustcrypto_reference frost_reference musig2_reference fn_dsa_reference bls12_381_reference poseidon_reference bn254_reference vrf_reference babyjubjub_reference circom_reference plonk_reference jubjub_reference
 
 clean:
 	rebar3 clean
-	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* priv/ecu_fn_dsa_nif.* priv/ecu_bls12_381_nif.* priv/ecu_poseidon_nif.* priv/ecu_bn254_nif.* priv/ecu_vrf_nif.* priv/ecu_babyjubjub_nif.* priv/ecu_circom_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target crates/fn_dsa_nif/target crates/bls12_381_nif/target crates/poseidon_nif/target crates/bn254_nif/target crates/vrf_nif/target crates/babyjubjub_nif/target crates/circom_nif/target
+	rm -rf priv/ecu_rustcrypto_nif.* priv/ecu_schnorr_nif.* priv/ecu_frost_nif.* priv/ecu_musig2_nif.* priv/ecu_fn_dsa_nif.* priv/ecu_bls12_381_nif.* priv/ecu_poseidon_nif.* priv/ecu_bn254_nif.* priv/ecu_vrf_nif.* priv/ecu_babyjubjub_nif.* priv/ecu_circom_nif.* priv/ecu_plonk_nif.* priv/ecu_jubjub_nif.* crates/rustcrypto_nif/target crates/frost_nif/target crates/musig2_nif/target crates/fn_dsa_nif/target crates/bls12_381_nif/target crates/poseidon_nif/target crates/bn254_nif/target crates/vrf_nif/target crates/babyjubjub_nif/target crates/circom_nif/target crates/plonk_nif/target crates/jubjub_nif/target
 

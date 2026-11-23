@@ -13,7 +13,10 @@
   decompress_point/1,
   eddsa_prv2pub/1,
   eddsa_sign/2,
-  eddsa_verify/3
+  eddsa_verify/3,
+  montgomery_ladder/2,
+  pedersen_hash/1,
+  pedersen_commit/2
 ]).
 -export([init/0]).
 
@@ -134,4 +137,43 @@ eddsa_verify(PK, Sig, MsgBE) ->
   end.
 
 eddsa_verify_nif(_PK, _Sig, _MsgBE) ->
+  erlang:nif_error(not_loaded).
+
+%% @doc Evaluate scalar multiplication on BabyJubjub Montgomery curve using the u-only ladder.
+-spec montgomery_ladder(<<_:256>>, <<_:256>>) -> {ok, <<_:256>>} | {error, term()}.
+montgomery_ladder(ScalarLE, UCoordLE) ->
+  try montgomery_ladder_nif(ScalarLE, UCoordLE) of
+    {ok, Res} when is_binary(Res) -> {ok, Res};
+    {error, Reason} -> {error, Reason}
+  catch
+    error:Reason -> {error, Reason}
+  end.
+
+montgomery_ladder_nif(_ScalarLE, _UCoordLE) ->
+  erlang:nif_error(not_loaded).
+
+%% @doc Compute Circomlib-compatible Pedersen hash of binary data returning 32-byte compressed point.
+-spec pedersen_hash(binary()) -> {ok, <<_:256>>} | {error, term()}.
+pedersen_hash(Data) ->
+  try pedersen_hash_nif(Data) of
+    {ok, Res} when is_binary(Res) -> {ok, Res};
+    {error, Reason} -> {error, Reason}
+  catch
+    error:Reason -> {error, Reason}
+  end.
+
+pedersen_hash_nif(_Data) ->
+  erlang:nif_error(not_loaded).
+
+%% @doc Compute Pedersen commitment C = hash(Data) + Blinding * base(9) returning 32-byte compressed point.
+-spec pedersen_commit(binary(), binary()) -> {ok, <<_:256>>} | {error, term()}.
+pedersen_commit(Data, BlindingLE) ->
+  try pedersen_commit_nif(Data, BlindingLE) of
+    {ok, Res} when is_binary(Res) -> {ok, Res};
+    {error, Reason} -> {error, Reason}
+  catch
+    error:Reason -> {error, Reason}
+  end.
+
+pedersen_commit_nif(_Data, _BlindingLE) ->
   erlang:nif_error(not_loaded).

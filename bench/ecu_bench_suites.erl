@@ -34,6 +34,7 @@ list_suites() ->
     poseidon,
     vrf,
     babyjubjub,
+    jubjub,
     kzg,
     circom,
     plonk
@@ -91,6 +92,7 @@ all_benchmarks() ->
     poseidon_benchmarks(),
     vrf_benchmarks(),
     babyjubjub_benchmarks(),
+    jubjub_benchmarks(),
     kzg_benchmarks(),
     circom_benchmarks(),
     plonk_benchmarks()
@@ -1457,6 +1459,16 @@ babyjubjub_benchmarks() ->
       MsgBE = <<Msg:256/big>>,
       PK = ecu_babyjubjub:derive_public_key(SK),
       Sig = ecu_babyjubjub:sign(SK, Msg),
+      {UCoord, _} =
+        case ecu_babyjubjub:edwards_to_montgomery(P1) of
+          {U, V} -> {U, V};
+          infinity -> {0, 0}
+        end,
+      Data248 = <<16#1234567890abcdef:248/little>>,
+      Data512 =
+        <<16#0123456789abcdef0123456789abcdef:256/little,
+          16#fedcba9876543210fedcba9876543210:256/little>>,
+      Blinding = 98765432109876543210,
 
       Base = [
         #{
@@ -1482,6 +1494,30 @@ babyjubjub_benchmarks() ->
           name => <<"BabyJubjub Point Decompress">>,
           group => babyjubjub,
           run => {fun(C) -> ecu_babyjubjub:decompress(C) end, P1Comp}
+        },
+        #{
+          id => babyjubjub_montgomery_ladder,
+          name => <<"BabyJubjub Montgomery Ladder">>,
+          group => babyjubjub,
+          run => {fun({K, U}) -> ecu_babyjubjub:montgomery_ladder(K, U) end, {Scalar, UCoord}}
+        },
+        #{
+          id => babyjubjub_pedersen_hash_248,
+          name => <<"BabyJubjub Pedersen Hash (248 bits)">>,
+          group => babyjubjub,
+          run => {fun(D) -> ecu_babyjubjub_pedersen:hash(D) end, Data248}
+        },
+        #{
+          id => babyjubjub_pedersen_hash_512,
+          name => <<"BabyJubjub Pedersen Hash (512 bits)">>,
+          group => babyjubjub,
+          run => {fun(D) -> ecu_babyjubjub_pedersen:hash(D) end, Data512}
+        },
+        #{
+          id => babyjubjub_pedersen_commit,
+          name => <<"BabyJubjub Pedersen Commit (248 bits)">>,
+          group => babyjubjub,
+          run => {fun({D, B}) -> ecu_babyjubjub_pedersen:commit(D, B) end, {Data248, Blinding}}
         },
         #{
           id => babyjubjub_eddsa_sign,
@@ -1539,6 +1575,159 @@ babyjubjub_benchmarks() ->
                 name => <<"BabyJubjub EdDSA Verify (Poseidon) (Rust NIF)">>,
                 group => babyjubjub,
                 run => {fun({P, S, M}) -> ecu_babyjubjub_nif:eddsa_verify(P, S, M) end, {PK, Sig, MsgBE}}
+              },
+              #{
+                id => babyjubjub_montgomery_ladder_rust,
+                name => <<"BabyJubjub Montgomery Ladder (Rust NIF)">>,
+                group => babyjubjub,
+                run =>
+                  {
+                    fun({K, U}) -> ecu_babyjubjub_nif:montgomery_ladder(K, U) end,
+                    {<<Scalar:256/little>>, <<UCoord:256/little>>}
+                  }
+              },
+              #{
+                id => babyjubjub_pedersen_hash_248_rust,
+                name => <<"BabyJubjub Pedersen Hash (248 bits) (Rust NIF)">>,
+                group => babyjubjub,
+                run => {fun(D) -> ecu_babyjubjub_nif:pedersen_hash(D) end, Data248}
+              },
+              #{
+                id => babyjubjub_pedersen_hash_512_rust,
+                name => <<"BabyJubjub Pedersen Hash (512 bits) (Rust NIF)">>,
+                group => babyjubjub,
+                run => {fun(D) -> ecu_babyjubjub_nif:pedersen_hash(D) end, Data512}
+              },
+              #{
+                id => babyjubjub_pedersen_commit_rust,
+                name => <<"BabyJubjub Pedersen Commit (248 bits) (Rust NIF)">>,
+                group => babyjubjub,
+                run =>
+                  {
+                    fun({D, B}) -> ecu_babyjubjub_nif:pedersen_commit(D, B) end,
+                    {Data248, <<Blinding:256/little>>}
+                  }
+              }
+            ];
+          false ->
+            []
+        end,
+      Base ++ NifBenches;
+    _ ->
+      []
+  end.
+
+%% ===================================================================
+%% Jubjub (BLS12-381 Twisted Edwards)
+%% ===================================================================
+
+jubjub_benchmarks() ->
+  case code:ensure_loaded(ecu_jubjub) of
+    {module, ecu_jubjub} ->
+      P1 = ecu_jubjub:generator(),
+      P2 = ecu_jubjub:double(P1),
+      P1Comp = ecu_jubjub:compress(P1),
+      P2Comp = ecu_jubjub:compress(P2),
+      Scalar = 12345678901234567890,
+      ScalarLE = <<Scalar:256/little>>,
+      {UCoord, _} =
+        case ecu_jubjub:edwards_to_montgomery(P1) of
+          {JU, JV} -> {JU, JV};
+          infinity -> {0, 0}
+        end,
+      {U_le, V_le} = {<<(element(1, P1)):256/little>>, <<(element(2, P1)):256/little>>},
+
+      Base = [
+        #{
+          id => jubjub_point_add,
+          name => <<"Jubjub Point Addition">>,
+          group => jubjub,
+          run => {fun({A, B}) -> ecu_jubjub:add(A, B) end, {P1, P2}}
+        },
+        #{
+          id => jubjub_point_double,
+          name => <<"Jubjub Point Doubling">>,
+          group => jubjub,
+          run => {fun(P) -> ecu_jubjub:double(P) end, P1}
+        },
+        #{
+          id => jubjub_scalar_mul,
+          name => <<"Jubjub Scalar Multiplication">>,
+          group => jubjub,
+          run => {fun({P, K}) -> ecu_jubjub:mul(P, K) end, {P1, Scalar}}
+        },
+        #{
+          id => jubjub_compress,
+          name => <<"Jubjub Point Compress">>,
+          group => jubjub,
+          run => {fun(P) -> ecu_jubjub:compress(P) end, P1}
+        },
+        #{
+          id => jubjub_decompress,
+          name => <<"Jubjub Point Decompress">>,
+          group => jubjub,
+          run => {fun(C) -> ecu_jubjub:decompress(C) end, P1Comp}
+        },
+        #{
+          id => jubjub_montgomery_ladder,
+          name => <<"Jubjub Montgomery Ladder">>,
+          group => jubjub,
+          run => {fun({K, U}) -> ecu_jubjub:montgomery_ladder(K, U) end, {Scalar, UCoord}}
+        }
+      ],
+
+      NifAvail =
+        case code:ensure_loaded(ecu_jubjub_nif) of
+          {module, ecu_jubjub_nif} ->
+            erlang:function_exported(ecu_jubjub_nif, is_available, 0) andalso
+              ecu_jubjub_nif:is_available();
+          _ ->
+            false
+        end,
+
+      NifBenches =
+        case NifAvail of
+          true ->
+            [
+              #{
+                id => jubjub_point_add_rust,
+                name => <<"Jubjub Point Addition (Rust NIF)">>,
+                group => jubjub,
+                run => {fun({A, B}) -> ecu_jubjub_nif:point_add(A, B) end, {P1Comp, P2Comp}}
+              },
+              #{
+                id => jubjub_point_double_rust,
+                name => <<"Jubjub Point Doubling (Rust NIF)">>,
+                group => jubjub,
+                run => {fun(P) -> ecu_jubjub_nif:point_double(P) end, P1Comp}
+              },
+              #{
+                id => jubjub_scalar_mul_rust,
+                name => <<"Jubjub Scalar Multiplication (Rust NIF)">>,
+                group => jubjub,
+                run => {fun({P, K}) -> ecu_jubjub_nif:point_mul(P, K) end, {P1Comp, ScalarLE}}
+              },
+              #{
+                id => jubjub_compress_rust,
+                name => <<"Jubjub Point Compress (Rust NIF)">>,
+                group => jubjub,
+                run => {fun({U, V}) -> ecu_jubjub_nif:compress_point(U, V) end, {U_le, V_le}}
+              },
+              #{
+                id => jubjub_decompress_rust,
+                name => <<"Jubjub Point Decompress (Rust NIF)">>,
+                group => jubjub,
+                run => {fun(C) -> ecu_jubjub_nif:decompress_point(C) end, P1Comp}
+              },
+              #{
+                id => jubjub_montgomery_ladder_rust,
+                name => <<"Jubjub Montgomery Ladder (Rust NIF)">>,
+                group => jubjub,
+                run =>
+                  {
+                    fun({K, U}) -> ecu_jubjub_nif:montgomery_ladder(K, U) end,
+                    {ScalarLE, <<UCoord:256/little>>}
+                  }
               }
             ];
           false ->

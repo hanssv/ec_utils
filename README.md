@@ -6,7 +6,7 @@ A pure Erlang cryptographic library implementing elliptic curve arithmetic
 BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
-pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **PLONK**, **BabyJubjub**, **KZG / EIP-4844**, **Circom / ZoKrates R1CS & WTNS**),
+pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **PLONK**, **BabyJubjub**, **Jubjub**, **Pedersen**, **KZG / EIP-4844**, **Circom / ZoKrates R1CS & WTNS**),
 Hash-to-Curve (RFC 9380), Verifiable Random Functions (VRF / RFC 9381),
 hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
 mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
@@ -431,6 +431,34 @@ Base8 = ecu_babyjubjub:base8(),
 P2 = ecu_babyjubjub:double(Base8),
 Compressed = ecu_babyjubjub:compress(P2),
 {ok, P2} = ecu_babyjubjub:decompress(Compressed).
+
+%% Montgomery ladder scalar multiplication (u-only constant-time)
+MBase8 = ecu_babyjubjub:edwards_to_montgomery(Base8),
+URes = ecu_babyjubjub:montgomery_ladder(123456789, element(1, MBase8)).
+
+%% Circomlib-compatible Pedersen Hash & Commitments
+MsgBin = <<"state commitment data">>,
+HashPt = ecu_babyjubjub_pedersen:hash(MsgBin),
+HashComp = ecu_babyjubjub_pedersen:hash_compressed(MsgBin),
+Commitment = ecu_babyjubjub_pedersen:commit(MsgBin, 123456789).
+
+### Jubjub Curve over BLS12-381 (Zcash ZIP 216 / ZIP 243)
+
+Pure-Erlang Jubjub twisted Edwards curve arithmetic over the scalar field of BLS12-381:
+
+```erlang
+Gen = ecu_jubjub:generator(),
+DoubleGen = ecu_jubjub:double(Gen),
+P_mul = ecu_jubjub:mul(Gen, 123456789),
+
+%% ZIP 216 point compression and decompression
+Comp = ecu_jubjub:compress(P_mul),
+{ok, P_mul} = ecu_jubjub:decompress(Comp),
+
+%% Montgomery ladder on Jubjub
+MGen = ecu_jubjub:edwards_to_montgomery(Gen),
+UK = ecu_jubjub:montgomery_ladder(123456789, element(1, MGen)).
+```
 ```
 
 ### KZG Polynomial Commitments & EIP-4844 (BLS12-381)
@@ -754,8 +782,17 @@ Supported Curves & API
   - `add/2`, `double/1`, `neg/1`, `mul/2`, `mul_base8/1`: Complete twisted Edwards arithmetic in projective coordinates over the scalar field of BN254.
   - `compress/1`, `decompress/1`: 32-byte point compression and decompression with Tonelli-Shanks modular square root.
   - `is_on_curve/1`, `is_in_subgroup/1`: Curve equation validation and prime-order subgroup membership checks.
+  - `edwards_to_montgomery/1`, `montgomery_to_edwards/1`, `montgomery_ladder/2`: Birational Montgomery mapping and constant-time $u$-only Montgomery ladder.
   - `keypair/0,1`, `derive_public_key/1`: Key generation and derivation matching Circom / SnarkJS conventions.
   - `sign/2`, `verify/3`: Circom-compatible EdDSA signing and verification with Poseidon hash (`EdDSAPoseidonVerifier.circom`).
+- `ecu_babyjubjub_pedersen`: Pure-Erlang Circomlib-compatible Pedersen Hash and Commitments over BabyJubjub:
+  - `base/1`, `bases/0`: The 10 canonical generator base points defined in `pedersen.circom`.
+  - `hash/1,2`, `hash_compressed/1`: 4-bit window Pedersen hashing supporting affine `{X, Y}`, 32-byte compressed, or `x_only` field element outputs up to 2000 bits (10 segments).
+  - `commit/2,3`: Pedersen vector/scalar commitments with default or custom blinding generators.
+- `ecu_jubjub`: Pure-Erlang implementation of the Jubjub twisted Edwards curve over BLS12-381 $\mathbb{F}_q$ (Zcash ZIP 216 / ZIP 243):
+  - `add/2`, `double/1`, `neg/1`, `mul/2`, `mul_base8/1`: Complete twisted Edwards group operations with $a = -1, d = -(10240/10241) \pmod q$.
+  - `compress/1`, `decompress/1`: ZIP 216 strict canonical point compression and decompression with Tonelli-Shanks square root.
+  - `edwards_to_montgomery/1`, `montgomery_to_edwards/1`, `montgomery_ladder/2`: Montgomery birational equivalence ($A=40962, B=-40964$) and $u$-only ladder scalar multiplication.
 - `ecu_blake512`: Pure-Erlang implementation of the BLAKE-512 cryptographic hash function used for BabyJubjub key expansion and nonces.
 - `ecu_poly`: Finite field polynomial arithmetic over prime fields (defaulting to BLS12-381 $r$):
   - `eval/2,3`: Horner's method polynomial evaluation in $O(d)$.
