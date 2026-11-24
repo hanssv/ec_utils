@@ -292,8 +292,8 @@ batch_verification_test() ->
   ?assert(ecu_groth16:verify(VK, Inputs2, Proof2)),
   ?assert(ecu_groth16:verify(VK, Inputs3, Proof3)),
 
-  %% Empty batch
-  ?assert(ecu_groth16:verify_batch(VK, [])),
+  %% Empty batch must be rejected (vacuous truth prevention)
+  ?assertNot(ecu_groth16:verify_batch(VK, [])),
 
   %% Single item batch
   ?assert(ecu_groth16:verify_batch(VK, [{Inputs1, Proof1}])),
@@ -594,3 +594,46 @@ differential_bn254_nif_oracle_test() ->
     false ->
       ok
   end.
+
+groth16_adversarial_rejections_test() ->
+  Inputs = [10, 20],
+  {VK, Proof} = generate_groth16_instance(Inputs, 42),
+  ?assert(ecu_groth16:verify(VK, Inputs, Proof)),
+
+  %% 1. Vacuous batch rejection: empty batch must fail
+  ?assertNot(ecu_groth16:verify_batch(VK, [])),
+  ?assertNot(ecu_groth16:verify_batch(bls12_381, VK, [])),
+
+  %% 2. String and hex public inputs
+  ?assert(ecu_groth16:verify(VK, [<<"10">>, <<"20">>], Proof)),
+  ?assert(ecu_groth16:verify(VK, [<<"0x0a">>, <<"0x14">>], Proof)),
+
+  %% 3. Adversarial / malformed public inputs
+  ?assertNot(ecu_groth16:verify(VK, [<<>>], Proof)),
+  ?assertNot(ecu_groth16:verify(VK, [<<"not_a_number">>], Proof)),
+  ?assertNot(ecu_groth16:verify(VK, [<<"null">>], Proof)),
+  ?assertNot(ecu_groth16:verify(VK, [-1, 20], Proof)),
+  ?assertNot(ecu_groth16:verify(VK, [?BLS12_381_R, 20], Proof)),
+  ?assertNot(ecu_groth16:verify(VK, [?BLS12_381_R + 1, 20], Proof)),
+  ?assertNot(ecu_groth16:verify(VK, [<<1, 2, 3>>, 20], Proof)),
+
+  %% 4. Symmetrical binary key map for VK
+  #groth16_vk{alpha_g1 = Alpha, beta_g2 = Beta, gamma_g2 = Gamma, delta_g2 = Delta, ic = IC} = VK,
+  VKBinKeys = #{
+    <<"alpha">> => Alpha,
+    <<"beta">> => Beta,
+    <<"gamma">> => Gamma,
+    <<"delta">> => Delta,
+    <<"ic">> => IC
+  },
+  ?assert(ecu_groth16:verify(VKBinKeys, Inputs, Proof)),
+
+  %% 5. Out-of-subgroup torsion point injection
+  %% On BLS12-381 G1, {0, 2} is order-3 cofactor torsion
+  TorsionG1 = {0, 2},
+  ?assert(?BLS:g1_on_curve(TorsionG1)),
+  ?assertNot(?BLS:g1_is_in_subgroup(TorsionG1)),
+  ProofTorsionA = Proof#groth16_proof{a = TorsionG1},
+  ?assertNot(ecu_groth16:verify(VK, Inputs, ProofTorsionA)),
+  ProofTorsionC = Proof#groth16_proof{c = TorsionG1},
+  ?assertNot(ecu_groth16:verify(VK, Inputs, ProofTorsionC)).

@@ -409,5 +409,59 @@ prop_differential_nif_oracle() ->
     end
   ).
 
+prop_plonk_adversarial_rejections() ->
+  ?FORALL(
+    {VK, Inputs, Proof},
+    gen_synthetic_instance(bn254),
+    begin
+      R = ?BN254_R,
+      %% 1. Non-numeric and empty public inputs rejected
+      MalformedPubRejected =
+        ecu_plonk:parse_public_inputs([<<"not_a_number">> | Inputs], bn254) =:= error,
+      EmptyBinPubRejected =
+        ecu_plonk:parse_public_inputs([<<>> | Inputs], bn254) =:= error,
+      OutOfRangePubRejected =
+        ecu_plonk:parse_public_inputs([R | Inputs], bn254) =:= error,
+
+      %% 2. Negative evaluation scalar rejection in proof record
+      BadProofRec = Proof#plonk_proof{eval_a = -5},
+      NegativeEvalRejected =
+        ecu_plonk:parse_proof(BadProofRec, bn254) =:= error,
+
+      %% 3. Unbounded or invalid power in VK rejected
+      BadVKPower = VK#plonk_vk{power = 100000000},
+      UnboundedPowerRejected =
+        ecu_plonk:parse_vk(BadVKPower, bn254) =:= error,
+
+      %% 4. Invalid root of unity in VK rejected
+      BadVKRoot = VK#plonk_vk{w = (VK#plonk_vk.w + 1) rem R},
+      InvalidRootRejected =
+        ecu_plonk:parse_vk(BadVKRoot, bn254) =:= error,
+
+      %% 5. Record normalization: compressed G1 point in VK record normalizes to affine
+      CompQm = ?BN:g1_compress(VK#plonk_vk.qm),
+      VKWithComp = VK#plonk_vk{qm = CompQm},
+      NormVKResult =
+        case ecu_plonk:parse_vk(VKWithComp, bn254) of
+          {ok, NormVK} ->
+            is_tuple(NormVK#plonk_vk.qm) andalso
+              NormVK#plonk_vk.qm =/= CompQm andalso
+              ecu_plonk:verify(NormVK, Inputs, Proof) =:= true;
+          error ->
+            false
+        end,
+
+      conjunction([
+        {malformed_pub_rejected, MalformedPubRejected},
+        {empty_bin_pub_rejected, EmptyBinPubRejected},
+        {out_of_range_pub_rejected, OutOfRangePubRejected},
+        {negative_eval_rejected, NegativeEvalRejected},
+        {unbounded_power_rejected, UnboundedPowerRejected},
+        {invalid_root_rejected, InvalidRootRejected},
+        {norm_vk_result, NormVKResult}
+      ])
+    end
+  ).
+
 enc_g1_bin({X, Y}) ->
   <<X:256/big, Y:256/big>>.

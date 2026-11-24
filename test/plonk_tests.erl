@@ -583,3 +583,44 @@ synthetic_bn254_nif_cross_verification_test() ->
     false ->
       ok
   end.
+
+plonk_adversarial_rejections_test() ->
+  {ok, VKJson} = file:read_file("test/data/plonk_bn254_vk.json"),
+  {ok, ProofJson} = file:read_file("test/data/plonk_bn254_proof.json"),
+  {ok, PubJson} = file:read_file("test/data/plonk_bn254_public.json"),
+  {ok, VK} = ecu_plonk:parse_vk(VKJson, bn254),
+  {ok, Proof} = ecu_plonk:parse_proof(ProofJson, bn254),
+  {ok, Pub} = ecu_plonk:parse_public_inputs(PubJson, bn254),
+  ?assert(ecu_plonk:verify(VK, Pub, Proof)),
+
+  %% 1. Non-numeric and malformed string public inputs
+  ?assertEqual(error, ecu_plonk:parse_public_inputs(<<"[\"not_a_number\", \"null\", \"\"]">>)),
+  ?assertEqual(error, ecu_plonk:parse_public_inputs([<<"not_a_number">>], bn254)),
+  ?assertEqual(error, ecu_plonk:parse_public_inputs([<<"null">>], bn254)),
+  ?assertEqual(error, ecu_plonk:parse_public_inputs([<<>>], bn254)),
+  ?assertEqual(error, ecu_plonk:parse_public_inputs([<<"-5">>], bn254)),
+
+  %% 2. Unbounded or invalid power in VK
+  VKMap = json:decode(VKJson),
+  ?assertEqual(error, ecu_plonk:parse_vk(VKMap#{<<"power">> => 100000000}, bn254)),
+  ?assertEqual(error, ecu_plonk:parse_vk(VKMap#{<<"power">> => 0}, bn254)),
+  ?assertEqual(error, ecu_plonk:parse_vk(VKMap#{<<"power">> => -1}, bn254)),
+  ?assertEqual(error, ecu_plonk:parse_vk(VKMap#{<<"power">> => 29}, bn254)),
+
+  %% 3. Invalid VK scalar parameters
+  ?assertEqual(error, ecu_plonk:parse_vk(VKMap#{<<"nPublic">> => -1}, bn254)),
+  ?assertEqual(error, ecu_plonk:parse_vk(VKMap#{<<"k1">> => 0}, bn254)),
+  ?assertEqual(error, ecu_plonk:parse_vk(VKMap#{<<"w">> => 0}, bn254)),
+  ?assertEqual(error, ecu_plonk:parse_vk(VKMap#{<<"w">> => 12345}, bn254)),
+
+  %% 4. Negative evaluation scalar rejection in record
+  BadProofRec = Proof#plonk_proof{eval_a = -5},
+  ?assertEqual(error, ecu_plonk:parse_proof(BadProofRec, bn254)),
+
+  %% 5. Record normalization: record with compressed G1 point normalizes to affine
+  {QmX, QmY} = VK#plonk_vk.qm,
+  CompQm = ?BN:g1_compress({QmX, QmY}),
+  VKWithComp = setelement(#plonk_vk.qm, VK, CompQm),
+  {ok, NormVK} = ecu_plonk:parse_vk(VKWithComp, bn254),
+  ?assertNotEqual(CompQm, NormVK#plonk_vk.qm),
+  ?assert(ecu_plonk:verify(NormVK, Pub, Proof)).
