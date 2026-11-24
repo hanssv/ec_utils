@@ -958,6 +958,18 @@ the library incorporates key algorithmic optimizations:
 | **babyjubjub point decompress** | — | **137 µs** | — | 645 µs (babyjubjub-rs Rust NIF) | **4.71× faster** |
 | **babyjubjub eddsa sign (Poseidon)** | — | **2.64 ms** | — | 276 µs (babyjubjub-rs Rust NIF) | 9.57× |
 | **babyjubjub eddsa verify (Poseidon)** | — | **2.74 ms** | — | 1.56 ms (babyjubjub-rs Rust NIF) | 1.76× |
+| **babyjubjub montgomery ladder** | — | **357 µs** | — | 625 µs (babyjubjub-rs Rust NIF) | **1.75× faster** |
+| **babyjubjub pedersen hash (248b)** | — | **1.11 ms** | — | 1.71 ms (babyjubjub-rs Rust NIF) | **1.54× faster** |
+| **babyjubjub pedersen hash (512b)** | — | **2.44 ms** | — | 2.64 ms (babyjubjub-rs Rust NIF) | **1.08× faster** |
+| **babyjubjub pedersen commit (248b)** | — | **2.46 ms** | — | 2.53 ms (babyjubjub-rs Rust NIF) | **1.03× faster** |
+| **jubjub point add** | — | **14.0 µs** | — | 39.5 µs (jubjub Rust NIF) | **2.82× faster** |
+| **jubjub point double** | — | **14.1 µs** | — | 23.8 µs (jubjub Rust NIF) | **1.69× faster** |
+| **jubjub scalar mul** | — | **212 µs** | — | 110 µs (jubjub Rust NIF) | 1.92× |
+| **jubjub point compress** | — | **0.07 µs** | — | 15.8 µs (jubjub Rust NIF) | **225× faster** |
+| **jubjub point decompress** | — | **185 µs** | — | 15.8 µs (jubjub Rust NIF) | 11.7× |
+| **jubjub montgomery ladder** | — | **289 µs** | — | 72.7 µs (jubjub Rust NIF) | 3.97× |
+| **redjubjub sign** | — | **1.18 ms** | — | 220 µs (redjubjub Rust NIF) | 5.35× |
+| **redjubjub verify** | — | **2.24 ms** | — | 222 µs (redjubjub Rust NIF) | 10.1× |
 | **poly eval (deg 16, Horner)** | — | **1.41 µs** | — | — | — |
 | **poly synthetic division (deg 16, Ruffini)** | — | **1.49 µs** | — | — | — |
 | **kzg commit (deg 16, G1)** | — | **213 µs** | — | 502 µs (blst Rust NIF)* | **2.36× faster** |
@@ -986,6 +998,7 @@ the library incorporates key algorithmic optimizations:
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
 - *BN254 elliptic curve and Groth16 reference benchmarks use an optional Arkworks test NIF (`crates/bn254_nif`) buildable via `make reference_nifs`.*
 - *BabyJubjub and Circom EdDSA reference benchmarks use an optional Rust test NIF (`crates/babyjubjub_nif`) wrapping `babyjubjub-rs`, buildable via `make babyjubjub_reference`.*
+- *Jubjub and RedJubjub reference benchmarks use an optional Rust test NIF (`crates/jubjub_nif`) wrapping `jubjub` and `redjubjub`, buildable via `make jubjub_reference`.*
 - *KZG polynomial commitment reference benchmarks use an optional test NIF (`crates/bls12_381_nif`) wrapping Supranational `blst`, buildable via `make bls12_381_reference`.*
 - *Circom R1CS and WTNS reference benchmarks use an optional test NIF (`crates/circom_nif`) wrapping official `r1cs-file` and `wtns-file` crates, buildable via `make circom_reference`.*
 - *PLONK universal zk-SNARK reference benchmarks use an optional Arkworks test NIF (`crates/plonk_nif`) buildable via `make plonk_reference`.*
@@ -1024,6 +1037,7 @@ See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cry
 - **HD Wallets & Mnemonics**: BIP-32, SLIP-0010, AEX-10, and BIP-39 `[Completed]`.
 - **Native Cryptographic Independence**: 100% pure-Erlang fallback for hashing, HMAC, and CSPRNG entropy via `ecu_compat` and `ecu_entropy` `[Completed]`.
 - **Pairing-Friendly Cryptography, zk-SNARKs & Poseidon (BLS12-381 & BN254)**: BLS signatures, BN254 / BLS12-381 curve arithmetic & optimal Ate pairings, Groth16 proof verification, and Poseidon algebraic hashing `[Completed]`.
+- **In-Circuit Curves & Circuit Tooling**: BabyJubjub, Jubjub, Montgomery ladders, Pedersen hash/commitments, RedJubjub (ZIP 215/216), KZG commitments (EIP-4844), Circom 2 / ZoKrates R1CS & WTNS, and PLONK verification `[Completed]`.
 
 Security Considerations & Limitations
 -------------------------------------
