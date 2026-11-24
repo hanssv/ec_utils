@@ -61,6 +61,10 @@
   montgomery_point/0
 ]).
 
+-ifdef(TEST).
+-export([to_proj/1, to_affine/1]).
+-endif.
+
 %%%-------------------------------------------------------------------
 %%% Curve Constants & Definitions
 %%%-------------------------------------------------------------------
@@ -316,24 +320,36 @@ verify(PK, Sig, Msg) when is_binary(Sig), byte_size(Sig) =:= 64 ->
         _ ->
           throw(bad_pk)
       end,
-    MsgInt = to_field_element(Msg),
-    <<R8Comp:32/binary, S:256/little>> = Sig,
-    if
-      S >= ?SUBORDER ->
+    case is_on_curve(PKPoint) andalso PKPoint =/= identity() of
+      false ->
         false;
       true ->
-        case decompress(R8Comp) of
-          {ok, R8} ->
-            {R8_X, R8_Y} = R8,
-            {PK_X, PK_Y} = PKPoint,
-            HM = ecu_poseidon:hash(bn254, [R8_X, R8_Y, PK_X, PK_Y, MsgInt]),
-            L = mul_base8(S),
-            HMTimes8 = (HM * 8) rem ?SUBORDER,
-            HM_PK = mul(PKPoint, HMTimes8),
-            R = add(R8, HM_PK),
-            L =:= R;
-          _ ->
-            false
+        %% Clear cofactor on PK per circomlib eddsaposeidon.circom:
+        %% A8 = 8 * PK; reject if A8.x == 0 (identity or order 2)
+        A8 = mul(PKPoint, 8),
+        case A8 =/= identity() andalso element(1, A8) =/= 0 of
+          false ->
+            false;
+          true ->
+            MsgInt = to_field_element(Msg),
+            <<R8Comp:32/binary, S:256/little>> = Sig,
+            if
+              S >= ?SUBORDER ->
+                false;
+              true ->
+                case decompress(R8Comp) of
+                  {ok, R8} when R8 =/= {0, 1} ->
+                    {R8_X, R8_Y} = R8,
+                    {PK_X, PK_Y} = PKPoint,
+                    HM = ecu_poseidon:hash(bn254, [R8_X, R8_Y, PK_X, PK_Y, MsgInt]),
+                    L = mul_base8(S),
+                    HM_A8 = mul(A8, HM),
+                    R = add(R8, HM_A8),
+                    L =:= R;
+                  _ ->
+                    false
+                end
+            end
         end
     end
   catch
@@ -349,24 +365,26 @@ verify(_, _, _) ->
 
 -compile({inline, [to_proj/1, to_affine/1, proj_add/2]}).
 
--spec to_proj(point() | projective_point()) -> projective_point().
-to_proj({X, Y}) ->
+-spec to_proj(term()) -> projective_point().
+to_proj({X, Y}) when is_integer(X), is_integer(Y) ->
   {X, Y, 1};
-to_proj({X, Y, Z}) ->
-  {X, Y, Z}.
+to_proj({X, Y, Z}) when is_integer(X), is_integer(Y), is_integer(Z) ->
+  {X, Y, Z};
+to_proj(_) ->
+  error(badarg).
 
--spec to_affine(point() | projective_point()) -> point().
-to_affine({X, Y}) ->
+-spec to_affine(term()) -> point().
+to_affine({X, Y}) when is_integer(X), is_integer(Y) ->
   {X, Y};
-to_affine({0, _Y, _Z}) ->
-  {0, 1};
-to_affine({_X, 0, _Z}) ->
+to_affine({_X, _Y, 0}) ->
   identity();
-to_affine({X, Y, 1}) ->
+to_affine({X, Y, 1}) when is_integer(X), is_integer(Y) ->
   {X, Y};
-to_affine({X, Y, Z}) ->
+to_affine({X, Y, Z}) when is_integer(X), is_integer(Y), is_integer(Z) ->
   ZInv = ecu_misc:exp_mod(Z, ?Q - 2, ?Q),
-  {(X * ZInv) rem ?Q, (Y * ZInv) rem ?Q}.
+  {(X * ZInv) rem ?Q, (Y * ZInv) rem ?Q};
+to_affine(_) ->
+  error(badarg).
 
 %% @doc Complete projective addition formula for twisted Edwards curves (BBJLP).
 -spec proj_add(projective_point(), projective_point()) -> projective_point().
@@ -592,7 +610,7 @@ montgomery_ladder_int(_K, 0) ->
 montgomery_ladder_int(KInt, UInt) when KInt > 0, UInt >= 0, UInt < ?Q ->
   X1 = UInt rem ?Q,
   {X2Fin, Z2Fin, X3Fin, Z3Fin, LastSwap} =
-    ladder_loop(253, KInt, X1, 1, 0, X1, 1, 0),
+    ladder_loop(255, KInt, X1, 1, 0, X1, 1, 0),
   {X2Res, _} = cswap(LastSwap, X2Fin, X3Fin),
   {Z2Res, _} = cswap(LastSwap, Z2Fin, Z3Fin),
   case Z2Res of

@@ -39,17 +39,36 @@
   decompress/1,
 
   montgomery_a/0,
+  montgomery_b/0,
+  montgomery_a24/0,
   is_on_montgomery/1,
   edwards_to_montgomery/1,
   montgomery_to_edwards/1,
-  montgomery_ladder/2
+  montgomery_ladder/2,
+
+  spendauth_basepoint/0,
+  binding_basepoint/0,
+  redjubjub_derive_public_key/1,
+  redjubjub_derive_public_key/2,
+  redjubjub_sign/2,
+  redjubjub_sign/3,
+  redjubjub_sign/4,
+  redjubjub_verify/3,
+  redjubjub_verify/4,
+  redjubjub_rerandomize_public_key/2,
+  redjubjub_rerandomize_keypair/2
 ]).
 
 -export_type([
   point/0,
   projective_point/0,
-  montgomery_point/0
+  montgomery_point/0,
+  sig_type/0
 ]).
+
+-ifdef(TEST).
+-export([to_proj/1, to_affine/1]).
+-endif.
 
 %%%-------------------------------------------------------------------
 %%% Curve Constants & Definitions
@@ -88,9 +107,25 @@
 -define(MONTGOMERY_B, (?Q - 40964)).
 -define(MONTGOMERY_A24, 10240).
 
+%% RedJubjub Basepoints (Zcash protocol spec §5.4.7.1, ZIP 215 / ZIP 216)
+-define(SPENDAUTH_U,
+  4139425550610461525665941076812662132363359224232624900223172373014329534291
+).
+-define(SPENDAUTH_V,
+  39635691377166599497441725607757882405510648532010642268690928210480481875248
+).
+
+-define(BINDING_U,
+  47042227020334719030310671629496501061777616454137182971856918820250544653111
+).
+-define(BINDING_V,
+  49531484613049745751551498609154147537293487462303198979615882148044956461707
+).
+
 -type point() :: {non_neg_integer(), non_neg_integer()}.
 -type projective_point() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 -type montgomery_point() :: {non_neg_integer(), non_neg_integer()} | infinity.
+-type sig_type() :: spend_auth | binding.
 
 %%%-------------------------------------------------------------------
 %%% API: Parameters
@@ -248,6 +283,14 @@ decompress(_) ->
 montgomery_a() ->
   ?MONTGOMERY_A.
 
+-spec montgomery_b() -> pos_integer().
+montgomery_b() ->
+  ?MONTGOMERY_B.
+
+-spec montgomery_a24() -> pos_integer().
+montgomery_a24() ->
+  ?MONTGOMERY_A24.
+
 %% @doc Check whether an affine point lies on Montgomery curve B*v^2 = u^3 + A*u^2 + u (mod q).
 -spec is_on_montgomery(montgomery_point()) -> boolean().
 is_on_montgomery(infinity) ->
@@ -355,7 +398,7 @@ montgomery_ladder_int(_K, 0) ->
 montgomery_ladder_int(KInt, UInt) when KInt > 0, UInt >= 0, UInt < ?Q ->
   X1 = UInt rem ?Q,
   {X2Fin, Z2Fin, X3Fin, Z3Fin, LastSwap} =
-    ladder_loop(253, KInt, X1, 1, 0, X1, 1, 0),
+    ladder_loop(255, KInt, X1, 1, 0, X1, 1, 0),
   {X2Res, _} = cswap(LastSwap, X2Fin, X3Fin),
   {Z2Res, _} = cswap(LastSwap, Z2Fin, Z3Fin),
   case Z2Res of
@@ -414,23 +457,235 @@ cswap(0, A, B) ->
   {A, B}.
 
 %%%-------------------------------------------------------------------
+%%% API: RedJubjub Signatures (ZIP 215 / ZIP 216 / Zcash Spec §5.4.7.1)
+%%%-------------------------------------------------------------------
+
+%% @doc Return the 80-bit security SpendAuth basepoint G_Sapling.
+-spec spendauth_basepoint() -> point().
+spendauth_basepoint() ->
+  {?SPENDAUTH_U, ?SPENDAUTH_V}.
+
+%% @doc Return the Binding basepoint J_Sapling.
+-spec binding_basepoint() -> point().
+binding_basepoint() ->
+  {?BINDING_U, ?BINDING_V}.
+
+%% @doc Derive RedJubjub spend authorization public key (32 bytes compressed).
+-spec redjubjub_derive_public_key(binary() | pos_integer()) -> binary().
+redjubjub_derive_public_key(SK) ->
+  redjubjub_derive_public_key(SK, spend_auth).
+
+%% @doc Derive RedJubjub public key (32 bytes compressed) for specified signature type.
+-spec redjubjub_derive_public_key(binary() | pos_integer(), sig_type()) -> binary().
+redjubjub_derive_public_key(SKBin, SigType) when is_binary(SKBin), byte_size(SKBin) =:= 32 ->
+  SKInt = binary:decode_unsigned(SKBin, little),
+  if
+    SKInt =< 0 orelse SKInt >= ?SUBORDER ->
+      error(badarg);
+    true ->
+      redjubjub_derive_public_key_int(SKInt, SigType)
+  end;
+redjubjub_derive_public_key(SKInt, SigType) when is_integer(SKInt), SKInt > 0, SKInt < ?SUBORDER ->
+  redjubjub_derive_public_key_int(SKInt, SigType);
+redjubjub_derive_public_key(_, _) ->
+  error(badarg).
+
+-spec redjubjub_derive_public_key_int(pos_integer(), sig_type()) -> binary().
+redjubjub_derive_public_key_int(SKInt, SigType) ->
+  Base = redjubjub_base(SigType),
+  PKPoint = mul(Base, SKInt),
+  compress(PKPoint).
+
+%% @doc Sign message with RedJubjub spend authorization key, returning 64-byte signature.
+-spec redjubjub_sign(binary() | pos_integer(), binary()) -> binary().
+redjubjub_sign(SK, Msg) ->
+  redjubjub_sign(SK, Msg, spend_auth).
+
+%% @doc Sign message with RedJubjub key for specified signature type using OS random nonce bytes.
+-spec redjubjub_sign(binary() | pos_integer(), binary(), sig_type()) -> binary().
+redjubjub_sign(SK, Msg, SigType) ->
+  T = ecu_compat:strong_rand_bytes(80),
+  redjubjub_sign(SK, Msg, SigType, T).
+
+%% @doc Sign message with RedJubjub key with explicit 80-byte randomness T.
+-spec redjubjub_sign(binary() | pos_integer(), binary(), sig_type(), binary()) -> binary().
+redjubjub_sign(SK, Msg, SigType, T) when is_binary(Msg), is_binary(T), byte_size(T) =:= 80 ->
+  SKInt =
+    if
+      is_binary(SK), byte_size(SK) =:= 32 -> binary:decode_unsigned(SK, little);
+      is_integer(SK) -> SK;
+      true -> error(badarg)
+    end,
+  if
+    SKInt =< 0 orelse SKInt >= ?SUBORDER ->
+      error(badarg);
+    true ->
+      Base = redjubjub_base(SigType),
+      PKPoint = mul(Base, SKInt),
+      PKBin = compress(PKPoint),
+      NonceHash = ecu_blake2b:hash(<<T:80/binary, PKBin:32/binary, Msg/binary>>, #{
+        outlen => 64,
+        personal => <<"Zcash_RedJubjubH">>
+      }),
+      Nonce = binary:decode_unsigned(NonceHash, little) rem ?SUBORDER,
+      RPoint = mul(Base, Nonce),
+      RBin = compress(RPoint),
+      CHash = ecu_blake2b:hash(<<RBin:32/binary, PKBin:32/binary, Msg/binary>>, #{
+        outlen => 64,
+        personal => <<"Zcash_RedJubjubH">>
+      }),
+      C = binary:decode_unsigned(CHash, little) rem ?SUBORDER,
+      S = (Nonce + C * SKInt) rem ?SUBORDER,
+      <<RBin:32/binary, S:256/little>>
+  end;
+redjubjub_sign(_, _, _, _) ->
+  error(badarg).
+
+%% @doc Verify RedJubjub spend authorization signature (64 bytes) over message.
+-spec redjubjub_verify(binary() | point(), binary(), binary()) -> boolean().
+redjubjub_verify(PK, Msg, Sig) ->
+  redjubjub_verify(PK, Msg, Sig, spend_auth).
+
+%% @doc Verify RedJubjub signature (64 bytes) for specified signature type.
+-spec redjubjub_verify(binary() | point(), binary(), binary(), sig_type()) -> boolean().
+redjubjub_verify(PK, Msg, Sig, SigType) when
+  is_binary(Msg), is_binary(Sig), byte_size(Sig) =:= 64
+->
+  try
+    <<RBin:32/binary, S:256/little>> = Sig,
+    case S >= ?SUBORDER of
+      true ->
+        false;
+      false ->
+        {PKBin, PKPoint} =
+          case PK of
+            {X, Y} when is_integer(X), is_integer(Y) ->
+              {compress({X, Y}), {X, Y}};
+            Bin when is_binary(Bin), byte_size(Bin) =:= 32 ->
+              case decompress(Bin) of
+                {ok, Pt} -> {Bin, Pt};
+                _ -> throw(bad_pk)
+              end;
+            _ ->
+              throw(bad_pk)
+          end,
+        case is_on_curve(PKPoint) andalso PKPoint =/= identity() of
+          false ->
+            false;
+          true ->
+            case decompress(RBin) of
+              {ok, RPoint} ->
+                Base = redjubjub_base(SigType),
+                CHash = ecu_blake2b:hash(<<RBin:32/binary, PKBin:32/binary, Msg/binary>>, #{
+                  outlen => 64,
+                  personal => <<"Zcash_RedJubjubH">>
+                }),
+                C = binary:decode_unsigned(CHash, little) rem ?SUBORDER,
+                SB = mul(Base, S),
+                CA = mul(PKPoint, C),
+                Check = add(add(SB, neg(CA)), neg(RPoint)),
+                mul(Check, 8) =:= identity();
+              _ ->
+                false
+            end
+        end
+    end
+  catch
+    _:_ -> false
+  end;
+redjubjub_verify(_, _, _, _) ->
+  false.
+
+%% @doc Re-randomize RedJubjub SpendAuth public key: PK' = PK + [Alpha]SpendAuthBase.
+-spec redjubjub_rerandomize_public_key(binary() | point(), binary() | integer()) -> binary().
+redjubjub_rerandomize_public_key(PK, Alpha) ->
+  AlphaInt =
+    if
+      is_binary(Alpha), byte_size(Alpha) =:= 32 -> binary:decode_unsigned(Alpha, little);
+      is_integer(Alpha) -> Alpha;
+      true -> error(badarg)
+    end,
+  if
+    AlphaInt =< 0 orelse AlphaInt >= ?SUBORDER ->
+      error(badarg);
+    true ->
+      PKPoint =
+        case PK of
+          {X, Y} when is_integer(X), is_integer(Y) -> {X, Y};
+          Bin when is_binary(Bin), byte_size(Bin) =:= 32 ->
+            case decompress(Bin) of
+              {ok, Pt} -> Pt;
+              _ -> error(badarg)
+            end;
+          _ ->
+            error(badarg)
+        end,
+      case is_on_curve(PKPoint) andalso PKPoint =/= identity() of
+        true ->
+          AlphaPt = mul(spendauth_basepoint(), AlphaInt),
+          NewPK = add(PKPoint, AlphaPt),
+          compress(NewPK);
+        false ->
+          error(badarg)
+      end
+  end.
+
+%% @doc Re-randomize RedJubjub SpendAuth secret key and derive updated public key.
+-spec redjubjub_rerandomize_keypair(binary() | integer(), binary() | integer()) ->
+  {binary(), binary()}.
+redjubjub_rerandomize_keypair(SK, Alpha) ->
+  SKInt =
+    if
+      is_binary(SK), byte_size(SK) =:= 32 -> binary:decode_unsigned(SK, little);
+      is_integer(SK) -> SK;
+      true -> error(badarg)
+    end,
+  AlphaInt =
+    if
+      is_binary(Alpha), byte_size(Alpha) =:= 32 -> binary:decode_unsigned(Alpha, little);
+      is_integer(Alpha) -> Alpha;
+      true -> error(badarg)
+    end,
+  if
+    SKInt =< 0 orelse SKInt >= ?SUBORDER orelse AlphaInt =< 0 orelse AlphaInt >= ?SUBORDER ->
+      error(badarg);
+    true ->
+      NewSKInt = (SKInt + AlphaInt) rem ?SUBORDER,
+      NewSKBin = <<NewSKInt:256/little>>,
+      NewPKBin = redjubjub_derive_public_key(NewSKInt, spend_auth),
+      {NewSKBin, NewPKBin}
+  end.
+
+-compile({inline, [redjubjub_base/1]}).
+-spec redjubjub_base(sig_type()) -> point().
+redjubjub_base(spend_auth) -> spendauth_basepoint();
+redjubjub_base(binding) -> binding_basepoint();
+redjubjub_base(_) -> error(badarg).
+
+%%%-------------------------------------------------------------------
 %%% Internal Helpers: Projective Coordinates
 %%%-------------------------------------------------------------------
 
--spec to_proj(point() | projective_point()) -> projective_point().
-to_proj({X, Y}) ->
+-spec to_proj(term()) -> projective_point().
+to_proj({X, Y}) when is_integer(X), is_integer(Y) ->
   {X, Y, 1};
-to_proj({X, Y, Z}) ->
-  {X, Y, Z}.
+to_proj({X, Y, Z}) when is_integer(X), is_integer(Y), is_integer(Z) ->
+  {X, Y, Z};
+to_proj(_) ->
+  error(badarg).
 
--spec to_affine(point() | projective_point()) -> point().
-to_affine({X, Y}) ->
+-spec to_affine(term()) -> point().
+to_affine({X, Y}) when is_integer(X), is_integer(Y) ->
   {X, Y};
-to_affine({X, Y, 1}) ->
+to_affine({_X, _Y, 0}) ->
+  identity();
+to_affine({X, Y, 1}) when is_integer(X), is_integer(Y) ->
   {X, Y};
-to_affine({X, Y, Z}) ->
+to_affine({X, Y, Z}) when is_integer(X), is_integer(Y), is_integer(Z) ->
   ZInv = ecu_misc:exp_mod(Z, ?Q - 2, ?Q),
-  {(X * ZInv) rem ?Q, (Y * ZInv) rem ?Q}.
+  {(X * ZInv) rem ?Q, (Y * ZInv) rem ?Q};
+to_affine(_) ->
+  error(badarg).
 
 %% @doc Complete projective addition formula for twisted Edwards curves with a = -1.
 -spec proj_add(projective_point(), projective_point()) -> projective_point().

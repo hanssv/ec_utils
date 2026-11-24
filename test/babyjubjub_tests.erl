@@ -230,3 +230,48 @@ montgomery_conversion_and_ladder_test() ->
     false ->
       ok
   end.
+
+adversarial_security_test() ->
+  Q = ecu_babyjubjub:q(),
+  Suborder = ecu_babyjubjub:suborder(),
+  Id = ecu_babyjubjub:identity(),
+
+  %% F-01: Order-2 point (0, Q - 1) is on curve but NOT in prime subgroup
+  Order2Pt = {0, Q - 1},
+  ?assert(ecu_babyjubjub:is_on_curve(Order2Pt)),
+  ?assertNot(ecu_babyjubjub:is_in_subgroup(Order2Pt)),
+
+  %% F-07: to_proj/1 must reject non-integer / invalid inputs
+  ?assertError(badarg, ecu_babyjubjub:to_proj({bad, point})),
+  ?assertError(badarg, ecu_babyjubjub:to_proj({1, 2, "not_int"})),
+
+  %% F-02: EdDSA validation against forged, identity, and torsion inputs
+  Priv = <<42:256/little>>,
+  Msg = <<"adversarial eddsa test">>,
+  PK = ecu_babyjubjub:derive_public_key(Priv),
+  Sig = ecu_babyjubjub:sign(Priv, Msg),
+  ?assert(ecu_babyjubjub:verify(PK, Sig, Msg)),
+
+  %% Rejection of identity and order-2 public keys
+  ?assertNot(ecu_babyjubjub:verify(Id, Sig, Msg)),
+  ?assertNot(ecu_babyjubjub:verify(Order2Pt, Sig, Msg)),
+  ?assertNot(ecu_babyjubjub:verify(ecu_babyjubjub:compress(Id), Sig, Msg)),
+  ?assertNot(ecu_babyjubjub:verify(ecu_babyjubjub:compress(Order2Pt), Sig, Msg)),
+
+  %% Rejection of forged signature with R8 = identity, S = 0
+  IdComp = ecu_babyjubjub:compress(Id),
+  ForgedSig = <<IdComp:32/binary, 0:256/little>>,
+  ?assertNot(ecu_babyjubjub:verify(PK, ForgedSig, Msg)),
+
+  %% Rejection of non-canonical S >= SUBORDER
+  <<RComp:32/binary, _S:256/little>> = Sig,
+  BadSSig = <<RComp:32/binary, (Suborder + 5):256/little>>,
+  ?assertNot(ecu_babyjubjub:verify(PK, BadSSig, Msg)),
+
+  %% F-03: Montgomery ladder on 255-bit scalar
+  {U_Base8, _} = ecu_babyjubjub:edwards_to_montgomery(ecu_babyjubjub:base8()),
+  LargeK = Q - 2,
+  EdLargeK = ecu_babyjubjub:mul(ecu_babyjubjub:base8(), LargeK),
+  {ExpectedLargeU, _} = ecu_babyjubjub:edwards_to_montgomery(EdLargeK),
+  LadderLargeU = ecu_babyjubjub:montgomery_ladder(LargeK, U_Base8),
+  ?assertEqual(ExpectedLargeU, LadderLargeU).

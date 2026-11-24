@@ -8,6 +8,8 @@ mod atoms {
         ok,
         error,
         badarg,
+        spend_auth,
+        binding,
     }
 }
 
@@ -173,7 +175,7 @@ fn montgomery_ladder_nif<'a>(
     let mut z3 = Fq::ONE;
     let mut swap = 0u8;
 
-    for t in (0..=253).rev() {
+    for t in (0..=255).rev() {
         let byte_idx = t / 8;
         let bit_idx = t % 8;
         let kt = (scalar_bytes[byte_idx] >> bit_idx) & 1;
@@ -222,6 +224,96 @@ fn montgomery_ladder_nif<'a>(
     let mut bin = NewBinary::new(env, 32);
     bin.as_mut_slice().copy_from_slice(&res_bytes);
     Ok(bin.into())
+}
+
+#[rustler::nif]
+fn redjubjub_derive_public_key_nif<'a>(
+    env: Env<'a>,
+    sk_bin: Binary,
+    sig_type: Atom,
+) -> Result<Binary<'a>, Atom> {
+    let sk_bytes = binary_to_bytes32(sk_bin)?;
+    let pk_bytes: [u8; 32] = if sig_type == atoms::spend_auth() {
+        let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::from_bytes(&sk_bytes)
+            .map_err(|_| atoms::badarg())?;
+        let pk: redjubjub::VerificationKey<redjubjub::SpendAuth> = (&sk).into();
+        pk.into()
+    } else if sig_type == atoms::binding() {
+        let sk = redjubjub::SigningKey::<redjubjub::Binding>::from_bytes(&sk_bytes)
+            .map_err(|_| atoms::badarg())?;
+        let pk: redjubjub::VerificationKey<redjubjub::Binding> = (&sk).into();
+        pk.into()
+    } else {
+        return Err(atoms::badarg());
+    };
+
+    let mut bin = NewBinary::new(env, 32);
+    bin.as_mut_slice().copy_from_slice(&pk_bytes);
+    Ok(bin.into())
+}
+
+#[rustler::nif]
+fn redjubjub_sign_nif<'a>(
+    env: Env<'a>,
+    sk_bin: Binary,
+    msg_bin: Binary,
+    sig_type: Atom,
+) -> Result<Binary<'a>, Atom> {
+    let sk_bytes = binary_to_bytes32(sk_bin)?;
+    let msg = msg_bin.as_slice();
+    let mut rng = rand::rng();
+
+    let sig_bytes: [u8; 64] = if sig_type == atoms::spend_auth() {
+        let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::from_bytes(&sk_bytes)
+            .map_err(|_| atoms::badarg())?;
+        let sig: redjubjub::Signature<redjubjub::SpendAuth> = sk.sign(&mut rng, msg);
+        sig.into()
+    } else if sig_type == atoms::binding() {
+        let sk = redjubjub::SigningKey::<redjubjub::Binding>::from_bytes(&sk_bytes)
+            .map_err(|_| atoms::badarg())?;
+        let sig: redjubjub::Signature<redjubjub::Binding> = sk.sign(&mut rng, msg);
+        sig.into()
+    } else {
+        return Err(atoms::badarg());
+    };
+
+    let mut bin = NewBinary::new(env, 64);
+    bin.as_mut_slice().copy_from_slice(&sig_bytes);
+    Ok(bin.into())
+}
+
+#[rustler::nif]
+fn redjubjub_verify_nif(pk_bin: Binary, msg_bin: Binary, sig_bin: Binary, sig_type: Atom) -> bool {
+    let pk_bytes = match binary_to_bytes32(pk_bin) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    if sig_bin.len() != 64 {
+        return false;
+    }
+    let mut sig_bytes = [0u8; 64];
+    sig_bytes.copy_from_slice(sig_bin.as_slice());
+    let msg = msg_bin.as_slice();
+
+    if sig_type == atoms::spend_auth() {
+        let vk_bytes = redjubjub::VerificationKeyBytes::<redjubjub::SpendAuth>::from(pk_bytes);
+        let vk = match redjubjub::VerificationKey::<redjubjub::SpendAuth>::try_from(vk_bytes) {
+            Ok(k) => k,
+            Err(_) => return false,
+        };
+        let sig = redjubjub::Signature::<redjubjub::SpendAuth>::from(sig_bytes);
+        vk.verify(msg, &sig).is_ok()
+    } else if sig_type == atoms::binding() {
+        let vk_bytes = redjubjub::VerificationKeyBytes::<redjubjub::Binding>::from(pk_bytes);
+        let vk = match redjubjub::VerificationKey::<redjubjub::Binding>::try_from(vk_bytes) {
+            Ok(k) => k,
+            Err(_) => return false,
+        };
+        let sig = redjubjub::Signature::<redjubjub::Binding>::from(sig_bytes);
+        vk.verify(msg, &sig).is_ok()
+    } else {
+        false
+    }
 }
 
 rustler::init!("ecu_jubjub_nif");

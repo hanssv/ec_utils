@@ -165,18 +165,26 @@ hash_compressed(Data) ->
 %%%-------------------------------------------------------------------
 
 %% @doc Compute a Pedersen commitment C = hash(Message) + Blinding * base(9).
-%% base(9) is used as the default blinding generator point.
+%% base(9) is used as the default blinding generator point for messages =< 1800 bits.
 -spec commit(bitstring(), integer() | binary()) -> point().
-commit(Message, Blinding) ->
-  commit(Message, Blinding, base(9)).
+commit(Message, Blinding) when is_bitstring(Message), bit_size(Message) =< 1800 ->
+  commit(Message, Blinding, base(9));
+commit(Message, _Blinding) when is_bitstring(Message) ->
+  error(generator_collision);
+commit(_, _) ->
+  error(badarg).
 
 %% @doc Compute a Pedersen commitment with an explicit blinding generator point.
 -spec commit(bitstring(), integer() | binary(), point()) -> point().
 commit(Message, BlindingBin, BlindingBase) when is_binary(BlindingBin), byte_size(BlindingBin) =:= 32 ->
   BlindingInt = binary:decode_unsigned(BlindingBin, little),
   commit(Message, BlindingInt, BlindingBase);
-commit(Message, BlindingInt, BlindingBase) when is_integer(BlindingInt) ->
-  case ecu_babyjubjub:is_on_curve(BlindingBase) of
+commit(Message, BlindingInt, BlindingBase) when is_integer(BlindingInt), is_bitstring(Message) ->
+  case
+    ecu_babyjubjub:is_on_curve(BlindingBase) andalso
+      ecu_babyjubjub:is_in_subgroup(BlindingBase) andalso
+      BlindingBase =/= ecu_babyjubjub:identity()
+  of
     true ->
       MsgPoint = hash_internal(Message),
       BlindingPoint =
@@ -201,12 +209,11 @@ commit(_, _, _) ->
 hash_internal(<<>>) ->
   ecu_babyjubjub:identity();
 hash_internal(Data) when is_bitstring(Data) ->
-  Bits = bits_from_bitstring(Data),
-  NumBits = length(Bits),
-  if
-    NumBits > ?MAX_BITS ->
-      error(input_too_large);
+  case bit_size(Data) > ?MAX_BITS of
     true ->
+      error(input_too_large);
+    false ->
+      Bits = bits_from_bitstring(Data),
       Segments = partition_segments(Bits, []),
       SegPoints = compute_segment_points(Segments, 0, []),
       lists:foldl(
@@ -264,7 +271,7 @@ compute_segment_points([SegBits | RestSegs], Idx, Acc) ->
             B3 =:= 1 -> -Mag;
             true -> Mag
           end,
-        {CurrentScalar + (Val bsl Shift), Shift + 4}
+        {CurrentScalar + (Val bsl Shift), Shift + 5}
       end,
       {0, 0},
       Windows

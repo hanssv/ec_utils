@@ -1673,6 +1673,35 @@ jubjub_benchmarks() ->
           name => <<"Jubjub Montgomery Ladder">>,
           group => jubjub,
           run => {fun({K, U}) -> ecu_jubjub:montgomery_ladder(K, U) end, {Scalar, UCoord}}
+        },
+        #{
+          id => redjubjub_sign,
+          name => <<"RedJubjub Sign">>,
+          group => jubjub,
+          run =>
+            {
+              fun({S, M, T}) -> ecu_jubjub:redjubjub_sign(S, M, spend_auth, T) end,
+              {
+                ScalarLE,
+                <<"Deterministic benchmark payload for RedJubjub verification">>,
+                <<0:640>>
+              }
+            }
+        },
+        #{
+          id => redjubjub_verify,
+          name => <<"RedJubjub Verify">>,
+          group => jubjub,
+          run =>
+            {
+              fun({P, M, S}) -> ecu_jubjub:redjubjub_verify(P, M, S, spend_auth) end,
+              begin
+                BenchMsg = <<"Deterministic benchmark payload for RedJubjub verification">>,
+                BenchPK = ecu_jubjub:redjubjub_derive_public_key(ScalarLE, spend_auth),
+                BenchSig = ecu_jubjub:redjubjub_sign(ScalarLE, BenchMsg, spend_auth, <<0:640>>),
+                {BenchPK, BenchMsg, BenchSig}
+              end
+            }
         }
       ],
 
@@ -1727,6 +1756,33 @@ jubjub_benchmarks() ->
                   {
                     fun({K, U}) -> ecu_jubjub_nif:montgomery_ladder(K, U) end,
                     {ScalarLE, <<UCoord:256/little>>}
+                  }
+              },
+              #{
+                id => redjubjub_sign_rust,
+                name => <<"RedJubjub Sign (Rust NIF)">>,
+                group => jubjub,
+                run =>
+                  {
+                    fun({S, M}) -> ecu_jubjub_nif:redjubjub_sign(S, M, spend_auth) end,
+                    {ScalarLE, <<"Deterministic benchmark payload for RedJubjub verification">>}
+                  }
+              },
+              #{
+                id => redjubjub_verify_rust,
+                name => <<"RedJubjub Verify (Rust NIF)">>,
+                group => jubjub,
+                run =>
+                  {
+                    fun({P, M, S}) -> ecu_jubjub_nif:redjubjub_verify(P, M, S, spend_auth) end,
+                    begin
+                      NifBenchMsg =
+                        <<"Deterministic benchmark payload for RedJubjub verification">>,
+                      NifBenchPK = ecu_jubjub:redjubjub_derive_public_key(ScalarLE, spend_auth),
+                      NifBenchSig =
+                        ecu_jubjub:redjubjub_sign(ScalarLE, NifBenchMsg, spend_auth, <<0:640>>),
+                      {NifBenchPK, NifBenchMsg, NifBenchSig}
+                    end
                   }
               }
             ];

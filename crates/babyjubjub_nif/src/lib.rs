@@ -167,7 +167,7 @@ fn montgomery_ladder_nif<'a>(
     let mut z3 = BigInt::one();
     let mut swap = 0;
 
-    for t in (0..=253).rev() {
+    for t in (0..=255).rev() {
         let kt = if k.bit(t as u64) { 1 } else { 0 };
         let new_swap = swap ^ kt;
         if new_swap == 1 {
@@ -281,7 +281,7 @@ fn pedersen_hash_internal(data: &[u8]) -> Result<Point, Atom> {
             };
             let mag = 1 + b0 + 2 * b1 + 4 * b2;
             let val = if b3 == 1 { -mag } else { mag };
-            let shift = w_idx * 4;
+            let shift = w_idx * 5;
             let term = BigInt::from(val) << shift;
             seg_scalar += term;
         }

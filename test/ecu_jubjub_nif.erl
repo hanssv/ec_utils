@@ -16,7 +16,11 @@
   compress_point/2,
   is_on_curve/1,
   is_in_subgroup/1,
-  montgomery_ladder/2
+  montgomery_ladder/2,
+
+  redjubjub_derive_public_key/2,
+  redjubjub_sign/3,
+  redjubjub_verify/4
 ]).
 -export([init/0]).
 
@@ -174,4 +178,44 @@ montgomery_ladder(ScalarLE, UCoordLE) ->
   end.
 
 montgomery_ladder_nif(_ScalarLE, _UCoordLE) ->
+  erlang:nif_error(not_loaded).
+
+%% @doc Derive RedJubjub public key (32 bytes compressed) from 32-byte secret scalar.
+-spec redjubjub_derive_public_key(binary(), spend_auth | binding) ->
+  {ok, binary()} | {error, term()}.
+redjubjub_derive_public_key(SK, SigType) ->
+  try redjubjub_derive_public_key_nif(SK, SigType) of
+    {ok, Res} when is_binary(Res) -> {ok, Res};
+    {error, Reason} -> {error, Reason}
+  catch
+    error:Reason -> {error, Reason}
+  end.
+
+redjubjub_derive_public_key_nif(_SK, _SigType) ->
+  erlang:nif_error(not_loaded).
+
+%% @doc Sign message with RedJubjub, returning 64-byte signature.
+-spec redjubjub_sign(binary(), binary(), spend_auth | binding) ->
+  {ok, binary()} | {error, term()}.
+redjubjub_sign(SK, Msg, SigType) ->
+  try redjubjub_sign_nif(SK, Msg, SigType) of
+    {ok, Res} when is_binary(Res) -> {ok, Res};
+    {error, Reason} -> {error, Reason}
+  catch
+    error:Reason -> {error, Reason}
+  end.
+
+redjubjub_sign_nif(_SK, _Msg, _SigType) ->
+  erlang:nif_error(not_loaded).
+
+%% @doc Verify RedJubjub 64-byte signature over message with 32-byte compressed public key.
+-spec redjubjub_verify(binary(), binary(), binary(), spend_auth | binding) -> boolean().
+redjubjub_verify(PK, Msg, Sig, SigType) ->
+  try
+    redjubjub_verify_nif(PK, Msg, Sig, SigType)
+  catch
+    _:_ -> false
+  end.
+
+redjubjub_verify_nif(_PK, _Msg, _Sig, _SigType) ->
   erlang:nif_error(not_loaded).

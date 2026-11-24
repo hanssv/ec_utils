@@ -442,9 +442,9 @@ HashPt = ecu_babyjubjub_pedersen:hash(MsgBin),
 HashComp = ecu_babyjubjub_pedersen:hash_compressed(MsgBin),
 Commitment = ecu_babyjubjub_pedersen:commit(MsgBin, 123456789).
 
-### Jubjub Curve over BLS12-381 (Zcash ZIP 216 / ZIP 243)
+### Jubjub Curve over BLS12-381 & RedJubjub (Zcash ZIP 215 / ZIP 216 / ZIP 243)
 
-Pure-Erlang Jubjub twisted Edwards curve arithmetic over the scalar field of BLS12-381:
+Pure-Erlang Jubjub twisted Edwards curve arithmetic over the scalar field of BLS12-381 and RedJubjub signatures:
 
 ```erlang
 Gen = ecu_jubjub:generator(),
@@ -457,8 +457,21 @@ Comp = ecu_jubjub:compress(P_mul),
 
 %% Montgomery ladder on Jubjub
 MGen = ecu_jubjub:edwards_to_montgomery(Gen),
-UK = ecu_jubjub:montgomery_ladder(123456789, element(1, MGen)).
-```
+UK = ecu_jubjub:montgomery_ladder(123456789, element(1, MGen)),
+
+%% RedJubjub SpendAuth & Binding Signatures (Zcash Spec §5.4.7.1)
+SK = <<42:256/little>>,
+Msg = <<"Spend authorization payload">>,
+PK = ecu_jubjub:redjubjub_derive_public_key(SK, spend_auth),
+Sig = ecu_jubjub:redjubjub_sign(SK, Msg, spend_auth),
+true = ecu_jubjub:redjubjub_verify(PK, Msg, Sig, spend_auth),
+
+%% Key re-randomization
+Alpha = <<12345:256/little>>,
+RandPK = ecu_jubjub:redjubjub_rerandomize_public_key(PK, Alpha),
+{RandSK, RandPK} = ecu_jubjub:redjubjub_rerandomize_keypair(SK, Alpha),
+RandSig = ecu_jubjub:redjubjub_sign(RandSK, Msg, spend_auth),
+true = ecu_jubjub:redjubjub_verify(RandPK, Msg, RandSig, spend_auth).
 ```
 
 ### KZG Polynomial Commitments & EIP-4844 (BLS12-381)
@@ -789,10 +802,15 @@ Supported Curves & API
   - `base/1`, `bases/0`: The 10 canonical generator base points defined in `pedersen.circom`.
   - `hash/1,2`, `hash_compressed/1`: 4-bit window Pedersen hashing supporting affine `{X, Y}`, 32-byte compressed, or `x_only` field element outputs up to 2000 bits (10 segments).
   - `commit/2,3`: Pedersen vector/scalar commitments with default or custom blinding generators.
-- `ecu_jubjub`: Pure-Erlang implementation of the Jubjub twisted Edwards curve over BLS12-381 $\mathbb{F}_q$ (Zcash ZIP 216 / ZIP 243):
+- `ecu_jubjub`: Pure-Erlang implementation of the Jubjub twisted Edwards curve over BLS12-381 $\mathbb{F}_q$ (Zcash ZIP 216 / ZIP 243) and RedJubjub signatures (ZIP 215 / ZIP 216 / Zcash Spec §5.4.7.1):
   - `add/2`, `double/1`, `neg/1`, `mul/2`, `mul_base8/1`: Complete twisted Edwards group operations with $a = -1, d = -(10240/10241) \pmod q$.
   - `compress/1`, `decompress/1`: ZIP 216 strict canonical point compression and decompression with Tonelli-Shanks square root.
   - `edwards_to_montgomery/1`, `montgomery_to_edwards/1`, `montgomery_ladder/2`: Montgomery birational equivalence ($A=40962, B=-40964$) and $u$-only ladder scalar multiplication.
+  - `spendauth_basepoint/0`, `binding_basepoint/0`: Standard Zcash SpendAuth ($\mathcal{G}_{\text{Sapling}}$) and Binding ($\mathcal{J}_{\text{Sapling}}$) generators.
+  - `redjubjub_derive_public_key/1,2`: Derive 32-byte compressed verification key from secret scalar for `spend_auth` or `binding`.
+  - `redjubjub_sign/2,3,4`, `redjubjub_verify/3,4`: RedJubjub Schnorr signing and verification with cofactor-cleared $[8]([S]\mathcal{B} - R - [c]VK) = \mathcal{O}$ checks.
+  - `redjubjub_rerandomize_public_key/2`, `redjubjub_rerandomize_keypair/2`: SpendAuth key and keypair re-randomization.
+- `ecu_blake2b`: Pure-Erlang implementation of the BLAKE2b cryptographic hash function (RFC 7693) supporting arbitrary output lengths (1-64 bytes), keying, salt, and personalization (used for RedJubjub $H^*$ challenge and nonce hashing).
 - `ecu_blake512`: Pure-Erlang implementation of the BLAKE-512 cryptographic hash function used for BabyJubjub key expansion and nonces.
 - `ecu_poly`: Finite field polynomial arithmetic over prime fields (defaulting to BLS12-381 $r$):
   - `eval/2,3`: Horner's method polynomial evaluation in $O(d)$.

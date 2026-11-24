@@ -93,6 +93,8 @@ zip216_canonical_rejection_test() ->
 
 montgomery_conversion_and_ladder_test() ->
   ?assertEqual(40962, ecu_jubjub:montgomery_a()),
+  ?assertEqual(ecu_jubjub:q() - 40964, ecu_jubjub:montgomery_b()),
+  ?assertEqual(10240, ecu_jubjub:montgomery_a24()),
 
   Id = ecu_jubjub:identity(),
   ?assertEqual(infinity, ecu_jubjub:edwards_to_montgomery(Id)),
@@ -209,3 +211,95 @@ nif_differential_test() ->
     false ->
       ok
   end.
+
+adversarial_security_and_redjubjub_test() ->
+  Q = ecu_jubjub:q(),
+  Suborder = ecu_jubjub:suborder(),
+  Id = ecu_jubjub:identity(),
+
+  %% F-07: to_proj and to_affine input validation
+  ?assertError(badarg, ecu_jubjub:to_proj({bad, point})),
+  ?assertError(badarg, ecu_jubjub:to_affine({1, 2, "not_int"})),
+  ?assertEqual(Id, ecu_jubjub:to_affine({123, 456, 0})),
+
+  %% F-06: Montgomery ladder on 255-bit scalars
+  Gen = ecu_jubjub:generator(),
+  MGen = ecu_jubjub:edwards_to_montgomery(Gen),
+  {UGen, _} = MGen,
+  LargeK = Q - 2,
+  EdLargeK = ecu_jubjub:mul(Gen, LargeK),
+  {ExpectedLargeU, _} = ecu_jubjub:edwards_to_montgomery(EdLargeK),
+  LadderLargeU = ecu_jubjub:montgomery_ladder(LargeK, UGen),
+  ?assertEqual(ExpectedLargeU, LadderLargeU),
+
+  %% RedJubjub Basepoints
+  SpendBase = ecu_jubjub:spendauth_basepoint(),
+  BindBase = ecu_jubjub:binding_basepoint(),
+  ?assert(ecu_jubjub:is_on_curve(SpendBase)),
+  ?assert(ecu_jubjub:is_in_subgroup(SpendBase)),
+  ?assert(ecu_jubjub:is_on_curve(BindBase)),
+  ?assert(ecu_jubjub:is_in_subgroup(BindBase)),
+
+  %% RedJubjub SpendAuth & Binding Sign/Verify
+  SK1 = <<42:256/little>>,
+  Msg1 = <<"RedJubjub SpendAuth test">>,
+  PK1 = ecu_jubjub:redjubjub_derive_public_key(SK1, spend_auth),
+  Sig1 = ecu_jubjub:redjubjub_sign(SK1, Msg1, spend_auth),
+  ?assert(ecu_jubjub:redjubjub_verify(PK1, Msg1, Sig1, spend_auth)),
+
+  SK2 = <<99:256/little>>,
+  Msg2 = <<"RedJubjub Binding test">>,
+  PK2 = ecu_jubjub:redjubjub_derive_public_key(SK2, binding),
+  Sig2 = ecu_jubjub:redjubjub_sign(SK2, Msg2, binding),
+  ?assert(ecu_jubjub:redjubjub_verify(PK2, Msg2, Sig2, binding)),
+
+  %% Cross-verification with Rust NIF oracle
+  case ecu_jubjub_nif:is_available() of
+    true ->
+      {ok, NifPK1} = ecu_jubjub_nif:redjubjub_derive_public_key(SK1, spend_auth),
+      ?assertEqual(PK1, NifPK1),
+      ?assert(ecu_jubjub_nif:redjubjub_verify(PK1, Msg1, Sig1, spend_auth)),
+
+      {ok, NifSig1} = ecu_jubjub_nif:redjubjub_sign(SK1, Msg1, spend_auth),
+      ?assert(ecu_jubjub:redjubjub_verify(PK1, Msg1, NifSig1, spend_auth)),
+
+      {ok, NifPK2} = ecu_jubjub_nif:redjubjub_derive_public_key(SK2, binding),
+      ?assertEqual(PK2, NifPK2),
+      ?assert(ecu_jubjub_nif:redjubjub_verify(PK2, Msg2, Sig2, binding)),
+
+      {ok, NifSig2} = ecu_jubjub_nif:redjubjub_sign(SK2, Msg2, binding),
+      ?assert(ecu_jubjub:redjubjub_verify(PK2, Msg2, NifSig2, binding));
+    false ->
+      ok
+  end,
+
+  %% Re-randomization
+  Alpha = <<12345:256/little>>,
+  RandPK = ecu_jubjub:redjubjub_rerandomize_public_key(PK1, Alpha),
+  {RandSK, RandDerivedPK} = ecu_jubjub:redjubjub_rerandomize_keypair(SK1, Alpha),
+  ?assertEqual(RandPK, RandDerivedPK),
+  RandSig = ecu_jubjub:redjubjub_sign(RandSK, Msg1, spend_auth),
+  ?assert(ecu_jubjub:redjubjub_verify(RandPK, Msg1, RandSig, spend_auth)),
+
+  %% Adversarial Rejections
+  Order2Pt = {0, Q - 1},
+  ?assertNot(ecu_jubjub:redjubjub_verify(Id, Msg1, Sig1, spend_auth)),
+  ?assertNot(ecu_jubjub:redjubjub_verify(Order2Pt, Msg1, Sig1, spend_auth)),
+  ?assertNot(ecu_jubjub:redjubjub_verify(ecu_jubjub:compress(Id), Msg1, Sig1, spend_auth)),
+  ?assertNot(ecu_jubjub:redjubjub_verify(ecu_jubjub:compress(Order2Pt), Msg1, Sig1, spend_auth)),
+
+  %% Non-canonical S >= Suborder
+  <<RComp:32/binary, _S:256/little>> = Sig1,
+  BadSSig = <<RComp:32/binary, (Suborder + 3):256/little>>,
+  ?assertNot(ecu_jubjub:redjubjub_verify(PK1, Msg1, BadSSig, spend_auth)),
+
+  %% Corrupted message and signature
+  ?assertNot(ecu_jubjub:redjubjub_verify(PK1, <<"Wrong msg">>, Sig1, spend_auth)),
+  BadSig = <<(binary:part(Sig1, 0, 63))/binary, 16#ff>>,
+  ?assertNot(ecu_jubjub:redjubjub_verify(PK1, Msg1, BadSig, spend_auth)),
+
+  %% Out of range scalar inputs
+  ?assertError(badarg, ecu_jubjub:redjubjub_derive_public_key(0)),
+  ?assertError(badarg, ecu_jubjub:redjubjub_derive_public_key(Suborder)),
+  ?assertError(badarg, ecu_jubjub:redjubjub_sign(0, Msg1)),
+  ?assertError(badarg, ecu_jubjub:redjubjub_sign(Suborder, Msg1)).

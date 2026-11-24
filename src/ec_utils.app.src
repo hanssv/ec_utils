@@ -52,6 +52,7 @@
     ecu_babyjubjub,
     ecu_babyjubjub_pedersen,
     ecu_blake512,
+    ecu_blake2b,
     ecu_poly,
     ecu_kzg,
     ecu_circom,

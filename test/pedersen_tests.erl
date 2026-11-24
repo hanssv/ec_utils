@@ -33,11 +33,11 @@ empty_hash_test() ->
   ?assertEqual(ecu_babyjubjub:compress(Id), ecu_babyjubjub_pedersen:hash_compressed(<<>>)).
 
 single_byte_vector_test() ->
-  %% Single zero byte <<0>>: 2 windows {0,0,0,0} -> scalar 1 + 16 = 17 on BASE[0]
+  %% Single zero byte <<0>>: 2 windows {0,0,0,0} -> scalar 1 + (1 bsl 5) = 33 on BASE[0]
   Base0 = ecu_babyjubjub_pedersen:base(0),
-  ExpectedPt = ecu_babyjubjub:mul(Base0, 17),
-  ExpectedX = 20122239225827662391862762159149847031375956973594213405841844209746264471448,
-  ExpectedY = 14157172923413575889356720908798107199581766035967383707727097972522317120482,
+  ExpectedPt = ecu_babyjubjub:mul(Base0, 33),
+  ExpectedX = 2713984616998054873485125083403724179682140658671583177610038376665425019990,
+  ExpectedY = 6281144028007049357012765257133378775433463448755543459194783914343308083779,
   ?assertEqual({ExpectedX, ExpectedY}, ExpectedPt),
 
   Pt = ecu_babyjubjub_pedersen:hash(<<0>>),
@@ -46,6 +46,12 @@ single_byte_vector_test() ->
 
   Comp = ecu_babyjubjub_pedersen:hash_compressed(<<0>>),
   ?assertEqual(ecu_babyjubjub:compress(Pt), Comp).
+
+collision_resistance_test() ->
+  %% Verify that 5-bit window boundary inputs <<7>> and <<31>> do not collide
+  H7 = ecu_babyjubjub_pedersen:hash(<<7>>),
+  H31 = ecu_babyjubjub_pedersen:hash(<<31>>),
+  ?assertNotEqual(H7, H31).
 
 formats_test() ->
   Data = <<"test data for pedersen hash">>,
@@ -118,8 +124,17 @@ commitments_test() ->
   ?assert(ecu_babyjubjub:is_on_curve(C_custom)),
   ?assertNotEqual(C1, C_custom),
 
-  %% Invalid blinding base rejected
-  ?assertError(badarg, ecu_babyjubjub_pedersen:commit(Msg, Blinding1, {123, 456})).
+  %% Invalid blinding base rejected (off-curve, identity, torsion outside prime subgroup)
+  ?assertError(badarg, ecu_babyjubjub_pedersen:commit(Msg, Blinding1, {123, 456})),
+  ?assertError(badarg, ecu_babyjubjub_pedersen:commit(Msg, Blinding1, ecu_babyjubjub:identity())),
+  Order2Pt = {0, ecu_babyjubjub:q() - 1},
+  ?assertError(badarg, ecu_babyjubjub_pedersen:commit(Msg, Blinding1, Order2Pt)),
+
+  %% Segment 9 generator collision protection: message > 1800 bits with default base(9)
+  Msg1800 = <<0:1800>>,
+  ?assert(is_tuple(ecu_babyjubjub_pedersen:commit(Msg1800, Blinding1))),
+  Msg1801 = <<0:1801>>,
+  ?assertError(generator_collision, ecu_babyjubjub_pedersen:commit(Msg1801, Blinding1)).
 
 homomorphic_commitment_test() ->
   %% Test additive homomorphic property of Pedersen commitment:

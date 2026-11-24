@@ -127,6 +127,56 @@ prop_eddsa_tamper_detect() ->
     end
   ).
 
+prop_eddsa_adversarial_rejections() ->
+  Id = ecu_babyjubjub:identity(),
+  Order2Pt = {0, ecu_babyjubjub:q() - 1},
+  IdComp = ecu_babyjubjub:compress(Id),
+  Order2Comp = ecu_babyjubjub:compress(Order2Pt),
+  Suborder = ecu_babyjubjub:suborder(),
+
+  ?FORALL(
+    {Seed, Msg},
+    {gen_seed(), gen_msg()},
+    begin
+      {SK, PK} = ecu_babyjubjub:keypair(Seed),
+      Sig = ecu_babyjubjub:sign(SK, Msg),
+      <<RComp:32/binary, _S:256/little>> = Sig,
+
+      %% 1. Rejection of identity and order-2 public keys
+      V1 = (not ecu_babyjubjub:verify(Id, Sig, Msg)),
+      V2 = (not ecu_babyjubjub:verify(Order2Pt, Sig, Msg)),
+      V3 = (not ecu_babyjubjub:verify(IdComp, Sig, Msg)),
+      V4 = (not ecu_babyjubjub:verify(Order2Comp, Sig, Msg)),
+
+      %% 2. Rejection of forged signature (R8 = identity, S = 0)
+      ForgedSig = <<IdComp:32/binary, 0:256/little>>,
+      V5 = (not ecu_babyjubjub:verify(PK, ForgedSig, Msg)),
+
+      %% 3. Rejection of out-of-range non-canonical scalar S >= SUBORDER
+      BadSSig = <<RComp:32/binary, (Suborder + 1):256/little>>,
+      V6 = (not ecu_babyjubjub:verify(PK, BadSSig, Msg)),
+
+      V1 andalso V2 andalso V3 andalso V4 andalso V5 andalso V6
+    end
+  ).
+
+prop_montgomery_ladder_full_range() ->
+  Q = ecu_babyjubjub:q(),
+  {U_Base8, _} = ecu_babyjubjub:edwards_to_montgomery(ecu_babyjubjub:base8()),
+  ?FORALL(
+    K,
+    choose(Q - 1000, Q - 1),
+    begin
+      EdK = ecu_babyjubjub:mul(ecu_babyjubjub:base8(), K),
+      case ecu_babyjubjub:edwards_to_montgomery(EdK) of
+        infinity ->
+          ecu_babyjubjub:montgomery_ladder(K, U_Base8) =:= 0;
+        {ExpectedU, _} ->
+          ecu_babyjubjub:montgomery_ladder(K, U_Base8) =:= ExpectedU
+      end
+    end
+  ).
+
 prop_nif_differential() ->
   case ecu_babyjubjub_nif:is_available() of
     true ->
