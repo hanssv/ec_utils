@@ -238,4 +238,28 @@ invalid_inputs_test() ->
   ?assertNot(?SIG:min_pk_fast_aggregate_verify([], <<"msg">>, binary:copy(<<0>>, 96))),
   ?assertNot(?SIG:min_pk_aggregate_verify([], binary:copy(<<0>>, 96))),
   ?assertNot(?SIG:min_sig_fast_aggregate_verify([], <<"msg">>, binary:copy(<<0>>, 48))),
-  ?assertNot(?SIG:min_sig_aggregate_verify([], binary:copy(<<0>>, 48))).
+  ?assertNot(?SIG:min_sig_aggregate_verify([], binary:copy(<<0>>, 48))),
+
+  %% Reject identity public keys in aggregation (F-16)
+  Inf1 = ?BLS:g1_infinity(),
+  Inf2 = ?BLS:g2_infinity(),
+  Inf1Comp = ?BLS:g1_compress(Inf1),
+  Inf2Comp = ?BLS:g2_compress(Inf2),
+  ?assertEqual({error, invalid_public_key}, ?SIG:min_pk_aggregate_public_keys([Inf1Comp])),
+  ?assertEqual({error, invalid_public_key}, ?SIG:min_sig_aggregate_public_keys([Inf2Comp])),
+
+  %% Rogue identity key cannot bypass fast_aggregate_verify (F-16)
+  IKM = crypto:hash(sha256, <<"rogue_test_ikm">>),
+  {ok, {PK_pk, SK_pk}} = ?SIG:min_pk_keygen(IKM),
+  Msg = <<"Test rogue identity prevention">>,
+  Sig_pk = ?SIG:min_pk_sign(SK_pk, Msg),
+  ?assertNot(?SIG:min_pk_fast_aggregate_verify([PK_pk, Inf1Comp], Msg, Sig_pk)),
+
+  {ok, {PK_sig, SK_sig}} = ?SIG:min_sig_keygen(IKM),
+  Sig_sig = ?SIG:min_sig_sign(SK_sig, Msg),
+  ?assertNot(?SIG:min_sig_fast_aggregate_verify([PK_sig, Inf2Comp], Msg, Sig_sig)),
+
+  %% Torsion point rejected in min_pk_verify (F-15)
+  TorsionG1 = {0, 2},
+  TorsionG1Comp = ?BLS:g1_compress(TorsionG1),
+  ?assertNot(?SIG:min_pk_verify(TorsionG1Comp, Msg, Sig_pk)).

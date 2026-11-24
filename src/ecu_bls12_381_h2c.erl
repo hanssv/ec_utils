@@ -52,6 +52,13 @@
   default_dst_g2_nu/0
 ]).
 
+-ifdef(TEST).
+-export([
+  isogeny_11/2,
+  isogeny_3/2
+]).
+-endif.
+
 %%%-------------------------------------------------------------------
 %%% Default DSTs per RFC 9380 Section 8.8
 %%%-------------------------------------------------------------------
@@ -248,17 +255,22 @@ sqrt_ratio_g1(U, V) ->
   end.
 
 %%% G1 11-isogeny map per RFC 9380 Appendix E.2
--spec isogeny_11(fp(), fp()) -> {fp(), fp()}.
+-spec isogeny_11(fp(), fp()) -> g1_affine().
 isogeny_11(X, Y) ->
   X_num = eval_poly_fp(iso_g1_x_num(), X),
   X_den = eval_poly_monic_fp(iso_g1_x_den(), X),
   Y_num = eval_poly_fp(iso_g1_y_num(), X),
   Y_den = eval_poly_monic_fp(iso_g1_y_den(), X),
 
-  X_out = ?FP:fp_mul(X_num, ?FP:fp_inv(X_den)),
-  Y_frac = ?FP:fp_mul(Y_num, ?FP:fp_inv(Y_den)),
-  Y_out = ?FP:fp_mul(Y, Y_frac),
-  {X_out, Y_out}.
+  case X_den =:= 0 orelse Y_den =:= 0 of
+    true ->
+      infinity;
+    false ->
+      X_out = ?FP:fp_mul(X_num, ?FP:fp_inv(X_den)),
+      Y_frac = ?FP:fp_mul(Y_num, ?FP:fp_inv(Y_den)),
+      Y_out = ?FP:fp_mul(Y, Y_frac),
+      {X_out, Y_out}
+  end.
 
 -spec eval_poly_fp([fp()], fp()) -> fp().
 eval_poly_fp([C | Rest], X) ->
@@ -412,17 +424,22 @@ sqrt_ratio_g2(U, V) ->
   end.
 
 %%% G2 3-isogeny map per RFC 9380 Appendix E.3
--spec isogeny_3(fp2(), fp2()) -> {fp2(), fp2()}.
+-spec isogeny_3(fp2(), fp2()) -> g2_affine().
 isogeny_3(X, Y) ->
   X_num = eval_poly_fp2(iso_g2_x_num(), X),
   X_den = eval_poly_monic_fp2(iso_g2_x_den(), X),
   Y_num = eval_poly_fp2(iso_g2_y_num(), X),
   Y_den = eval_poly_monic_fp2(iso_g2_y_den(), X),
 
-  X_out = ?FP:fp2_mul(X_num, ?FP:fp2_inv(X_den)),
-  Y_frac = ?FP:fp2_mul(Y_num, ?FP:fp2_inv(Y_den)),
-  Y_out = ?FP:fp2_mul(Y, Y_frac),
-  {X_out, Y_out}.
+  case ?FP:fp2_is_zero(X_den) orelse ?FP:fp2_is_zero(Y_den) of
+    true ->
+      infinity;
+    false ->
+      X_out = ?FP:fp2_mul(X_num, ?FP:fp2_inv(X_den)),
+      Y_frac = ?FP:fp2_mul(Y_num, ?FP:fp2_inv(Y_den)),
+      Y_out = ?FP:fp2_mul(Y, Y_frac),
+      {X_out, Y_out}
+  end.
 
 -spec eval_poly_fp2([fp2()], fp2()) -> fp2().
 eval_poly_fp2([C | Rest], X) ->

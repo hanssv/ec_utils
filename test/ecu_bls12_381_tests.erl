@@ -253,3 +253,16 @@ invalid_decompression_test() ->
     {error, coordinate_out_of_range},
     ?BLS:g2_decompress(<<(16#80 bor 16#1F):8, 0:760>>)
   ).
+
+torsion_subgroup_test() ->
+  %% Point {0, 2} on E(Fp): y^2 = x^3 + 4 is an order-3 torsion point outside G1 (F-15)
+  TorsionG1 = {0, 2},
+  ?assert(?BLS:g1_on_curve(TorsionG1)),
+  ?assertNot(?BLS:g1_is_in_subgroup(TorsionG1)),
+  %% Decompression and deserialization must reject torsion points
+  CompTorsion = ?BLS:g1_compress(TorsionG1),
+  ?assertEqual({error, point_not_in_subgroup}, ?BLS:g1_decompress(CompTorsion)),
+  UncompTorsion = ?BLS:g1_serialize_uncompressed(TorsionG1),
+  ?assertEqual({error, point_not_in_subgroup}, ?BLS:g1_deserialize_uncompressed(UncompTorsion)),
+  %% Pairing check must reject torsion points (F-17)
+  ?assertNot(ecu_bls12_381_pairing:pairing_check([{TorsionG1, ?BLS:g2_generator()}])).

@@ -161,3 +161,13 @@ rfc9380_j10_1_test_vector_test() ->
       16#12424ac32561493f3fe3c260708a12b7c620e7be00099a974e259ddc7d1f6395c3c811cdd19f1e8dbf3e9ecfdcbab8d6},
   ?assertEqual({ExpectedX, ExpectedY}, Pt),
   ?assert(?BLS:g2_is_in_subgroup(Pt)).
+
+isogeny_kernel_infinity_test() ->
+  %% When an isogeny denominator evaluates to 0, RFC 9380 §4.3 mandates outputting infinity
+  %% Root of iso_g2_x_den: X^2 + C1*X + C0 = 0 in Fp2 (F-17)
+  Root =
+    {4002409555221667393417789825735904156556882819939007885332058136124031650490837864442687629129015664037894272559781,
+      6},
+  ?assertEqual(infinity, ?H2C:isogeny_3(Root, {1, 1})),
+  ?assertEqual(infinity, ?H2C:clear_cofactor_g1(infinity)),
+  ?assertEqual(infinity, ?H2C:clear_cofactor_g2(infinity)).
