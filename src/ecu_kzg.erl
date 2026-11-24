@@ -67,19 +67,20 @@
 
 %% @doc Generate a test Structured Reference String (SRS) of a given degree
 %% from a toxic waste secret scalar Tau.
--spec setup(non_neg_integer(), integer()) -> srs().
-setup(Degree, SecretTau) when Degree >= 0, is_integer(SecretTau) ->
-  Tau = ((SecretTau rem ?R) + ?R) rem ?R,
-  case Tau of
-    0 ->
-      error(zero_secret_tau);
-    _ ->
-      G1Gen = ?BLS:g1_generator(),
-      G2Gen = ?BLS:g2_generator(),
-      G1Points = generate_powers_g1(Degree, Tau, G1Gen),
-      G2Points = [G2Gen, ?BLS:g2_scalar_mul(G2Gen, Tau)],
-      #kzg_srs{g1 = G1Points, g2 = G2Points}
-  end.
+-spec setup(pos_integer(), pos_integer()) -> srs().
+setup(Degree, SecretTau) when
+  is_integer(Degree), Degree >= 1, is_integer(SecretTau), SecretTau > 1, SecretTau < ?R
+->
+  Tau = SecretTau,
+  G1Gen = ?BLS:g1_generator(),
+  G2Gen = ?BLS:g2_generator(),
+  G1Points = generate_powers_g1(Degree, Tau, G1Gen),
+  G2Points = [G2Gen, ?BLS:g2_scalar_mul(G2Gen, Tau)],
+  #kzg_srs{g1 = G1Points, g2 = G2Points};
+setup(Degree, _SecretTau) when not (is_integer(Degree) andalso Degree >= 1) ->
+  error(invalid_degree);
+setup(_Degree, _SecretTau) ->
+  error(invalid_secret_tau).
 
 %% @doc Retrieve G1 setup points from SRS.
 -spec srs_g1(srs()) -> [g1_point()].
@@ -124,7 +125,8 @@ generate_powers_g1_loop(_Degree, _I, _Power, _Tau, _G1Gen, Acc) ->
 commit(#kzg_srs{g1 = G1Setup}, Poly) ->
   commit(G1Setup, Poly);
 commit(G1Setup, Poly) when is_list(G1Setup), is_list(Poly) ->
-  Trimmed = ?POLY:trim(Poly),
+  NormPoly = normalize_poly(Poly),
+  Trimmed = ?POLY:trim(NormPoly),
   case Trimmed of
     [0] ->
       ?BLS:g1_infinity();
@@ -156,9 +158,14 @@ commit_compressed(SRS, Poly) ->
 create_proof(SRS, Poly, ZInput) ->
   Z = to_scalar(ZInput),
   Y = ?POLY:eval(Poly, Z, ?R),
-  {Q, _Remainder} = ?POLY:divide_by_linear(Poly, Z, ?R),
-  Proof = commit(SRS, Q),
-  {Proof, Y}.
+  {Q, Remainder} = ?POLY:divide_by_linear(Poly, Z, ?R),
+  case Remainder =:= Y of
+    true ->
+      Proof = commit(SRS, Q),
+      {Proof, Y};
+    false ->
+      error(remainder_mismatch)
+  end.
 
 %% @doc Create evaluation proof returning 48-byte compressed G1 proof.
 -spec create_proof_compressed(srs(), ?POLY:poly(), scalar_input()) ->
@@ -187,12 +194,8 @@ verify(#kzg_srs{g2 = G2Setup}, Commitment, ZInput, YInput, Proof) ->
     {ok, {G2Gen, TauG2}} ->
       case {parse_g1(Commitment), parse_g1(Proof)} of
         {{ok, CPoint}, {ok, PiPoint}} ->
-          Z = to_scalar(ZInput),
-          Y = to_scalar(YInput),
-          case Z < ?R andalso Y < ?R of
-            false ->
-              false;
-            true ->
+          case {parse_scalar(ZInput), parse_scalar(YInput)} of
+            {{ok, Z}, {ok, Y}} ->
               %% P1 = [y]_1 - C
               YG1 =
                 case Y of
@@ -211,7 +214,9 @@ verify(#kzg_srs{g2 = G2Setup}, Commitment, ZInput, YInput, Proof) ->
               P2 = PiPoint,
               Q2 = ?BLS:g2_sub(TauG2, ZG2),
 
-              ?PAIRING:pairing_check([{P1, Q1}, {P2, Q2}])
+              ?PAIRING:pairing_check([{P1, Q1}, {P2, Q2}]);
+            _ ->
+              false
           end;
         _ ->
           false
@@ -242,13 +247,15 @@ verify_kzg_proof(SRS, Commitment, Z, Y, Proof) ->
 -spec verify_batch(srs(), [{g1_input(), scalar_input(), scalar_input(), g1_input()}]) ->
   boolean().
 verify_batch(_SRS, []) ->
-  true;
-verify_batch(#kzg_srs{g2 = G2Setup}, Proofs) ->
+  false;
+verify_batch(#kzg_srs{g2 = G2Setup}, Proofs) when is_list(Proofs) ->
   case parse_g2_setup(G2Setup) of
     {ok, {G2Gen, TauG2}} ->
       Parsed = parse_proof_tuples(Proofs, []),
       case Parsed of
         error ->
+          false;
+        {ok, []} ->
           false;
         {ok, ValidTuples} ->
           Gamma = rand_128bit_challenge(),
@@ -257,7 +264,9 @@ verify_batch(#kzg_srs{g2 = G2Setup}, Proofs) ->
       end;
     error ->
       false
-  end.
+  end;
+verify_batch(_SRS, _) ->
+  false.
 
 -spec parse_proof_tuples(
   [{g1_input(), scalar_input(), scalar_input(), g1_input()}],
@@ -268,17 +277,17 @@ parse_proof_tuples([], Acc) ->
 parse_proof_tuples([{C, ZIn, YIn, Pi} | Rest], Acc) ->
   case {parse_g1(C), parse_g1(Pi)} of
     {{ok, CPoint}, {ok, PiPoint}} ->
-      Z = to_scalar(ZIn),
-      Y = to_scalar(YIn),
-      case Z < ?R andalso Y < ?R of
-        true ->
+      case {parse_scalar(ZIn), parse_scalar(YIn)} of
+        {{ok, Z}, {ok, Y}} ->
           parse_proof_tuples(Rest, [{CPoint, Z, Y, PiPoint} | Acc]);
-        false ->
+        _ ->
           error
       end;
     _ ->
       error
-  end.
+  end;
+parse_proof_tuples(_, _Acc) ->
+  error.
 
 -spec accumulate_batch(
   [{g1_point(), non_neg_integer(), non_neg_integer(), g1_point()}],
@@ -366,11 +375,18 @@ point_evaluation(
     false ->
       {error, invalid_versioned_hash};
     true ->
-      case verify(SRS, CommitmentBin, ZBin, YBin, ProofBin) of
-        true ->
-          {ok, <<4096:256/big, ?R:256/big>>};
+      <<ZInt:256/big>> = ZBin,
+      <<YInt:256/big>> = YBin,
+      case ZInt < ?R andalso YInt < ?R of
         false ->
-          {error, verification_failed}
+          {error, scalar_out_of_range};
+        true ->
+          case verify(SRS, CommitmentBin, ZBin, YBin, ProofBin) of
+            true ->
+              {ok, <<4096:256/big, ?R:256/big>>};
+            false ->
+              {error, verification_failed}
+          end
       end
   end;
 point_evaluation(_SRS, _Invalid) ->
@@ -396,17 +412,53 @@ parse_g1({X, Y} = Point) when is_integer(X), is_integer(Y) ->
 parse_g1(_) ->
   {error, invalid_g1_point}.
 
--spec parse_g2_setup([g2_point()]) -> {ok, {g2_point(), g2_point()}} | error.
-parse_g2_setup([G2Gen, TauG2 | _]) ->
-  {ok, {G2Gen, TauG2}};
+-spec parse_g2_setup([term()]) -> {ok, {g2_point(), g2_point()}} | error.
+parse_g2_setup([G2GenIn, TauG2In | _]) ->
+  case {parse_one_g2(G2GenIn), parse_one_g2(TauG2In)} of
+    {{ok, G2Gen}, {ok, TauG2}} -> {ok, {G2Gen, TauG2}};
+    _ -> error
+  end;
 parse_g2_setup(_) ->
   error.
 
+-spec parse_one_g2(term()) -> {ok, g2_point()} | error.
+parse_one_g2(infinity) ->
+  error;
+parse_one_g2({{X0, X1}, {Y0, Y1}} = P) when
+  is_integer(X0), is_integer(X1), is_integer(Y0), is_integer(Y1)
+->
+  case ?BLS:g2_on_curve(P) andalso ?BLS:g2_is_in_subgroup(P) of
+    true -> {ok, P};
+    false -> error
+  end;
+parse_one_g2(_) ->
+  error.
+
+-spec parse_scalar(scalar_input()) -> {ok, non_neg_integer()} | error.
+parse_scalar(<<Int:256/big>>) when Int >= 0, Int < ?R ->
+  {ok, Int};
+parse_scalar(Int) when is_integer(Int), Int >= 0, Int < ?R ->
+  {ok, Int};
+parse_scalar(_) ->
+  error.
+
 -spec to_scalar(scalar_input()) -> non_neg_integer().
-to_scalar(<<Int:256/big>>) ->
+to_scalar(<<Int:256/big>>) when Int >= 0, Int < ?R ->
   Int;
-to_scalar(Int) when is_integer(Int) ->
-  ((Int rem ?R) + ?R) rem ?R.
+to_scalar(Int) when is_integer(Int), Int >= 0, Int < ?R ->
+  Int;
+to_scalar(_) ->
+  error(invalid_scalar).
+
+-spec normalize_poly(?POLY:poly()) -> ?POLY:poly().
+normalize_poly(Poly) ->
+  [
+    case is_integer(C) of
+      true -> ((C rem ?R) + ?R) rem ?R;
+      false -> error({invalid_coefficient, C})
+    end
+   || C <- Poly
+  ].
 
 -spec multi_scalar_mul_g1([non_neg_integer()], [g1_point()]) -> g1_point().
 multi_scalar_mul_g1(Coeffs, Points) ->

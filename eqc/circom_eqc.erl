@@ -191,47 +191,101 @@ prop_public_input_extraction() ->
 %%%-------------------------------------------------------------------
 
 prop_differential_nif() ->
-  case ecu_circom_nif:is_available() of
-    true ->
-      ?FORALL(
-        {R1CS, WTNS, Prime, OutWires},
-        gen_valid_circuit_and_witness(),
-        begin
-          case Prime of
-            ?BN254_R ->
-              R1CSBin = ecu_circom:serialize_r1cs(R1CS),
-              WTNSBin = ecu_circom:serialize_wtns(WTNS),
+  case code:ensure_loaded(ecu_circom_nif) of
+    {module, ecu_circom_nif} ->
+      case ecu_circom_nif:is_available() of
+        true ->
+          ?FORALL(
+            {R1CS, WTNS, Prime, OutWires},
+            gen_valid_circuit_and_witness(),
+            begin
+              case Prime of
+                ?BN254_R ->
+                  R1CSBin = ecu_circom:serialize_r1cs(R1CS),
+                  WTNSBin = ecu_circom:serialize_wtns(WTNS),
 
-              %% 1. Rust roundtrips binary identical
-              {ok, NifR1CSBin} = ecu_circom_nif:r1cs_roundtrip(R1CSBin),
-              {ok, NifWTNSBin} = ecu_circom_nif:wtns_roundtrip(WTNSBin),
-              R1CSMatch = (R1CSBin =:= NifR1CSBin),
-              WTNSMatch = (WTNSBin =:= NifWTNSBin),
+                  %% 1. Rust roundtrips binary identical
+                  {ok, NifR1CSBin} = ecu_circom_nif:r1cs_roundtrip(R1CSBin),
+                  {ok, NifWTNSBin} = ecu_circom_nif:wtns_roundtrip(WTNSBin),
+                  R1CSMatch = (R1CSBin =:= NifR1CSBin),
+                  WTNSMatch = (WTNSBin =:= NifWTNSBin),
 
-              %% 2. Rust verifies satisfying witness
-              {ok, NifSatisfied} = ecu_circom_nif:check_constraints(R1CSBin, WTNSBin),
-              ErlSatisfied = ecu_circom:is_satisfied(R1CS, WTNS),
+                  %% 2. Rust verifies satisfying witness
+                  {ok, NifSatisfied} = ecu_circom_nif:check_constraints(R1CSBin, WTNSBin),
+                  ErlSatisfied = ecu_circom:is_satisfied(R1CS, WTNS),
 
-              %% 3. Rust rejects tampered witness
-              Witness = WTNS#wtns.witness,
-              MutateWire = lists:last(OutWires),
-              MutatedWitness = set_nth(
-                MutateWire + 1, Witness, (lists:nth(MutateWire + 1, Witness) + 1) rem Prime
-              ),
-              MutatedWTNSBin = ecu_circom:serialize_wtns(MutatedWitness, Prime),
-              {ok, NifRejects} = ecu_circom_nif:check_constraints(R1CSBin, MutatedWTNSBin),
+                  %% 3. Rust rejects tampered witness
+                  Witness = WTNS#wtns.witness,
+                  MutateWire = lists:last(OutWires),
+                  MutatedWitness = set_nth(
+                    MutateWire + 1, Witness, (lists:nth(MutateWire + 1, Witness) + 1) rem Prime
+                  ),
+                  MutatedWTNSBin = ecu_circom:serialize_wtns(MutatedWitness, Prime),
+                  {ok, NifRejects} = ecu_circom_nif:check_constraints(R1CSBin, MutatedWTNSBin),
 
-              R1CSMatch andalso WTNSMatch andalso NifSatisfied andalso ErlSatisfied andalso
-                (not NifRejects);
-            _ ->
-              %% Rust NIF r1cs-file<32> is instantiated with BN254 field size
-              true
-          end
-        end
-      );
-    false ->
+                  R1CSMatch andalso WTNSMatch andalso NifSatisfied andalso ErlSatisfied andalso
+                    (not NifRejects);
+                _ ->
+                  %% Rust NIF r1cs-file<32> is instantiated with BN254 field size
+                  true
+              end
+            end
+          );
+        false ->
+          true
+      end;
+    _ ->
       true
   end.
+
+prop_circom_adversarial_rejections() ->
+  ?FORALL(
+    {R1CS, WTNS, Prime, _OutWires},
+    gen_valid_circuit_and_witness(),
+    begin
+      Witness = WTNS#wtns.witness,
+      H = R1CS#r1cs.header,
+
+      %% 1. All-zero witness (Wire 0 = 0) must be rejected
+      AllZeroWitness = lists:duplicate(length(Witness), 0),
+      ZeroRejected =
+        (not ecu_circom:is_satisfied(R1CS, AllZeroWitness)) andalso
+          (ecu_circom:check_constraints(R1CS, AllZeroWitness) =:= {error, invalid_wire_zero}),
+
+      %% 2. Non-unitary Wire 0 (Wire 0 = 2) must be rejected
+      NonUnitaryWitness = set_nth(1, Witness, 2),
+      NonUnitaryRejected =
+        (not ecu_circom:is_satisfied(R1CS, NonUnitaryWitness)) andalso
+          (ecu_circom:check_constraints(R1CS, NonUnitaryWitness) =:= {error, invalid_wire_zero}),
+
+      %% 3. Prime mismatch between circuit and witness must be rejected
+      MismatchedPrime =
+        case Prime of
+          ?BN254_R -> ?BLS12_381_R;
+          _ -> ?BN254_R
+        end,
+      MismatchedWTNS = WTNS#wtns{header = (WTNS#wtns.header)#wtns_header{prime = MismatchedPrime}},
+      PrimeMismatchRejected =
+        (not ecu_circom:is_satisfied(R1CS, MismatchedWTNS)) andalso
+          (ecu_circom:check_constraints(R1CS, MismatchedWTNS) =:=
+            {error, {prime_mismatch, MismatchedPrime, H#r1cs_header.prime}}),
+
+      %% 4. Truncated WTNS binary must return error tuple and not crash
+      WTNSBin = ecu_circom:serialize_wtns(WTNS),
+      TruncatedBin =
+        case byte_size(WTNSBin) > 32 of
+          true -> binary:part(WTNSBin, 0, byte_size(WTNSBin) - 32);
+          false -> <<>>
+        end,
+      TruncatedRejected =
+        case ecu_circom:parse_wtns(TruncatedBin) of
+          {error, _} -> true;
+          _ -> false
+        end,
+
+      ZeroRejected andalso NonUnitaryRejected andalso PrimeMismatchRejected andalso TruncatedRejected
+    end
+  ).
 
 %%%-------------------------------------------------------------------
 %%% Helpers

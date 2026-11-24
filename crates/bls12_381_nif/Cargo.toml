@@ -8,5 +8,5 @@ name = "ecu_bls12_381_nif"
 crate-type = ["cdylib"]
 
 [dependencies]
-blst = "0.3.17"
+blst = { version = "0.3.17", features = ["no-threads"] }
 rustler = "0.39.0"

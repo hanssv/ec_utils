@@ -29,6 +29,8 @@
   is_zero/1,
   degree/1,
   trim/1,
+  normalize/1,
+  normalize/2,
   eval/2,
   eval/3,
   add/2,
@@ -83,6 +85,16 @@ trim_rev([0 | Rest]) ->
   trim_rev(Rest);
 trim_rev(Reversed) ->
   lists:reverse(Reversed).
+
+%% @doc Normalize polynomial coefficients modulo BLS12-381 r and trim trailing zeroes.
+-spec normalize(poly()) -> poly().
+normalize(P) ->
+  normalize(P, ?DEFAULT_MOD).
+
+%% @doc Normalize polynomial coefficients modulo Mod and trim trailing zeroes.
+-spec normalize(poly(), pos_integer()) -> poly().
+normalize(P, Mod) when is_list(P), is_integer(Mod), Mod > 1 ->
+  trim([((C rem Mod) + Mod) rem Mod || C <- P, is_integer(C)]).
 
 %% @doc Evaluate polynomial at X modulo BLS12-381 scalar field modulus r.
 -spec eval(poly(), integer()) -> non_neg_integer().
@@ -222,17 +234,17 @@ divide_by_linear(P, Z) ->
 %% @doc Divide polynomial P(x) by (x - Z) modulo Mod using Ruffini's rule / synthetic division.
 %% Returns {Q, Remainder} where P(x) = Q(x)*(x - Z) + Remainder.
 -spec divide_by_linear(poly(), integer(), pos_integer()) -> {poly(), non_neg_integer()}.
-divide_by_linear(P, Z, Mod) ->
-  Trimmed = trim(P),
+divide_by_linear(P, Z, Mod) when is_list(P), is_integer(Z), is_integer(Mod), Mod > 1 ->
+  NormP = [((C rem Mod) + Mod) rem Mod || C <- P, is_integer(C)],
+  Trimmed = trim(NormP),
   NormZ = ((Z rem Mod) + Mod) rem Mod,
   case Trimmed of
     [C0] ->
-      {[0], ((C0 rem Mod) + Mod) rem Mod};
+      {[0], C0};
     _ ->
       Rev = lists:reverse(Trimmed),
       [Cd | Rest] = Rev,
-      NormCd = ((Cd rem Mod) + Mod) rem Mod,
-      synthetic_division(Rest, NormZ, Mod, NormCd, [NormCd])
+      synthetic_division(Rest, NormZ, Mod, Cd, [Cd])
   end.
 
 -spec synthetic_division(

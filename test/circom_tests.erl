@@ -336,4 +336,56 @@ error_handling_test() ->
   BadR1CS = ecu_circom:new_r1cs(Header#r1cs_header{n_wires = 5}, [BadConstraint]),
   ?assertEqual(
     {error, {invalid_wire_id, 99, 4}}, ecu_circom:check_constraints(BadR1CS, [1, 2, 3, 4, 5])
-  ).
+  ),
+
+  %% Adversarial: All-zero witness (Wire 0 = 0) must be rejected
+  AllZeroWitness = [0, 0, 0, 0, 0],
+  ?assertEqual({error, invalid_wire_zero}, ecu_circom:check_constraints(R1CS, AllZeroWitness)),
+  ?assertEqual(false, ecu_circom:is_satisfied(R1CS, AllZeroWitness)),
+
+  %% Adversarial: Non-unitary Wire 0 (Wire 0 = 2) must be rejected
+  BadWire0Witness = [2, 0, 0, 0, 0],
+  ?assertEqual({error, invalid_wire_zero}, ecu_circom:check_constraints(R1CS, BadWire0Witness)),
+  ?assertEqual(false, ecu_circom:is_satisfied(R1CS, BadWire0Witness)),
+
+  %% Adversarial: Prime mismatch between circuit (BN254) and witness (BLS12-381)
+  BLSWtns = ecu_circom:new_wtns([1, 0, 0, 0, 0], ?BLS12_381_R, 32),
+  ?assertEqual(
+    {error, {prime_mismatch, ?BLS12_381_R, ?BN254_R}},
+    ecu_circom:check_constraints(R1CS, BLSWtns)
+  ),
+  ?assertEqual(false, ecu_circom:is_satisfied(R1CS, BLSWtns)),
+
+  %% Adversarial: Truncated WTNS binary (outer section truncated)
+  WTNSBin = ecu_circom:serialize_wtns(ecu_circom:new_wtns([1, 2, 3, 4, 5], 32)),
+  <<TruncatedWTNS:(byte_size(WTNSBin) - 32)/binary, _/binary>> = WTNSBin,
+  ?assertEqual({error, truncated_section_data}, ecu_circom:parse_wtns(TruncatedWTNS)),
+
+  %% Adversarial: Truncated witness payload inside valid section framing
+  HBin =
+    <<32:32/little-unsigned-integer, ?BN254_R:32/little-unsigned-integer-unit:8,
+      5:32/little-unsigned-integer>>,
+  Sec1 =
+    <<1:32/little-unsigned-integer, (byte_size(HBin)):64/little-unsigned-integer, HBin/binary>>,
+  ShortWBin = <<1:32/little-unsigned-integer-unit:8, 2:32/little-unsigned-integer-unit:8>>,
+  Sec2 =
+    <<2:32/little-unsigned-integer, (byte_size(ShortWBin)):64/little-unsigned-integer,
+      ShortWBin/binary>>,
+  MalformedWTNS =
+    <<?WTNS_MAGIC/binary, ?WTNS_VERSION:32/little-unsigned-integer, 2:32/little-unsigned-integer,
+      Sec1/binary, Sec2/binary>>,
+  ?assertEqual({error, truncated_wtns_witness}, ecu_circom:parse_wtns(MalformedWTNS)),
+
+  %% Adversarial: Inconsistent header wire counts in R1CS (1 + pub_out + pub_in + priv_in > n_wires)
+  InconsistentH = #r1cs_header{
+    field_size = 32,
+    prime = ?BN254_R,
+    n_wires = 2,
+    n_pub_out = 1,
+    n_pub_in = 1,
+    n_prvt_in = 1,
+    n_labels = 2,
+    n_constraints = 0
+  },
+  InconsistentR1CSBin = ecu_circom:serialize_r1cs(ecu_circom:new_r1cs(InconsistentH, [])),
+  ?assertEqual({error, invalid_wire_counts}, ecu_circom:parse_r1cs(InconsistentR1CSBin)).

@@ -223,7 +223,12 @@ run_bench(#{id := Id, name := Name, group := Group, run := RunSpec}, Opts) ->
           true -> {200000, 50 * BatchSize}
         end;
       FixedMs when is_integer(FixedMs), FixedMs > 0 ->
-        {FixedMs * 1000, maps:get(min_iterations, Opts, 1)}
+        MinFloor =
+          case maps:get(min_iterations, Opts, 1) of
+            I when is_integer(I), I > 0 -> I;
+            _ -> 1
+          end,
+        {FixedMs * 1000, MinFloor}
     end,
 
   %% Step 2: Timed execution collecting batch timings
