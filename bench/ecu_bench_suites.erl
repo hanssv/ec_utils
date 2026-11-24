@@ -1460,9 +1460,14 @@ babyjubjub_benchmarks() ->
       PK = ecu_babyjubjub:derive_public_key(SK),
       Sig = ecu_babyjubjub:sign(SK, Msg),
       {UCoord, _} =
-        case ecu_babyjubjub:edwards_to_montgomery(P1) of
-          {U, V} -> {U, V};
-          infinity -> {0, 0}
+        case erlang:function_exported(ecu_babyjubjub, edwards_to_montgomery, 1) of
+          true ->
+            case ecu_babyjubjub:edwards_to_montgomery(P1) of
+              {U, V} -> {U, V};
+              infinity -> {0, 0}
+            end;
+          false ->
+            {0, 0}
         end,
       Data248 = <<16#1234567890abcdef:248/little>>,
       Data512 =
@@ -1496,30 +1501,6 @@ babyjubjub_benchmarks() ->
           run => {fun(C) -> ecu_babyjubjub:decompress(C) end, P1Comp}
         },
         #{
-          id => babyjubjub_montgomery_ladder,
-          name => <<"BabyJubjub Montgomery Ladder">>,
-          group => babyjubjub,
-          run => {fun({K, U}) -> ecu_babyjubjub:montgomery_ladder(K, U) end, {Scalar, UCoord}}
-        },
-        #{
-          id => babyjubjub_pedersen_hash_248,
-          name => <<"BabyJubjub Pedersen Hash (248 bits)">>,
-          group => babyjubjub,
-          run => {fun(D) -> ecu_babyjubjub_pedersen:hash(D) end, Data248}
-        },
-        #{
-          id => babyjubjub_pedersen_hash_512,
-          name => <<"BabyJubjub Pedersen Hash (512 bits)">>,
-          group => babyjubjub,
-          run => {fun(D) -> ecu_babyjubjub_pedersen:hash(D) end, Data512}
-        },
-        #{
-          id => babyjubjub_pedersen_commit,
-          name => <<"BabyJubjub Pedersen Commit (248 bits)">>,
-          group => babyjubjub,
-          run => {fun({D, B}) -> ecu_babyjubjub_pedersen:commit(D, B) end, {Data248, Blinding}}
-        },
-        #{
           id => babyjubjub_eddsa_sign,
           name => <<"BabyJubjub EdDSA Sign (Poseidon)">>,
           group => babyjubjub,
@@ -1532,6 +1513,48 @@ babyjubjub_benchmarks() ->
           run => {fun({P, S, M}) -> ecu_babyjubjub:verify(P, S, M) end, {PK, Sig, Msg}}
         }
       ],
+
+      MontgomeryBenches =
+        case erlang:function_exported(ecu_babyjubjub, montgomery_ladder, 2) of
+          true ->
+            [
+              #{
+                id => babyjubjub_montgomery_ladder,
+                name => <<"BabyJubjub Montgomery Ladder">>,
+                group => babyjubjub,
+                run => {fun({K, U}) -> ecu_babyjubjub:montgomery_ladder(K, U) end, {Scalar, UCoord}}
+              }
+            ];
+          false ->
+            []
+        end,
+
+      PedersenBenches =
+        case code:ensure_loaded(ecu_babyjubjub_pedersen) of
+          {module, ecu_babyjubjub_pedersen} ->
+            [
+              #{
+                id => babyjubjub_pedersen_hash_248,
+                name => <<"BabyJubjub Pedersen Hash (248 bits)">>,
+                group => babyjubjub,
+                run => {fun(D) -> ecu_babyjubjub_pedersen:hash(D) end, Data248}
+              },
+              #{
+                id => babyjubjub_pedersen_hash_512,
+                name => <<"BabyJubjub Pedersen Hash (512 bits)">>,
+                group => babyjubjub,
+                run => {fun(D) -> ecu_babyjubjub_pedersen:hash(D) end, Data512}
+              },
+              #{
+                id => babyjubjub_pedersen_commit,
+                name => <<"BabyJubjub Pedersen Commit (248 bits)">>,
+                group => babyjubjub,
+                run => {fun({D, B}) -> ecu_babyjubjub_pedersen:commit(D, B) end, {Data248, Blinding}}
+              }
+            ];
+          _ ->
+            []
+        end,
 
       NifAvail =
         case code:ensure_loaded(ecu_babyjubjub_nif) of
@@ -1575,44 +1598,65 @@ babyjubjub_benchmarks() ->
                 name => <<"BabyJubjub EdDSA Verify (Poseidon) (Rust NIF)">>,
                 group => babyjubjub,
                 run => {fun({P, S, M}) -> ecu_babyjubjub_nif:eddsa_verify(P, S, M) end, {PK, Sig, MsgBE}}
-              },
-              #{
-                id => babyjubjub_montgomery_ladder_rust,
-                name => <<"BabyJubjub Montgomery Ladder (Rust NIF)">>,
-                group => babyjubjub,
-                run =>
-                  {
-                    fun({K, U}) -> ecu_babyjubjub_nif:montgomery_ladder(K, U) end,
-                    {<<Scalar:256/little>>, <<UCoord:256/little>>}
-                  }
-              },
-              #{
-                id => babyjubjub_pedersen_hash_248_rust,
-                name => <<"BabyJubjub Pedersen Hash (248 bits) (Rust NIF)">>,
-                group => babyjubjub,
-                run => {fun(D) -> ecu_babyjubjub_nif:pedersen_hash(D) end, Data248}
-              },
-              #{
-                id => babyjubjub_pedersen_hash_512_rust,
-                name => <<"BabyJubjub Pedersen Hash (512 bits) (Rust NIF)">>,
-                group => babyjubjub,
-                run => {fun(D) -> ecu_babyjubjub_nif:pedersen_hash(D) end, Data512}
-              },
-              #{
-                id => babyjubjub_pedersen_commit_rust,
-                name => <<"BabyJubjub Pedersen Commit (248 bits) (Rust NIF)">>,
-                group => babyjubjub,
-                run =>
-                  {
-                    fun({D, B}) -> ecu_babyjubjub_nif:pedersen_commit(D, B) end,
-                    {Data248, <<Blinding:256/little>>}
-                  }
               }
-            ];
+            ] ++
+              case erlang:function_exported(ecu_babyjubjub_nif, montgomery_ladder, 2) of
+                true ->
+                  [
+                    #{
+                      id => babyjubjub_montgomery_ladder_rust,
+                      name => <<"BabyJubjub Montgomery Ladder (Rust NIF)">>,
+                      group => babyjubjub,
+                      run =>
+                        {
+                          fun({K, U}) -> ecu_babyjubjub_nif:montgomery_ladder(K, U) end,
+                          {<<Scalar:256/little>>, <<UCoord:256/little>>}
+                        }
+                    }
+                  ];
+                false ->
+                  []
+              end ++
+              case erlang:function_exported(ecu_babyjubjub_nif, pedersen_hash, 1) of
+                true ->
+                  [
+                    #{
+                      id => babyjubjub_pedersen_hash_248_rust,
+                      name => <<"BabyJubjub Pedersen Hash (248 bits) (Rust NIF)">>,
+                      group => babyjubjub,
+                      run => {fun(D) -> ecu_babyjubjub_nif:pedersen_hash(D) end, Data248}
+                    },
+                    #{
+                      id => babyjubjub_pedersen_hash_512_rust,
+                      name => <<"BabyJubjub Pedersen Hash (512 bits) (Rust NIF)">>,
+                      group => babyjubjub,
+                      run => {fun(D) -> ecu_babyjubjub_nif:pedersen_hash(D) end, Data512}
+                    }
+                  ];
+                false ->
+                  []
+              end ++
+              case erlang:function_exported(ecu_babyjubjub_nif, pedersen_commit, 2) of
+                true ->
+                  [
+                    #{
+                      id => babyjubjub_pedersen_commit_rust,
+                      name => <<"BabyJubjub Pedersen Commit (248 bits) (Rust NIF)">>,
+                      group => babyjubjub,
+                      run =>
+                        {
+                          fun({D, B}) -> ecu_babyjubjub_nif:pedersen_commit(D, B) end,
+                          {Data248, <<Blinding:256/little>>}
+                        }
+                    }
+                  ];
+                false ->
+                  []
+              end;
           false ->
             []
         end,
-      Base ++ NifBenches;
+      Base ++ MontgomeryBenches ++ PedersenBenches ++ NifBenches;
     _ ->
       []
   end.
