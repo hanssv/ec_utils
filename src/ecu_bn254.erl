@@ -191,16 +191,12 @@ g1_scalar_mul(P, Bin) when is_binary(Bin) ->
   g1_scalar_mul(P, binary:decode_unsigned(Bin));
 g1_scalar_mul(_P, 0) ->
   infinity;
-g1_scalar_mul(P, K) when is_integer(K) ->
-  ModK = ((K rem ?BN254_R) + ?BN254_R) rem ?BN254_R,
-  case ModK of
-    0 ->
-      infinity;
-    _ ->
-      J = g1_to_jacobian(P),
-      ResJ = g1_j_scalar_mul(J, ModK),
-      g1_from_jacobian(ResJ)
-  end.
+g1_scalar_mul(P, K) when is_integer(K), K > 0 ->
+  J = g1_to_jacobian(P),
+  ResJ = g1_j_scalar_mul(J, K),
+  g1_from_jacobian(ResJ);
+g1_scalar_mul(P, K) when is_integer(K), K < 0 ->
+  g1_scalar_mul(g1_neg(P), -K).
 
 -spec g1_scalar_mul_base(scalar()) -> g1_affine().
 g1_scalar_mul_base(K) ->
@@ -449,16 +445,12 @@ g2_scalar_mul(Q, Bin) when is_binary(Bin) ->
   g2_scalar_mul(Q, binary:decode_unsigned(Bin));
 g2_scalar_mul(_Q, 0) ->
   infinity;
-g2_scalar_mul(Q, K) when is_integer(K) ->
-  ModK = ((K rem ?BN254_R) + ?BN254_R) rem ?BN254_R,
-  case ModK of
-    0 ->
-      infinity;
-    _ ->
-      J = g2_to_jacobian(Q),
-      ResJ = g2_j_scalar_mul(J, ModK),
-      g2_from_jacobian(ResJ)
-  end.
+g2_scalar_mul(Q, K) when is_integer(K), K > 0 ->
+  J = g2_to_jacobian(Q),
+  ResJ = g2_j_scalar_mul(J, K),
+  g2_from_jacobian(ResJ);
+g2_scalar_mul(Q, K) when is_integer(K), K < 0 ->
+  g2_scalar_mul(g2_neg(Q), -K).
 
 -spec g2_scalar_mul_base(scalar()) -> g2_affine().
 g2_scalar_mul_base(K) ->
@@ -575,7 +567,7 @@ g2_from_uncompressed(<<X1B:32/binary, X0B:32/binary, Y1B:32/binary, Y0B:32/binar
     Y1 = ?FP:fp_from_bin(Y1B),
     Y0 = ?FP:fp_from_bin(Y0B),
     Q = {{X0, X1}, {Y0, Y1}},
-    case g2_on_curve(Q) of
+    case g2_is_in_subgroup(Q) of
       true -> {ok, Q};
       false -> error
     end
@@ -627,7 +619,11 @@ g2_decompress(<<TaggedX1:256/big, X0B:32/binary>>) ->
                 true -> RootY;
                 false -> ?FP:fp2_neg(RootY)
               end,
-            {ok, {X, Y}}
+            Point = {X, Y},
+            case g2_is_in_subgroup(Point) of
+              true -> {ok, Point};
+              false -> error
+            end
         end
     end
   catch

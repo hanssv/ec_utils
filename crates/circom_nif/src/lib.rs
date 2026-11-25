@@ -107,12 +107,21 @@ fn check_constraints(r1cs_bin: Binary, wtns_bin: Binary) -> Result<bool, String>
         WtnsFile::<32>::read(&mut wtns_cur).map_err(|e| format!("wtns read error: {:?}", e))?;
 
     let prime = BigUint::from_bytes_le(&*r1cs.header.prime);
+    let wtns_prime = BigUint::from_bytes_le(&*wtns.header.prime);
+    if prime != wtns_prime {
+        return Err("Prime mismatch between circuit and witness".to_string());
+    }
+
     let witness: Vec<BigUint> = wtns
         .witness
         .0
         .iter()
         .map(|fe| BigUint::from_bytes_le(&**fe))
         .collect();
+
+    if witness.is_empty() || witness[0] != BigUint::from(1u32) {
+        return Ok(false);
+    }
 
     if witness.len() < r1cs.header.n_wires as usize {
         return Err(format!(

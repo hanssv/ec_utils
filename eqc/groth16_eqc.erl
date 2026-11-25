@@ -274,3 +274,39 @@ prop_differential_blst_tampered() ->
         true
     end
   ).
+
+prop_groth16_adversarial_rejections() ->
+  ?FORALL(
+    {VK, PublicInputs, Proof},
+    gen_groth16_instance(),
+    begin
+      %% 1. Vacuous batch rejection
+      EmptyBatchRejected = ecu_groth16:verify_batch(VK, []) =:= false,
+
+      %% 2. String representation of valid inputs should verify
+      StrInputs = [integer_to_binary(X) || X <- PublicInputs],
+      StrVerified = ecu_groth16:verify(VK, StrInputs, Proof) =:= true,
+
+      %% 3. Non-numeric / empty binaries must be rejected
+      EmptyBinRejected = ecu_groth16:verify(VK, [<<>> | PublicInputs], Proof) =:= false,
+      MalformedStrRejected =
+        ecu_groth16:verify(VK, [<<"not_a_number">> | PublicInputs], Proof) =:= false,
+      NegativeRejected = ecu_groth16:verify(VK, [-1 | PublicInputs], Proof) =:= false,
+      OutOfRangeRejected = ecu_groth16:verify(VK, [?R | PublicInputs], Proof) =:= false,
+
+      %% 4. Torsion injection (order-3 point on curve {0, 2} in BLS12-381 G1)
+      BadProofTorsion = Proof#groth16_proof{a = {0, 2}},
+      TorsionRejected =
+        ecu_groth16:verify(VK, PublicInputs, BadProofTorsion) =:= false,
+
+      conjunction([
+        {empty_batch_rejected, EmptyBatchRejected},
+        {str_verified, StrVerified},
+        {empty_bin_rejected, EmptyBinRejected},
+        {malformed_str_rejected, MalformedStrRejected},
+        {negative_rejected, NegativeRejected},
+        {out_of_range_rejected, OutOfRangeRejected},
+        {torsion_rejected, TorsionRejected}
+      ])
+    end
+  ).

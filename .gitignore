@@ -32,4 +32,5 @@ priv/ecu_vrf_nif.*
 priv/ecu_babyjubjub_nif.*
 priv/ecu_circom_nif.*
 priv/ecu_plonk_nif.*
+priv/ecu_jubjub_nif.*
 doc/

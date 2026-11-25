@@ -151,7 +151,66 @@ kzg_batch_verify_test() ->
   %% Tamper the second tuple's Y
   {C2, Z2, Y2, Pi2} = lists:nth(2, Tuples),
   TamperedTuples = lists:keyreplace(C2, 1, Tuples, {C2, Z2, Y2 + 1, Pi2}),
-  ?assertEqual(false, ecu_kzg:verify_batch(SRS, TamperedTuples)).
+  ?assertEqual(false, ecu_kzg:verify_batch(SRS, TamperedTuples)),
+
+  %% Empty batch must NOT vacuously succeed
+  ?assertEqual(false, ecu_kzg:verify_batch(SRS, [])).
+
+kzg_adversarial_rejections_test() ->
+  SecretTau = 123456789987654321,
+  SRS = ecu_kzg:setup(4, SecretTau),
+  Poly = [3, 2, 1],
+  C = ecu_kzg:commit(SRS, Poly),
+  Z = 10,
+  {Proof, Y} = ecu_kzg:create_proof(SRS, Poly, Z),
+
+  %% 1. Rejection of invalid setup parameters
+  ?assertError(invalid_degree, ecu_kzg:setup(0, 10)),
+  ?assertError(invalid_secret_tau, ecu_kzg:setup(2, 0)),
+  ?assertError(invalid_secret_tau, ecu_kzg:setup(2, 1)),
+  ?assertError(invalid_secret_tau, ecu_kzg:setup(2, ?R)),
+  ?assertError(invalid_secret_tau, ecu_kzg:setup(2, ?R + 1)),
+  ?assertError(invalid_secret_tau, ecu_kzg:setup(2, -1)),
+
+  %% 2. Rejection of out-of-range scalars in verify
+  ?assertEqual(false, ecu_kzg:verify(SRS, C, ?R, Y, Proof)),
+  ?assertEqual(false, ecu_kzg:verify(SRS, C, ?R + 5, Y, Proof)),
+  ?assertEqual(false, ecu_kzg:verify(SRS, C, -1, Y, Proof)),
+  ?assertEqual(false, ecu_kzg:verify(SRS, C, Z, ?R, Proof)),
+  ?assertEqual(false, ecu_kzg:verify(SRS, C, Z, ?R + 10, Proof)),
+  ?assertEqual(false, ecu_kzg:verify(SRS, C, Z, -1, Proof)),
+
+  %% 3. Rejection of malformed / infinity G2 points in SRS
+  BadSRSInfinity = {kzg_srs, ecu_kzg:srs_g1(SRS), [infinity, infinity]},
+  ?assertEqual(false, ecu_kzg:verify(BadSRSInfinity, C, Z, Y, Proof)),
+  ?assertEqual(false, ecu_kzg:verify_batch(BadSRSInfinity, [{C, Z, Y, Proof}])),
+
+  BadSRSOffCurve =
+    {kzg_srs, ecu_kzg:srs_g1(SRS), [{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}]},
+  ?assertEqual(false, ecu_kzg:verify(BadSRSOffCurve, C, Z, Y, Proof)),
+  ?assertEqual(false, ecu_kzg:verify_batch(BadSRSOffCurve, [{C, Z, Y, Proof}])),
+
+  %% 4. Rejection of out-of-range scalars in point evaluation
+  CompC = ecu_kzg:commit_compressed(SRS, Poly),
+  Sha = ecu_compat:hash(sha256, CompC),
+  <<_:8, RestSha:31/binary>> = Sha,
+  VersionedHash = <<16#01:8, RestSha:31/binary>>,
+  CompProof = ecu_bls12_381:g1_compress(Proof),
+  OutOfRangeZ = <<?R:256/big>>,
+  BadEipInputZ =
+    <<VersionedHash:32/binary, OutOfRangeZ:32/binary, Y:256/big, CompC:48/binary, CompProof:48/binary>>,
+  ?assertEqual({error, scalar_out_of_range}, ecu_kzg:point_evaluation(SRS, BadEipInputZ)),
+
+  OutOfRangeY = <<(?R + 1):256/big>>,
+  BadEipInputY =
+    <<VersionedHash:32/binary, Z:256/big, OutOfRangeY:32/binary, CompC:48/binary, CompProof:48/binary>>,
+  ?assertEqual({error, scalar_out_of_range}, ecu_kzg:point_evaluation(SRS, BadEipInputY)),
+
+  %% 5. Polynomial normalization and unreduced / negative coefficients
+  UnreducedPoly = [3 + ?R, 2 - ?R, -1],
+  NormPoly = ecu_poly:normalize(UnreducedPoly),
+  ?assertEqual([3, 2, ?R - 1], NormPoly),
+  ?assertEqual(ecu_kzg:commit(SRS, NormPoly), ecu_kzg:commit(SRS, UnreducedPoly)).
 
 kzg_eip4844_point_evaluation_test() ->
   SecretTau = 777888999,

@@ -242,16 +242,12 @@ g1_scalar_mul(P, Bin) when is_binary(Bin) ->
   g1_scalar_mul(P, binary:decode_unsigned(Bin));
 g1_scalar_mul(_P, 0) ->
   infinity;
-g1_scalar_mul(P, K) when is_integer(K) ->
-  ModK = ((K rem ?BLS12_381_R) + ?BLS12_381_R) rem ?BLS12_381_R,
-  case ModK of
-    0 ->
-      infinity;
-    _ ->
-      J = g1_to_jacobian(P),
-      ResJ = g1_j_scalar_mul(J, ModK),
-      g1_from_jacobian(ResJ)
-  end.
+g1_scalar_mul(P, K) when is_integer(K), K > 0 ->
+  J = g1_to_jacobian(P),
+  ResJ = g1_j_scalar_mul(J, K),
+  g1_from_jacobian(ResJ);
+g1_scalar_mul(P, K) when is_integer(K), K < 0 ->
+  g1_scalar_mul(g1_neg(P), -K).
 
 -spec g1_scalar_mul_base(scalar()) -> g1_affine().
 g1_scalar_mul_base(K) ->
@@ -558,16 +554,12 @@ g2_scalar_mul(Q, Bin) when is_binary(Bin) ->
   g2_scalar_mul(Q, binary:decode_unsigned(Bin));
 g2_scalar_mul(_Q, 0) ->
   infinity;
-g2_scalar_mul(Q, K) when is_integer(K) ->
-  ModK = ((K rem ?BLS12_381_R) + ?BLS12_381_R) rem ?BLS12_381_R,
-  case ModK of
-    0 ->
-      infinity;
-    _ ->
-      J = g2_to_jacobian(Q),
-      ResJ = g2_j_scalar_mul(J, ModK),
-      g2_from_jacobian(ResJ)
-  end.
+g2_scalar_mul(Q, K) when is_integer(K), K > 0 ->
+  J = g2_to_jacobian(Q),
+  ResJ = g2_j_scalar_mul(J, K),
+  g2_from_jacobian(ResJ);
+g2_scalar_mul(Q, K) when is_integer(K), K < 0 ->
+  g2_scalar_mul(g2_neg(Q), -K).
 
 -spec g2_scalar_mul_base(scalar()) -> g2_affine().
 g2_scalar_mul_base(K) ->

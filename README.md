@@ -6,7 +6,7 @@ A pure Erlang cryptographic library implementing elliptic curve arithmetic
 BIP-340 Schnorr, **ML-DSA / FIPS 204**, **SLH-DSA / FIPS 205**), threshold signatures (FROST RFC 9591), multi-signatures
 (MuSig2 BIP-327), key exchange (X25519, X448), quantum-resistant key encapsulation
 (ML-KEM / FIPS 203), hybrid post-quantum key exchange (X25519 + ML-KEM-768),
-pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **PLONK**, **BabyJubjub**, **KZG / EIP-4844**, **Circom / ZoKrates R1CS & WTNS**),
+pairing-friendly cryptography & zero-knowledge proof verification (**BLS12-381**, **BN254**, **Groth16**, **PLONK**, **BabyJubjub**, **Jubjub**, **Pedersen**, **KZG / EIP-4844**, **Circom / ZoKrates R1CS & WTNS**),
 Hash-to-Curve (RFC 9380), Verifiable Random Functions (VRF / RFC 9381),
 hierarchical deterministic wallets (BIP-32, SLIP-0010, AEX-10),
 mnemonics (BIP-39), and address encodings (Base58, Base58Check, Bech32, Bech32m).
@@ -431,6 +431,47 @@ Base8 = ecu_babyjubjub:base8(),
 P2 = ecu_babyjubjub:double(Base8),
 Compressed = ecu_babyjubjub:compress(P2),
 {ok, P2} = ecu_babyjubjub:decompress(Compressed).
+
+%% Montgomery ladder scalar multiplication (u-only constant-time)
+MBase8 = ecu_babyjubjub:edwards_to_montgomery(Base8),
+URes = ecu_babyjubjub:montgomery_ladder(123456789, element(1, MBase8)).
+
+%% Circomlib-compatible Pedersen Hash & Commitments
+MsgBin = <<"state commitment data">>,
+HashPt = ecu_babyjubjub_pedersen:hash(MsgBin),
+HashComp = ecu_babyjubjub_pedersen:hash_compressed(MsgBin),
+Commitment = ecu_babyjubjub_pedersen:commit(MsgBin, 123456789).
+
+### Jubjub Curve over BLS12-381 & RedJubjub (Zcash ZIP 215 / ZIP 216 / ZIP 243)
+
+Pure-Erlang Jubjub twisted Edwards curve arithmetic over the scalar field of BLS12-381 and RedJubjub signatures:
+
+```erlang
+Gen = ecu_jubjub:generator(),
+DoubleGen = ecu_jubjub:double(Gen),
+P_mul = ecu_jubjub:mul(Gen, 123456789),
+
+%% ZIP 216 point compression and decompression
+Comp = ecu_jubjub:compress(P_mul),
+{ok, P_mul} = ecu_jubjub:decompress(Comp),
+
+%% Montgomery ladder on Jubjub
+MGen = ecu_jubjub:edwards_to_montgomery(Gen),
+UK = ecu_jubjub:montgomery_ladder(123456789, element(1, MGen)),
+
+%% RedJubjub SpendAuth & Binding Signatures (Zcash Spec §5.4.7.1)
+SK = <<42:256/little>>,
+Msg = <<"Spend authorization payload">>,
+PK = ecu_jubjub:redjubjub_derive_public_key(SK, spend_auth),
+Sig = ecu_jubjub:redjubjub_sign(SK, Msg, spend_auth),
+true = ecu_jubjub:redjubjub_verify(PK, Msg, Sig, spend_auth),
+
+%% Key re-randomization
+Alpha = <<12345:256/little>>,
+RandPK = ecu_jubjub:redjubjub_rerandomize_public_key(PK, Alpha),
+{RandSK, RandPK} = ecu_jubjub:redjubjub_rerandomize_keypair(SK, Alpha),
+RandSig = ecu_jubjub:redjubjub_sign(RandSK, Msg, spend_auth),
+true = ecu_jubjub:redjubjub_verify(RandPK, Msg, RandSig, spend_auth).
 ```
 
 ### KZG Polynomial Commitments & EIP-4844 (BLS12-381)
@@ -754,8 +795,22 @@ Supported Curves & API
   - `add/2`, `double/1`, `neg/1`, `mul/2`, `mul_base8/1`: Complete twisted Edwards arithmetic in projective coordinates over the scalar field of BN254.
   - `compress/1`, `decompress/1`: 32-byte point compression and decompression with Tonelli-Shanks modular square root.
   - `is_on_curve/1`, `is_in_subgroup/1`: Curve equation validation and prime-order subgroup membership checks.
+  - `edwards_to_montgomery/1`, `montgomery_to_edwards/1`, `montgomery_ladder/2`: Birational Montgomery mapping and constant-time $u$-only Montgomery ladder.
   - `keypair/0,1`, `derive_public_key/1`: Key generation and derivation matching Circom / SnarkJS conventions.
   - `sign/2`, `verify/3`: Circom-compatible EdDSA signing and verification with Poseidon hash (`EdDSAPoseidonVerifier.circom`).
+- `ecu_babyjubjub_pedersen`: Pure-Erlang Circomlib-compatible Pedersen Hash and Commitments over BabyJubjub:
+  - `base/1`, `bases/0`: The 10 canonical generator base points defined in `pedersen.circom`.
+  - `hash/1,2`, `hash_compressed/1`: 4-bit window Pedersen hashing supporting affine `{X, Y}`, 32-byte compressed, or `x_only` field element outputs up to 2000 bits (10 segments).
+  - `commit/2,3`: Pedersen vector/scalar commitments with default or custom blinding generators.
+- `ecu_jubjub`: Pure-Erlang implementation of the Jubjub twisted Edwards curve over BLS12-381 $\mathbb{F}_q$ (Zcash ZIP 216 / ZIP 243) and RedJubjub signatures (ZIP 215 / ZIP 216 / Zcash Spec §5.4.7.1):
+  - `add/2`, `double/1`, `neg/1`, `mul/2`, `mul_base8/1`: Complete twisted Edwards group operations with $a = -1, d = -(10240/10241) \pmod q$.
+  - `compress/1`, `decompress/1`: ZIP 216 strict canonical point compression and decompression with Tonelli-Shanks square root.
+  - `edwards_to_montgomery/1`, `montgomery_to_edwards/1`, `montgomery_ladder/2`: Montgomery birational equivalence ($A=40962, B=-40964$) and $u$-only ladder scalar multiplication.
+  - `spendauth_basepoint/0`, `binding_basepoint/0`: Standard Zcash SpendAuth ($\mathcal{G}_{\text{Sapling}}$) and Binding ($\mathcal{J}_{\text{Sapling}}$) generators.
+  - `redjubjub_derive_public_key/1,2`: Derive 32-byte compressed verification key from secret scalar for `spend_auth` or `binding`.
+  - `redjubjub_sign/2,3,4`, `redjubjub_verify/3,4`: RedJubjub Schnorr signing and verification with cofactor-cleared $[8]([S]\mathcal{B} - R - [c]VK) = \mathcal{O}$ checks.
+  - `redjubjub_rerandomize_public_key/2`, `redjubjub_rerandomize_keypair/2`: SpendAuth key and keypair re-randomization.
+- `ecu_blake2b`: Pure-Erlang implementation of the BLAKE2b cryptographic hash function (RFC 7693) supporting arbitrary output lengths (1-64 bytes), keying, salt, and personalization (used for RedJubjub $H^*$ challenge and nonce hashing).
 - `ecu_blake512`: Pure-Erlang implementation of the BLAKE-512 cryptographic hash function used for BabyJubjub key expansion and nonces.
 - `ecu_poly`: Finite field polynomial arithmetic over prime fields (defaulting to BLS12-381 $r$):
   - `eval/2,3`: Horner's method polynomial evaluation in $O(d)$.
@@ -903,6 +958,18 @@ the library incorporates key algorithmic optimizations:
 | **babyjubjub point decompress** | — | **137 µs** | — | 645 µs (babyjubjub-rs Rust NIF) | **4.71× faster** |
 | **babyjubjub eddsa sign (Poseidon)** | — | **2.64 ms** | — | 276 µs (babyjubjub-rs Rust NIF) | 9.57× |
 | **babyjubjub eddsa verify (Poseidon)** | — | **2.74 ms** | — | 1.56 ms (babyjubjub-rs Rust NIF) | 1.76× |
+| **babyjubjub montgomery ladder** | — | **357 µs** | — | 625 µs (babyjubjub-rs Rust NIF) | **1.75× faster** |
+| **babyjubjub pedersen hash (248b)** | — | **1.11 ms** | — | 1.71 ms (babyjubjub-rs Rust NIF) | **1.54× faster** |
+| **babyjubjub pedersen hash (512b)** | — | **2.44 ms** | — | 2.64 ms (babyjubjub-rs Rust NIF) | **1.08× faster** |
+| **babyjubjub pedersen commit (248b)** | — | **2.46 ms** | — | 2.53 ms (babyjubjub-rs Rust NIF) | **1.03× faster** |
+| **jubjub point add** | — | **14.0 µs** | — | 39.5 µs (jubjub Rust NIF) | **2.82× faster** |
+| **jubjub point double** | — | **14.1 µs** | — | 23.8 µs (jubjub Rust NIF) | **1.69× faster** |
+| **jubjub scalar mul** | — | **212 µs** | — | 110 µs (jubjub Rust NIF) | 1.92× |
+| **jubjub point compress** | — | **0.07 µs** | — | 15.8 µs (jubjub Rust NIF) | **225× faster** |
+| **jubjub point decompress** | — | **185 µs** | — | 15.8 µs (jubjub Rust NIF) | 11.7× |
+| **jubjub montgomery ladder** | — | **289 µs** | — | 72.7 µs (jubjub Rust NIF) | 3.97× |
+| **redjubjub sign** | — | **1.18 ms** | — | 220 µs (redjubjub Rust NIF) | 5.35× |
+| **redjubjub verify** | — | **2.24 ms** | — | 222 µs (redjubjub Rust NIF) | 10.1× |
 | **poly eval (deg 16, Horner)** | — | **1.41 µs** | — | — | — |
 | **poly synthetic division (deg 16, Ruffini)** | — | **1.49 µs** | — | — | — |
 | **kzg commit (deg 16, G1)** | — | **213 µs** | — | 502 µs (blst Rust NIF)* | **2.36× faster** |
@@ -931,6 +998,7 @@ the library incorporates key algorithmic optimizations:
 - *MuSig2 reference benchmarks use the official BIP-327 Rust crate buildable via `make musig2_reference`.*
 - *BN254 elliptic curve and Groth16 reference benchmarks use an optional Arkworks test NIF (`crates/bn254_nif`) buildable via `make reference_nifs`.*
 - *BabyJubjub and Circom EdDSA reference benchmarks use an optional Rust test NIF (`crates/babyjubjub_nif`) wrapping `babyjubjub-rs`, buildable via `make babyjubjub_reference`.*
+- *Jubjub and RedJubjub reference benchmarks use an optional Rust test NIF (`crates/jubjub_nif`) wrapping `jubjub` and `redjubjub`, buildable via `make jubjub_reference`.*
 - *KZG polynomial commitment reference benchmarks use an optional test NIF (`crates/bls12_381_nif`) wrapping Supranational `blst`, buildable via `make bls12_381_reference`.*
 - *Circom R1CS and WTNS reference benchmarks use an optional test NIF (`crates/circom_nif`) wrapping official `r1cs-file` and `wtns-file` crates, buildable via `make circom_reference`.*
 - *PLONK universal zk-SNARK reference benchmarks use an optional Arkworks test NIF (`crates/plonk_nif`) buildable via `make plonk_reference`.*
@@ -969,6 +1037,7 @@ See [ROADMAP.md](ROADMAP.md) for details on completed milestones and planned cry
 - **HD Wallets & Mnemonics**: BIP-32, SLIP-0010, AEX-10, and BIP-39 `[Completed]`.
 - **Native Cryptographic Independence**: 100% pure-Erlang fallback for hashing, HMAC, and CSPRNG entropy via `ecu_compat` and `ecu_entropy` `[Completed]`.
 - **Pairing-Friendly Cryptography, zk-SNARKs & Poseidon (BLS12-381 & BN254)**: BLS signatures, BN254 / BLS12-381 curve arithmetic & optimal Ate pairings, Groth16 proof verification, and Poseidon algebraic hashing `[Completed]`.
+- **In-Circuit Curves & Circuit Tooling**: BabyJubjub, Jubjub, Montgomery ladders, Pedersen hash/commitments, RedJubjub (ZIP 215/216), KZG commitments (EIP-4844), Circom 2 / ZoKrates R1CS & WTNS, and PLONK verification `[Completed]`.
 
 Security Considerations & Limitations
 -------------------------------------

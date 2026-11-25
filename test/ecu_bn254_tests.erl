@@ -330,4 +330,23 @@ subgroup_and_curve_validation_test() ->
   %% G2 invalid point
   BadG2 = {{1, 0}, {3, 0}},
   ?assertNot(?BN:g2_on_curve(BadG2)),
-  ?assertEqual(error, ?BN:g2_from_uncompressed(<<0:256, 1:256, 0:256, 3:256>>)).
+  ?assertEqual(error, ?BN:g2_from_uncompressed(<<0:256, 1:256, 0:256, 3:256>>)),
+
+  %% G2 point on twist curve but NOT in prime subgroup G2 (F-12, F-13, F-14)
+  %% Find X0 such that X={X0, 0} has a square root on the twist curve
+  TwistB = {
+    16#2b149d40ceb8aaae81be18991be06ac3b5b4c5e559dbefa33267e6dc24a138e5,
+    16#9713b03af0fed4cd2cafadeed8fdf4a74fa084e52d1852e4a2bd0685c315d2
+  },
+  X = {1, 0},
+  Rhs = ecu_bn254_fp:fp2_add(
+    ecu_bn254_fp:fp2_mul(ecu_bn254_fp:fp2_sqr(X), X),
+    TwistB
+  ),
+  {ok, Y} = ecu_bn254_fp:fp2_sqrt(Rhs),
+  TwistPt = {X, Y},
+  ?assert(?BN:g2_on_curve(TwistPt)),
+  ?assertNot(?BN:g2_is_in_subgroup(TwistPt)),
+  ?assertEqual(error, ?BN:g2_from_uncompressed(?BN:g2_to_uncompressed(TwistPt))),
+  ?assertEqual(error, ?BN:g2_decompress(?BN:g2_compress(TwistPt))),
+  ?assertNot(?PAIRING:pairing_check([{?BN:g1_generator(), TwistPt}])).

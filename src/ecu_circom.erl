@@ -281,17 +281,34 @@ check_constraints(R1CSInput, WitnessInput) ->
     {_, {error, _} = Err} ->
       Err;
     {#r1cs{header = H, constraints = Constraints}, {WitnessTuple, PrimeOpt}} ->
-      Prime =
-        case PrimeOpt of
-          undefined -> H#r1cs_header.prime;
-          P when is_integer(P) -> P
-        end,
-      NWires = H#r1cs_header.n_wires,
-      WLen = tuple_size(WitnessTuple),
-      case WLen < NWires of
-        true ->
-          {error, {witness_too_short, WLen, NWires}};
+      Prime = H#r1cs_header.prime,
+      case is_integer(Prime) andalso Prime > 1 of
         false ->
+          {error, invalid_circuit_prime};
+        true ->
+          case PrimeOpt of
+            undefined ->
+              check_witness_and_constraints(Constraints, WitnessTuple, Prime, H#r1cs_header.n_wires);
+            P when is_integer(P), P =:= Prime ->
+              check_witness_and_constraints(Constraints, WitnessTuple, Prime, H#r1cs_header.n_wires);
+            P when is_integer(P) ->
+              {error, {prime_mismatch, P, Prime}}
+          end
+      end
+  end.
+
+-spec check_witness_and_constraints([r1cs_constraint()], tuple(), integer(), non_neg_integer()) ->
+  ok | {error, term()}.
+check_witness_and_constraints(Constraints, WitnessTuple, Prime, NWires) ->
+  WLen = tuple_size(WitnessTuple),
+  case WLen < NWires of
+    true ->
+      {error, {witness_too_short, WLen, NWires}};
+    false ->
+      case WLen >= 1 andalso element(1, WitnessTuple) =:= 1 of
+        false ->
+          {error, invalid_wire_zero};
+        true ->
           check_constraints_loop(Constraints, WitnessTuple, Prime, 0)
       end
   end.
@@ -370,6 +387,8 @@ decode_r1cs(_) ->
   {ok, map()} | {error, term()}.
 read_sections(<<>>, 0, Acc) ->
   {ok, Acc};
+read_sections(_Rest, Remaining, _Acc) when Remaining > 1000 ->
+  {error, too_many_sections};
 read_sections(<<>>, Remaining, _Acc) when Remaining > 0 ->
   {error, unexpected_eof_in_sections};
 read_sections(
@@ -399,39 +418,44 @@ assemble_r1cs(Sections) ->
         {ok, Header} ->
           FS = Header#r1cs_header.field_size,
           P = Header#r1cs_header.prime,
-          Constraints =
+          ConstraintsRes =
             case maps:get(?R1CS_SEC_CONSTRAINTS, Sections, undefined) of
               undefined ->
-                [];
+                {ok, []};
               [ConstraintsBin | _] ->
                 decode_constraints(ConstraintsBin, Header#r1cs_header.n_constraints, FS, P)
             end,
-          WireMap =
-            case maps:get(?R1CS_SEC_WIRE_MAP, Sections, undefined) of
-              undefined ->
-                [];
-              [WireMapBin | _] ->
-                decode_wire_map(WireMapBin)
-            end,
-          Custom =
-            maps:fold(
-              fun(K, VList, Acc) ->
-                case K of
-                  ?R1CS_SEC_HEADER -> Acc;
-                  ?R1CS_SEC_CONSTRAINTS -> Acc;
-                  ?R1CS_SEC_WIRE_MAP -> Acc;
-                  OtherType -> Acc ++ [{OtherType, V} || V <- VList]
-                end
-              end,
-              [],
-              Sections
-            ),
-          {ok, #r1cs{
-            header = Header,
-            constraints = Constraints,
-            wire_map = WireMap,
-            custom_sections = Custom
-          }};
+          case ConstraintsRes of
+            {error, _} = Err ->
+              Err;
+            {ok, Constraints} ->
+              WireMap =
+                case maps:get(?R1CS_SEC_WIRE_MAP, Sections, undefined) of
+                  undefined ->
+                    [];
+                  [WireMapBin | _] ->
+                    decode_wire_map(WireMapBin)
+                end,
+              Custom =
+                maps:fold(
+                  fun(K, VList, Acc) ->
+                    case K of
+                      ?R1CS_SEC_HEADER -> Acc;
+                      ?R1CS_SEC_CONSTRAINTS -> Acc;
+                      ?R1CS_SEC_WIRE_MAP -> Acc;
+                      OtherType -> Acc ++ [{OtherType, V} || V <- VList]
+                    end
+                  end,
+                  [],
+                  Sections
+                ),
+              {ok, #r1cs{
+                header = Header,
+                constraints = Constraints,
+                wire_map = WireMap,
+                custom_sections = Custom
+              }}
+          end;
         {error, _} = Err ->
           Err
       end
@@ -439,30 +463,46 @@ assemble_r1cs(Sections) ->
 
 -spec decode_r1cs_header(binary()) -> {ok, #r1cs_header{}} | {error, term()}.
 decode_r1cs_header(<<FS:32/little-unsigned-integer, Rest/binary>>) ->
-  case byte_size(Rest) >= FS + 28 of
-    true ->
-      <<PrimeBin:FS/binary, NWires:32/little-unsigned-integer, NPubOut:32/little-unsigned-integer,
-        NPubIn:32/little-unsigned-integer, NPrvtIn:32/little-unsigned-integer,
-        NLabels:64/little-unsigned-integer, NConstraints:32/little-unsigned-integer, _/binary>> = Rest,
-      <<Prime:FS/little-unsigned-integer-unit:8>> = PrimeBin,
-      {ok, #r1cs_header{
-        field_size = FS,
-        prime = Prime,
-        n_wires = NWires,
-        n_pub_out = NPubOut,
-        n_pub_in = NPubIn,
-        n_prvt_in = NPrvtIn,
-        n_labels = NLabels,
-        n_constraints = NConstraints
-      }};
+  case FS >= 1 andalso FS =< 256 of
     false ->
-      {error, truncated_r1cs_header}
+      {error, invalid_field_size};
+    true ->
+      case byte_size(Rest) >= FS + 28 of
+        true ->
+          <<PrimeBin:FS/binary, NWires:32/little-unsigned-integer, NPubOut:32/little-unsigned-integer,
+            NPubIn:32/little-unsigned-integer, NPrvtIn:32/little-unsigned-integer,
+            NLabels:64/little-unsigned-integer, NConstraints:32/little-unsigned-integer,
+            _/binary>> = Rest,
+          <<Prime:FS/little-unsigned-integer-unit:8>> = PrimeBin,
+          case Prime > 1 of
+            false ->
+              {error, invalid_prime};
+            true ->
+              case 1 + NPubOut + NPubIn + NPrvtIn > NWires of
+                true ->
+                  {error, invalid_wire_counts};
+                false ->
+                  {ok, #r1cs_header{
+                    field_size = FS,
+                    prime = Prime,
+                    n_wires = NWires,
+                    n_pub_out = NPubOut,
+                    n_pub_in = NPubIn,
+                    n_prvt_in = NPrvtIn,
+                    n_labels = NLabels,
+                    n_constraints = NConstraints
+                  }}
+              end
+          end;
+        false ->
+          {error, truncated_r1cs_header}
+      end
   end;
 decode_r1cs_header(_) ->
   {error, invalid_r1cs_header}.
 
 -spec decode_constraints(binary(), non_neg_integer(), non_neg_integer(), integer()) ->
-  [r1cs_constraint()].
+  {ok, [r1cs_constraint()]} | {error, term()}.
 decode_constraints(Bin, NConstraints, FS, Prime) ->
   decode_constraints_loop(Bin, NConstraints, FS, Prime, []).
 
@@ -472,24 +512,40 @@ decode_constraints(Bin, NConstraints, FS, Prime) ->
   non_neg_integer(),
   integer(),
   [r1cs_constraint()]
-) -> [r1cs_constraint()].
+) -> {ok, [r1cs_constraint()]} | {error, term()}.
 decode_constraints_loop(<<>>, 0, _FS, _Prime, Acc) ->
-  lists:reverse(Acc);
+  {ok, lists:reverse(Acc)};
+decode_constraints_loop(<<>>, Remaining, _FS, _Prime, _Acc) when Remaining > 0 ->
+  {error, truncated_constraints};
 decode_constraints_loop(Bin, Remaining, FS, Prime, Acc) when Remaining > 0 ->
-  {A, Rest1} = decode_linear_comb(Bin, FS, Prime),
-  {B, Rest2} = decode_linear_comb(Rest1, FS, Prime),
-  {C, Rest3} = decode_linear_comb(Rest2, FS, Prime),
-  decode_constraints_loop(Rest3, Remaining - 1, FS, Prime, [{A, B, C} | Acc]).
+  case decode_linear_comb(Bin, FS, Prime) of
+    {ok, {A, Rest1}} ->
+      case decode_linear_comb(Rest1, FS, Prime) of
+        {ok, {B, Rest2}} ->
+          case decode_linear_comb(Rest2, FS, Prime) of
+            {ok, {C, Rest3}} ->
+              decode_constraints_loop(Rest3, Remaining - 1, FS, Prime, [{A, B, C} | Acc]);
+            {error, _} = Err ->
+              Err
+          end;
+        {error, _} = Err ->
+          Err
+      end;
+    {error, _} = Err ->
+      Err
+  end.
 
 -spec decode_linear_comb(binary(), non_neg_integer(), integer()) ->
-  {linear_combination(), binary()}.
+  {ok, {linear_combination(), binary()}} | {error, term()}.
 decode_linear_comb(<<NTerms:32/little-unsigned-integer, Rest/binary>>, FS, Prime) ->
-  decode_terms(Rest, NTerms, FS, Prime, []).
+  decode_terms(Rest, NTerms, FS, Prime, []);
+decode_linear_comb(_Bin, _FS, _Prime) ->
+  {error, truncated_linear_combination}.
 
 -spec decode_terms(binary(), non_neg_integer(), non_neg_integer(), integer(), linear_combination()) ->
-  {linear_combination(), binary()}.
+  {ok, {linear_combination(), binary()}} | {error, term()}.
 decode_terms(Rest, 0, _FS, _Prime, Acc) ->
-  {lists:reverse(Acc), Rest};
+  {ok, {lists:reverse(Acc), Rest}};
 decode_terms(Bin, Remaining, FS, Prime, Acc) when Remaining > 0 ->
   case Bin of
     <<WireId:32/little-unsigned-integer, FactorBin:FS/binary, Rest/binary>> ->
@@ -497,7 +553,7 @@ decode_terms(Bin, Remaining, FS, Prime, Acc) when Remaining > 0 ->
       NormFactor = Factor rem Prime,
       decode_terms(Rest, Remaining - 1, FS, Prime, [{WireId, NormFactor} | Acc]);
     _ ->
-      erlang:error({truncated_linear_combination, Remaining})
+      {error, truncated_linear_combination}
   end.
 
 -spec decode_wire_map(binary()) -> [non_neg_integer()].
@@ -626,13 +682,19 @@ assemble_wtns(Sections) ->
             undefined ->
               {error, missing_wtns_witness};
             [WitnessBin | _] ->
-              Witness = decode_witness_vector(
-                WitnessBin,
-                Header#wtns_header.witness_len,
-                Header#wtns_header.field_size,
-                Header#wtns_header.prime
-              ),
-              {ok, #wtns{header = Header, witness = Witness}}
+              case
+                decode_witness_vector(
+                  WitnessBin,
+                  Header#wtns_header.witness_len,
+                  Header#wtns_header.field_size,
+                  Header#wtns_header.prime
+                )
+              of
+                {ok, Witness} ->
+                  {ok, #wtns{header = Header, witness = Witness}};
+                {error, _} = Err ->
+                  Err
+              end
           end;
         {error, _} = Err ->
           Err
@@ -641,40 +703,51 @@ assemble_wtns(Sections) ->
 
 -spec decode_wtns_header(binary()) -> {ok, #wtns_header{}} | {error, term()}.
 decode_wtns_header(<<FS:32/little-unsigned-integer, Rest/binary>>) ->
-  case byte_size(Rest) >= FS + 4 of
-    true ->
-      <<PrimeBin:FS/binary, WLen:32/little-unsigned-integer, _/binary>> = Rest,
-      <<Prime:FS/little-unsigned-integer-unit:8>> = PrimeBin,
-      {ok, #wtns_header{
-        field_size = FS,
-        prime = Prime,
-        witness_len = WLen
-      }};
+  case FS >= 1 andalso FS =< 256 of
     false ->
-      {error, truncated_wtns_header}
+      {error, invalid_field_size};
+    true ->
+      case byte_size(Rest) >= FS + 4 of
+        true ->
+          <<PrimeBin:FS/binary, WLen:32/little-unsigned-integer, _/binary>> = Rest,
+          <<Prime:FS/little-unsigned-integer-unit:8>> = PrimeBin,
+          case Prime > 1 of
+            false ->
+              {error, invalid_prime};
+            true ->
+              {ok, #wtns_header{
+                field_size = FS,
+                prime = Prime,
+                witness_len = WLen
+              }}
+          end;
+        false ->
+          {error, truncated_wtns_header}
+      end
   end;
 decode_wtns_header(_) ->
   {error, invalid_wtns_header}.
 
--spec decode_witness_vector(binary(), non_neg_integer(), non_neg_integer(), integer()) -> [integer()].
+-spec decode_witness_vector(binary(), non_neg_integer(), non_neg_integer(), integer()) ->
+  {ok, [integer()]} | {error, term()}.
 decode_witness_vector(Bin, WLen, FS, Prime) ->
-  decode_witness_loop(Bin, WLen, FS, Prime, []).
+  ExpectedBytes = WLen * FS,
+  case byte_size(Bin) < ExpectedBytes of
+    true ->
+      {error, truncated_wtns_witness};
+    false ->
+      decode_witness_loop(Bin, WLen, FS, Prime, [])
+  end.
 
 -spec decode_witness_loop(binary(), non_neg_integer(), non_neg_integer(), integer(), [integer()]) ->
-  [integer()].
-decode_witness_loop(<<>>, 0, _FS, _Prime, Acc) ->
-  lists:reverse(Acc);
+  {ok, [integer()]}.
+decode_witness_loop(_Bin, 0, _FS, _Prime, Acc) ->
+  {ok, lists:reverse(Acc)};
 decode_witness_loop(Bin, Remaining, FS, Prime, Acc) when Remaining > 0 ->
-  case Bin of
-    <<ElemBin:FS/binary, Rest/binary>> ->
-      <<Elem:FS/little-unsigned-integer-unit:8>> = ElemBin,
-      NormElem = Elem rem Prime,
-      decode_witness_loop(Rest, Remaining - 1, FS, Prime, [NormElem | Acc]);
-    _ ->
-      lists:reverse(Acc)
-  end;
-decode_witness_loop(_, _, _, _, Acc) ->
-  lists:reverse(Acc).
+  <<ElemBin:FS/binary, Rest/binary>> = Bin,
+  <<Elem:FS/little-unsigned-integer-unit:8>> = ElemBin,
+  NormElem = Elem rem Prime,
+  decode_witness_loop(Rest, Remaining - 1, FS, Prime, [NormElem | Acc]).
 
 %%%===================================================================
 %%% Internal Functions - WTNS Encoder

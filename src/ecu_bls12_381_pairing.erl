@@ -69,8 +69,20 @@ pairing(P, Q) -> final_exp(miller_loop(P, Q)).
 pairing_check([]) ->
   true;
 pairing_check(Pairs) ->
-  Ml = miller_loop(Pairs),
-  final_exp(Ml) =:= ?FP:fp12_one().
+  case
+    lists:all(
+      fun({P, Q}) ->
+        ?BLS:g1_is_in_subgroup(P) andalso ?BLS:g2_is_in_subgroup(Q)
+      end,
+      Pairs
+    )
+  of
+    false ->
+      false;
+    true ->
+      Ml = miller_loop(Pairs),
+      final_exp(Ml) =:= ?FP:fp12_one()
+  end.
 
 -spec pairing_check(g1_affine(), g2_affine(), g1_affine(), g2_affine()) -> boolean().
 pairing_check(P1, Q1, P2, Q2) ->

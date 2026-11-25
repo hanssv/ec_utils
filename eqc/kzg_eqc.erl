@@ -267,3 +267,76 @@ prop_kzg_batch_verify_differential() ->
     _ ->
       true
   end.
+
+prop_kzg_adversarial_rejections() ->
+  SRS = get_srs(),
+  ?FORALL(
+    {Poly, Z, BadScalarOffset},
+    {gen_small_poly(), gen_field_element(), choose(1, 1000)},
+    begin
+      C = ecu_kzg:commit(SRS, Poly),
+      {Proof, Y} = ecu_kzg:create_proof(SRS, Poly, Z),
+
+      %% 1. Rejection of empty batch
+      EmptyBatchRejected = not ecu_kzg:verify_batch(SRS, []),
+
+      %% 2. Rejection of out-of-range scalars (Z >= ?R, Y >= ?R, negative)
+      BadZ1 = ?R + BadScalarOffset,
+      BadZ2 = -BadScalarOffset,
+      BadY1 = ?R + BadScalarOffset,
+      BadY2 = -BadScalarOffset,
+
+      OutOfRangeZ1 = not ecu_kzg:verify(SRS, C, BadZ1, Y, Proof),
+      OutOfRangeZ2 = not ecu_kzg:verify(SRS, C, BadZ2, Y, Proof),
+      OutOfRangeY1 = not ecu_kzg:verify(SRS, C, Z, BadY1, Proof),
+      OutOfRangeY2 = not ecu_kzg:verify(SRS, C, Z, BadY2, Proof),
+
+      %% 3. Rejection of out-of-range scalars in batch verify
+      BadBatchZ = not ecu_kzg:verify_batch(SRS, [{C, BadZ1, Y, Proof}]),
+      BadBatchY = not ecu_kzg:verify_batch(SRS, [{C, Z, BadY1, Proof}]),
+
+      %% 4. Rejection of invalid Tau in setup
+      InvalidTauZero =
+        try ecu_kzg:setup(3, 0) of
+          _ -> false
+        catch
+          error:invalid_secret_tau -> true;
+          _:_ -> false
+        end,
+      InvalidTauOne =
+        try ecu_kzg:setup(3, 1) of
+          _ -> false
+        catch
+          error:invalid_secret_tau -> true;
+          _:_ -> false
+        end,
+      InvalidTauR =
+        try ecu_kzg:setup(3, ?R) of
+          _ -> false
+        catch
+          error:invalid_secret_tau -> true;
+          _:_ -> false
+        end,
+      InvalidTauNeg =
+        try ecu_kzg:setup(3, -5) of
+          _ -> false
+        catch
+          error:invalid_secret_tau -> true;
+          _:_ -> false
+        end,
+
+      %% 5. Rejection of invalid degree in setup
+      InvalidDegree =
+        try ecu_kzg:setup(0, 7) of
+          _ -> false
+        catch
+          error:invalid_degree -> true;
+          _:_ -> false
+        end,
+
+      EmptyBatchRejected andalso OutOfRangeZ1 andalso OutOfRangeZ2 andalso
+        OutOfRangeY1 andalso OutOfRangeY2 andalso BadBatchZ andalso BadBatchY andalso
+        InvalidTauZero andalso InvalidTauOne andalso InvalidTauR andalso InvalidTauNeg andalso
+        InvalidDegree
+    end
+  ).

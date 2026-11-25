@@ -225,6 +225,93 @@ prop_min_sig_fast_aggregate() ->
   ).
 
 %%%-------------------------------------------------------------------
+%%% Adversarial & Negative Subgroup / Rogue-Key Properties (F-15, F-16, F-17)
+%%%-------------------------------------------------------------------
+
+prop_g1_torsion_rejection_adversarial() ->
+  ?FORALL(
+    Msg,
+    binary(),
+    begin
+      %% Order-3 torsion point on E(Fp): y^2 = x^3 + 4
+      TorsionG1 = {0, 2},
+      TorsionComp = ?BLS:g1_compress(TorsionG1),
+      TorsionUncomp = ?BLS:g1_serialize_uncompressed(TorsionG1),
+      OnCurve = ?BLS:g1_on_curve(TorsionG1),
+      InSubgroup = ?BLS:g1_is_in_subgroup(TorsionG1),
+      DecompRes = ?BLS:g1_decompress(TorsionComp),
+      DeserRes = ?BLS:g1_deserialize_uncompressed(TorsionUncomp),
+      PairingCheckRes = ecu_bls12_381_pairing:pairing_check([{TorsionG1, ?BLS:g2_generator()}]),
+      DummySig = ?BLS:g2_compress(?BLS:g2_infinity()),
+      SigVerifyRes = ?SIG:min_pk_verify(TorsionComp, Msg, DummySig),
+      OnCurve andalso
+        (not InSubgroup) andalso
+        (DecompRes =:= {error, point_not_in_subgroup}) andalso
+        (DeserRes =:= {error, point_not_in_subgroup}) andalso
+        (not PairingCheckRes) andalso
+        (not SigVerifyRes)
+    end
+  ).
+
+prop_rogue_identity_key_rejection_adversarial() ->
+  ?FORALL(
+    {IKMs, Msg},
+    {vector(2, gen_ikm()), binary()},
+    begin
+      KeyPairs = [
+        begin
+          {ok, {PK, SK}} = ?SIG:min_pk_keygen(IKM),
+          {PK, SK}
+        end
+       || IKM <- IKMs
+      ],
+      PKs = [PK || {PK, _} <- KeyPairs],
+      SKs = [SK || {_, SK} <- KeyPairs],
+      Sigs = [?SIG:min_pk_sign(SK, Msg) || SK <- SKs],
+      {ok, SigAgg} = ?SIG:min_pk_aggregate_signatures(Sigs),
+
+      Inf1Comp = ?BLS:g1_compress(?BLS:g1_infinity()),
+      %% Injected identity key must be rejected by aggregation
+      AggWithInfRes = ?SIG:min_pk_aggregate_public_keys(PKs ++ [Inf1Comp]),
+      %% Rogue-identity key injection must not verify with honest-only aggregate signature
+      RogueVerifyRes = ?SIG:min_pk_fast_aggregate_verify(PKs ++ [Inf1Comp], Msg, SigAgg),
+
+      Inf2Comp = ?BLS:g2_compress(?BLS:g2_infinity()),
+      SigAggWithInfRes = ?SIG:min_sig_aggregate_public_keys([Inf2Comp]),
+
+      AggWithInfRes =:= {error, invalid_public_key} andalso
+        (not RogueVerifyRes) andalso
+        SigAggWithInfRes =:= {error, invalid_public_key}
+    end
+  ).
+
+prop_boundary_scalars_homomorphism() ->
+  ?FORALL(
+    {K, ScalarChoice},
+    {gen_small_scalar(), elements([0, ?BLS12_381_R, -1, -?BLS12_381_R, ?BLS12_381_R - 1])},
+    begin
+      P = ?BLS:g1_scalar_mul_base(K),
+      Q = ?BLS:g2_scalar_mul_base(K),
+      Zero1 = ?BLS:g1_scalar_mul(P, 0),
+      Zero2 = ?BLS:g2_scalar_mul(Q, 0),
+      Inf1 = ?BLS:g1_scalar_mul(P, ?BLS12_381_R),
+      Inf2 = ?BLS:g2_scalar_mul(Q, ?BLS12_381_R),
+      Neg1 = ?BLS:g1_scalar_mul(P, -1),
+      Neg2 = ?BLS:g2_scalar_mul(Q, -1),
+      MulP = ?BLS:g1_scalar_mul(P, ScalarChoice),
+      MulQ = ?BLS:g2_scalar_mul(Q, ScalarChoice),
+      Zero1 =:= ?BLS:g1_infinity() andalso
+        Zero2 =:= ?BLS:g2_infinity() andalso
+        Inf1 =:= ?BLS:g1_infinity() andalso
+        Inf2 =:= ?BLS:g2_infinity() andalso
+        Neg1 =:= ?BLS:g1_neg(P) andalso
+        Neg2 =:= ?BLS:g2_neg(Q) andalso
+        ?BLS:g1_is_in_subgroup(MulP) andalso
+        ?BLS:g2_is_in_subgroup(MulQ)
+    end
+  ).
+
+%%%-------------------------------------------------------------------
 %%% Differential Oracle Properties vs blst NIF
 %%%-------------------------------------------------------------------
 

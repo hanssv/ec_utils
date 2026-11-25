@@ -73,7 +73,20 @@
   ic := [point_g1()]
 }.
 
--type verification_key() :: vk_map() | vk_tuple() | #groth16_vk{}.
+-type vk_map_short() :: #{
+  alpha := point_g1(),
+  beta := point_g2(),
+  gamma := point_g2(),
+  delta := point_g2(),
+  ic := [point_g1()]
+}.
+
+-type vk_map_bin() :: #{
+  binary() => point_g1() | point_g2() | [point_g1()]
+}.
+
+-type verification_key() ::
+  vk_map() | vk_map_short() | vk_map_bin() | vk_tuple() | #groth16_vk{}.
 
 -type curve() :: bls12_381 | bn254.
 
@@ -124,7 +137,7 @@ verify_batch(VK, Items) ->
 %% @doc Verify a batch of Groth16 proofs under the specified curve.
 -spec verify_batch(curve(), verification_key(), [{[scalar()], proof()}]) -> boolean().
 verify_batch(Curve, _VK, []) when Curve =:= bls12_381; Curve =:= bn254 ->
-  true;
+  false;
 verify_batch(Curve, VK, [{PublicInputs, Proof}]) when Curve =:= bls12_381; Curve =:= bn254 ->
   verify(Curve, VK, PublicInputs, Proof);
 verify_batch(Curve, VK, Items) when
@@ -434,6 +447,17 @@ parse_vk(
   Curve
 ) when is_list(IC) ->
   parse_vk({A, B, G, D, IC}, Curve);
+parse_vk(
+  #{
+    <<"alpha">> := A,
+    <<"beta">> := B,
+    <<"gamma">> := G,
+    <<"delta">> := D,
+    <<"ic">> := IC
+  },
+  Curve
+) when is_list(IC) ->
+  parse_vk({A, B, G, D, IC}, Curve);
 parse_vk(_, _) ->
   error.
 
@@ -451,16 +475,66 @@ parse_scalars_loop([], _Order, Acc) ->
   {ok, lists:reverse(Acc)};
 parse_scalars_loop([X | Rest], Order, Acc) when is_integer(X), X >= 0, X < Order ->
   parse_scalars_loop(Rest, Order, [X | Acc]);
-parse_scalars_loop([Bin | Rest], Order, Acc) when is_binary(Bin), byte_size(Bin) =< 32 ->
-  Val = binary:decode_unsigned(Bin),
-  case Val < Order of
-    true ->
+parse_scalars_loop([Bin | Rest], Order, Acc) when is_binary(Bin), byte_size(Bin) > 0 ->
+  case decode_scalar_bin(Bin, Order) of
+    {ok, Val} ->
       parse_scalars_loop(Rest, Order, [Val | Acc]);
-    false ->
+    error ->
       error
   end;
 parse_scalars_loop(_, _, _) ->
   error.
+
+-spec decode_scalar_bin(binary(), pos_integer()) -> {ok, non_neg_integer()} | error.
+decode_scalar_bin(<<"0x", Hex/binary>>, Order) when byte_size(Hex) > 0 ->
+  try binary_to_integer(Hex, 16) of
+    Val when Val >= 0, Val < Order -> {ok, Val};
+    _ -> error
+  catch
+    _:_ -> error
+  end;
+decode_scalar_bin(<<"0X", Hex/binary>>, Order) when byte_size(Hex) > 0 ->
+  decode_scalar_bin(<<"0x", Hex/binary>>, Order);
+decode_scalar_bin(Bin, Order) when byte_size(Bin) =:= 32 ->
+  case is_ascii_digits(Bin) of
+    true ->
+      try binary_to_integer(Bin, 10) of
+        Val when Val >= 0, Val < Order -> {ok, Val};
+        _ -> error
+      catch
+        _:_ -> error
+      end;
+    false ->
+      Val = binary:decode_unsigned(Bin),
+      case Val < Order of
+        true -> {ok, Val};
+        false -> error
+      end
+  end;
+decode_scalar_bin(Bin, Order) ->
+  case is_ascii_digits(Bin) of
+    true ->
+      try binary_to_integer(Bin, 10) of
+        Val when Val >= 0, Val < Order -> {ok, Val};
+        _ -> error
+      catch
+        _:_ -> error
+      end;
+    false ->
+      error
+  end.
+
+-spec is_ascii_digits(binary()) -> boolean().
+is_ascii_digits(<<>>) -> false;
+is_ascii_digits(Bin) -> is_ascii_digits_loop(Bin).
+
+-spec is_ascii_digits_loop(binary()) -> boolean().
+is_ascii_digits_loop(<<>>) ->
+  true;
+is_ascii_digits_loop(<<B, Rest/binary>>) when B >= $0, B =< $9 ->
+  is_ascii_digits_loop(Rest);
+is_ascii_digits_loop(_) ->
+  false.
 
 -spec normalize_g1(term(), curve()) -> {ok, groth16_g1()} | error.
 normalize_g1(infinity, _Curve) ->

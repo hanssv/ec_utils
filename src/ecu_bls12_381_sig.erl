@@ -276,7 +276,7 @@ min_pk_aggregate_signatures(Sigs) ->
 min_pk_aggregate_public_keys([]) ->
   {error, empty_public_keys};
 min_pk_aggregate_public_keys(PKs) ->
-  aggregate_g1_points(PKs, ?BLS:g1_infinity()).
+  aggregate_g1_public_keys(PKs, ?BLS:g1_infinity()).
 
 -spec min_pk_fast_aggregate_verify([min_pk_pubkey()], binary(), min_pk_sig()) -> boolean().
 min_pk_fast_aggregate_verify(PKs, Msg, SigAgg) ->
@@ -401,7 +401,7 @@ min_sig_aggregate_signatures(Sigs) ->
 min_sig_aggregate_public_keys([]) ->
   {error, empty_public_keys};
 min_sig_aggregate_public_keys(PKs) ->
-  aggregate_g2_points(PKs, ?BLS:g2_infinity()).
+  aggregate_g2_public_keys(PKs, ?BLS:g2_infinity()).
 
 -spec min_sig_fast_aggregate_verify([min_sig_pubkey()], binary(), min_sig_sig()) -> boolean().
 min_sig_fast_aggregate_verify(PKs, Msg, SigAgg) ->
@@ -598,7 +598,49 @@ is_valid_sig_g1(Pt) ->
 is_valid_sig_g2(Pt) ->
   ?BLS:g2_is_in_subgroup(Pt).
 
--spec aggregate_g1_points([min_pk_pubkey()], ?BLS:g1_affine()) ->
+-spec aggregate_g1_public_keys([min_pk_pubkey()], ?BLS:g1_affine()) ->
+  {ok, ?BLS:g1_compressed()} | {error, term()}.
+aggregate_g1_public_keys([], AccPt) ->
+  case is_valid_pk_g1(AccPt) of
+    true -> {ok, ?BLS:g1_compress(AccPt)};
+    false -> {error, invalid_aggregate_public_key}
+  end;
+aggregate_g1_public_keys([Item | Rest], AccPt) ->
+  case to_g1_point(Item) of
+    {ok, Pt} ->
+      case is_valid_pk_g1(Pt) of
+        true ->
+          NewAcc = ?BLS:g1_add(AccPt, Pt),
+          aggregate_g1_public_keys(Rest, NewAcc);
+        false ->
+          {error, invalid_public_key}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+-spec aggregate_g2_public_keys([min_sig_pubkey()], ?BLS:g2_affine()) ->
+  {ok, ?BLS:g2_compressed()} | {error, term()}.
+aggregate_g2_public_keys([], AccPt) ->
+  case is_valid_pk_g2(AccPt) of
+    true -> {ok, ?BLS:g2_compress(AccPt)};
+    false -> {error, invalid_aggregate_public_key}
+  end;
+aggregate_g2_public_keys([Item | Rest], AccPt) ->
+  case to_g2_point(Item) of
+    {ok, Pt} ->
+      case is_valid_pk_g2(Pt) of
+        true ->
+          NewAcc = ?BLS:g2_add(AccPt, Pt),
+          aggregate_g2_public_keys(Rest, NewAcc);
+        false ->
+          {error, invalid_public_key}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+-spec aggregate_g1_points([min_sig_sig()], ?BLS:g1_affine()) ->
   {ok, ?BLS:g1_compressed()} | {error, term()}.
 aggregate_g1_points([], AccPt) ->
   {ok, ?BLS:g1_compress(AccPt)};

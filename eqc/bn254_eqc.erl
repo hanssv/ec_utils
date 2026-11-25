@@ -143,6 +143,71 @@ prop_g2_arithmetic() ->
     end
   ).
 
+prop_g2_twist_subgroup_rejection_adversarial() ->
+  ?FORALL(
+    Seed,
+    choose(1, 1000000000),
+    begin
+      TwistB = {
+        16#2b149d40ceb8aaae81be18991be06ac3b5b4c5e559dbefa33267e6dc24a138e5,
+        16#9713b03af0fed4cd2cafadeed8fdf4a74fa084e52d1852e4a2bd0685c315d2
+      },
+      FindPt = fun Loop(X0) ->
+        X = {X0 rem ?BN254_P, 0},
+        Rhs = ?FP:fp2_add(
+          ?FP:fp2_mul(?FP:fp2_sqr(X), X),
+          TwistB
+        ),
+        case ?FP:fp2_sqrt(Rhs) of
+          {ok, Y} -> {X, Y};
+          error -> Loop(X0 + 1)
+        end
+      end,
+      TwistPt = FindPt(Seed),
+      OnCurve = ?BN:g2_on_curve(TwistPt),
+      InSub = ?BN:g2_is_in_subgroup(TwistPt),
+      case InSub of
+        false ->
+          DecompRes = ?BN:g2_decompress(?BN:g2_compress(TwistPt)),
+          DeserRes = ?BN:g2_from_uncompressed(?BN:g2_to_uncompressed(TwistPt)),
+          PairingCheckRes = ?PAIRING:pairing_check([{?BN:g1_generator(), TwistPt}]),
+          OnCurve andalso
+            (DecompRes =:= error) andalso
+            (DeserRes =:= error) andalso
+            (not PairingCheckRes);
+        true ->
+          %% Extremely rare case where point happens to be in G2
+          true
+      end
+    end
+  ).
+
+prop_boundary_scalars_homomorphism() ->
+  ?FORALL(
+    {K, ScalarChoice},
+    {gen_small_scalar(), elements([0, ?BN254_R, -1, -?BN254_R, ?BN254_R - 1])},
+    begin
+      P = ?BN:g1_scalar_mul_base(K),
+      Q = ?BN:g2_scalar_mul_base(K),
+      Zero1 = ?BN:g1_scalar_mul(P, 0),
+      Zero2 = ?BN:g2_scalar_mul(Q, 0),
+      Inf1 = ?BN:g1_scalar_mul(P, ?BN254_R),
+      Inf2 = ?BN:g2_scalar_mul(Q, ?BN254_R),
+      Neg1 = ?BN:g1_scalar_mul(P, -1),
+      Neg2 = ?BN:g2_scalar_mul(Q, -1),
+      MulP = ?BN:g1_scalar_mul(P, ScalarChoice),
+      MulQ = ?BN:g2_scalar_mul(Q, ScalarChoice),
+      Zero1 =:= ?BN:g1_infinity() andalso
+        Zero2 =:= ?BN:g2_infinity() andalso
+        Inf1 =:= ?BN:g1_infinity() andalso
+        Inf2 =:= ?BN:g2_infinity() andalso
+        Neg1 =:= ?BN:g1_neg(P) andalso
+        Neg2 =:= ?BN:g2_neg(Q) andalso
+        ?BN:g1_is_in_subgroup(MulP) andalso
+        ?BN:g2_is_in_subgroup(MulQ)
+    end
+  ).
+
 %%%-------------------------------------------------------------------
 %%% Pairing Properties
 %%%-------------------------------------------------------------------

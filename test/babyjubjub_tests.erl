@@ -79,7 +79,13 @@ decompress_invalid_test() ->
   ?assertEqual({error, bad_length}, ecu_babyjubjub:decompress(<<0:248>>)),
   Q = ecu_babyjubjub:q(),
   TooBig = <<(Q + 5):256/little>>,
-  ?assertEqual({error, y_outside_field}, ecu_babyjubjub:decompress(TooBig)).
+  ?assertEqual({error, y_outside_field}, ecu_babyjubjub:decompress(TooBig)),
+  %% Non-canonical sign bit for X = 0 points (Y = 1 and Y = Q - 1)
+  NonCanonicalId = <<1:248/little, 16#80:8>>,
+  ?assertEqual({error, non_canonical}, ecu_babyjubjub:decompress(NonCanonicalId)),
+  <<Y0_neg:248/little, YLast_neg:8>> = <<(Q - 1):256/little>>,
+  NonCanonicalNegId = <<Y0_neg:248/little, (YLast_neg bor 16#80):8>>,
+  ?assertEqual({error, non_canonical}, ecu_babyjubjub:decompress(NonCanonicalNegId)).
 
 blake512_test() ->
   Msg =
@@ -160,3 +166,112 @@ nif_differential_test() ->
     false ->
       ok
   end.
+
+montgomery_conversion_and_ladder_test() ->
+  ?assertEqual(168698, ecu_babyjubjub:montgomery_a()),
+  ?assertEqual(1, ecu_babyjubjub:montgomery_b()),
+  ?assertEqual(42174, ecu_babyjubjub:montgomery_a24()),
+
+  %% Identity maps to infinity and back
+  Id = ecu_babyjubjub:identity(),
+  ?assertEqual(infinity, ecu_babyjubjub:edwards_to_montgomery(Id)),
+  ?assertEqual(Id, ecu_babyjubjub:montgomery_to_edwards(infinity)),
+  ?assert(ecu_babyjubjub:is_on_montgomery(infinity)),
+
+  %% Point (0, q-1) maps to (0, 0) and back
+  Q = ecu_babyjubjub:q(),
+  P_0_minus1 = {0, Q - 1},
+  ?assert(ecu_babyjubjub:is_on_curve(P_0_minus1)),
+  ?assertEqual({0, 0}, ecu_babyjubjub:edwards_to_montgomery(P_0_minus1)),
+  ?assertEqual(P_0_minus1, ecu_babyjubjub:montgomery_to_edwards({0, 0})),
+  ?assert(ecu_babyjubjub:is_on_montgomery({0, 0})),
+
+  %% Generator and Base8 round-trip
+  Gen = ecu_babyjubjub:generator(),
+  MGen = ecu_babyjubjub:edwards_to_montgomery(Gen),
+  ?assert(ecu_babyjubjub:is_on_montgomery(MGen)),
+  ?assertEqual(Gen, ecu_babyjubjub:montgomery_to_edwards(MGen)),
+
+  Base8 = ecu_babyjubjub:base8(),
+  MBase8 = ecu_babyjubjub:edwards_to_montgomery(Base8),
+  ?assert(ecu_babyjubjub:is_on_montgomery(MBase8)),
+  ?assertEqual(Base8, ecu_babyjubjub:montgomery_to_edwards(MBase8)),
+
+  %% Montgomery ladder consistency with Edwards scalar multiplication
+  {U_Base8, _} = MBase8,
+  lists:foreach(
+    fun(K) ->
+      EdK = ecu_babyjubjub:mul(Base8, K),
+      case ecu_babyjubjub:edwards_to_montgomery(EdK) of
+        infinity ->
+          ?assertEqual(0, ecu_babyjubjub:montgomery_ladder(K, U_Base8));
+        {UK, _VK} ->
+          ?assertEqual(UK, ecu_babyjubjub:montgomery_ladder(K, U_Base8))
+      end
+    end,
+    [1, 2, 3, 5, 7, 16, 100, 123456789]
+  ),
+
+  %% Binary ladder encoding
+  K_bin = <<123456789:256/little>>,
+  U_bin = <<U_Base8:256/little>>,
+  ResBin =
+    case ecu_babyjubjub:montgomery_ladder(K_bin, U_bin) of
+      B when is_binary(B) -> B
+    end,
+  ?assertEqual(32, byte_size(ResBin)),
+  <<ResInt:256/little>> = ResBin,
+  ?assertEqual(ecu_babyjubjub:montgomery_ladder(123456789, U_Base8), ResInt),
+
+  %% Reference NIF differential
+  case ecu_babyjubjub_nif:is_available() of
+    true ->
+      ?assertEqual({ok, ResBin}, ecu_babyjubjub_nif:montgomery_ladder(K_bin, U_bin));
+    false ->
+      ok
+  end.
+
+adversarial_security_test() ->
+  Q = ecu_babyjubjub:q(),
+  Suborder = ecu_babyjubjub:suborder(),
+  Id = ecu_babyjubjub:identity(),
+
+  %% F-01: Order-2 point (0, Q - 1) is on curve but NOT in prime subgroup
+  Order2Pt = {0, Q - 1},
+  ?assert(ecu_babyjubjub:is_on_curve(Order2Pt)),
+  ?assertNot(ecu_babyjubjub:is_in_subgroup(Order2Pt)),
+
+  %% F-07: to_proj/1 must reject non-integer / invalid inputs
+  ?assertError(badarg, ecu_babyjubjub:to_proj({bad, point})),
+  ?assertError(badarg, ecu_babyjubjub:to_proj({1, 2, "not_int"})),
+
+  %% F-02: EdDSA validation against forged, identity, and torsion inputs
+  Priv = <<42:256/little>>,
+  Msg = <<"adversarial eddsa test">>,
+  PK = ecu_babyjubjub:derive_public_key(Priv),
+  Sig = ecu_babyjubjub:sign(Priv, Msg),
+  ?assert(ecu_babyjubjub:verify(PK, Sig, Msg)),
+
+  %% Rejection of identity and order-2 public keys
+  ?assertNot(ecu_babyjubjub:verify(Id, Sig, Msg)),
+  ?assertNot(ecu_babyjubjub:verify(Order2Pt, Sig, Msg)),
+  ?assertNot(ecu_babyjubjub:verify(ecu_babyjubjub:compress(Id), Sig, Msg)),
+  ?assertNot(ecu_babyjubjub:verify(ecu_babyjubjub:compress(Order2Pt), Sig, Msg)),
+
+  %% Rejection of forged signature with R8 = identity, S = 0
+  IdComp = ecu_babyjubjub:compress(Id),
+  ForgedSig = <<IdComp:32/binary, 0:256/little>>,
+  ?assertNot(ecu_babyjubjub:verify(PK, ForgedSig, Msg)),
+
+  %% Rejection of non-canonical S >= SUBORDER
+  <<RComp:32/binary, _S:256/little>> = Sig,
+  BadSSig = <<RComp:32/binary, (Suborder + 5):256/little>>,
+  ?assertNot(ecu_babyjubjub:verify(PK, BadSSig, Msg)),
+
+  %% F-03: Montgomery ladder on 255-bit scalar
+  {U_Base8, _} = ecu_babyjubjub:edwards_to_montgomery(ecu_babyjubjub:base8()),
+  LargeK = Q - 2,
+  EdLargeK = ecu_babyjubjub:mul(ecu_babyjubjub:base8(), LargeK),
+  {ExpectedLargeU, _} = ecu_babyjubjub:edwards_to_montgomery(EdLargeK),
+  LadderLargeU = ecu_babyjubjub:montgomery_ladder(LargeK, U_Base8),
+  ?assertEqual(ExpectedLargeU, LadderLargeU).

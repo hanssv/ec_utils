@@ -40,8 +40,8 @@
 
 -type curve() :: bn254 | bls12_381.
 
--type plonk_vk_input() :: #plonk_vk{} | map() | binary().
--type plonk_proof_input() :: #plonk_proof{} | map() | binary().
+-type plonk_vk_input() :: #plonk_vk{} | map() | binary() | tuple().
+-type plonk_proof_input() :: #plonk_proof{} | map() | binary() | tuple().
 -type plonk_public_input() :: [integer() | binary()] | binary().
 
 -export_type([
@@ -100,10 +100,7 @@ parse_vk(Bin, Curve) when is_binary(Bin) ->
     _:_ -> error
   end;
 parse_vk(#plonk_vk{curve = Curve} = VK, Curve) ->
-  case validate_vk_record(VK, Curve) of
-    true -> {ok, VK};
-    false -> error
-  end;
+  normalize_vk_record(VK, Curve);
 parse_vk(#plonk_vk{}, _Curve) ->
   error;
 parse_vk(Map, Curve) when is_map(Map) ->
@@ -126,10 +123,7 @@ parse_proof(Bin, Curve) when is_binary(Bin) ->
     _:_ -> error
   end;
 parse_proof(#plonk_proof{} = Proof, Curve) ->
-  case validate_proof_record(Proof, Curve) of
-    true -> {ok, Proof};
-    false -> error
-  end;
+  normalize_proof_record(Proof, Curve);
 parse_proof(Map, Curve) when is_map(Map) ->
   parse_proof_map(Map, Curve);
 parse_proof(_, _) ->
@@ -265,100 +259,97 @@ do_verify(Curve, VK, PublicInputs, Proof) ->
       Xin = lists:foldl(fun(_, Acc) -> (Acc * Acc) rem R end, Xi, lists:seq(1, Power)),
       Zh = (Xin - 1 + R) rem R,
 
-      CalcL = fun(Idx) ->
-        Wi = lists:foldl(fun(_, Acc) -> (Acc * W_omega) rem R end, 1, lists:seq(1, Idx - 1)),
-        Num = (Wi * Zh) rem R,
-        Den = (DomainSize * ((Xi - Wi + R) rem R)) rem R,
-        (Num * mod_inv(Den, R)) rem R
-      end,
-
       NumL = max(1, NPub),
-      L = [CalcL(I) || I <- lists:seq(1, NumL)],
-      L1 = lists:nth(1, L),
+      case compute_lagrange_evals(NumL, Xi, Zh, DomainSize, W_omega, R) of
+        error ->
+          false;
+        {ok, L} ->
+          L1 = lists:nth(1, L),
 
-      %% Public input polynomial PI(xi) = - sum(w_i * L_{i+1}(xi))
-      PI = lists:foldl(
-        fun({PubVal, LVal}, Acc) ->
-          (Acc - ((PubVal * LVal) rem R) + R) rem R
-        end,
-        0,
-        lists:zip(PublicInputs, lists:sublist(L, length(PublicInputs)))
-      ),
+          %% Public input polynomial PI(xi) = - sum(w_i * L_{i+1}(xi))
+          PI = lists:foldl(
+            fun({PubVal, LVal}, Acc) ->
+              (Acc - ((PubVal * LVal) rem R) + R) rem R
+            end,
+            0,
+            lists:zip(PublicInputs, lists:sublist(L, length(PublicInputs)))
+          ),
 
-      %% Linearization scalar r0
-      Alpha2 = (Alpha * Alpha) rem R,
-      E1 = PI,
-      E2 = (L1 * Alpha2) rem R,
-      E3a = (EvalA + Beta * EvalS1 + Gamma) rem R,
-      E3b = (EvalB + Beta * EvalS2 + Gamma) rem R,
-      E3c = (EvalC + Gamma) rem R,
-      E3 = ((((((E3a * E3b) rem R) * E3c) rem R) * EvalZw) rem R * Alpha) rem R,
-      R0 = ((E1 - E2 - E3) rem R + R) rem R,
+          %% Linearization scalar r0
+          Alpha2 = (Alpha * Alpha) rem R,
+          E1 = PI,
+          E2 = (L1 * Alpha2) rem R,
+          E3a = (EvalA + Beta * EvalS1 + Gamma) rem R,
+          E3b = (EvalB + Beta * EvalS2 + Gamma) rem R,
+          E3c = (EvalC + Gamma) rem R,
+          E3 = ((((((E3a * E3b) rem R) * E3c) rem R) * EvalZw) rem R * Alpha) rem R,
+          R0 = ((E1 - E2 - E3) rem R + R) rem R,
 
-      %% Linearized commitment D = D1 + D2 - D3 - D4
-      D1_m = g1_scalar_mul((EvalA * EvalB) rem R, Qm, Curve),
-      D1_l = g1_scalar_mul(EvalA, Ql, Curve),
-      D1_r = g1_scalar_mul(EvalB, Qr, Curve),
-      D1_o = g1_scalar_mul(EvalC, Qo, Curve),
-      D1 = lists:foldl(
-        fun(P, Acc) -> g1_add(Acc, P, Curve) end,
-        Qc,
-        [D1_m, D1_l, D1_r, D1_o]
-      ),
+          %% Linearized commitment D = D1 + D2 - D3 - D4
+          D1_m = g1_scalar_mul((EvalA * EvalB) rem R, Qm, Curve),
+          D1_l = g1_scalar_mul(EvalA, Ql, Curve),
+          D1_r = g1_scalar_mul(EvalB, Qr, Curve),
+          D1_o = g1_scalar_mul(EvalC, Qo, Curve),
+          D1 = lists:foldl(
+            fun(P, Acc) -> g1_add(Acc, P, Curve) end,
+            Qc,
+            [D1_m, D1_l, D1_r, D1_o]
+          ),
 
-      BetaXi = (Beta * Xi) rem R,
-      D2a1 = (EvalA + BetaXi + Gamma) rem R,
-      D2a2 = (EvalB + BetaXi * K1 + Gamma) rem R,
-      D2a3 = (EvalC + BetaXi * K2 + Gamma) rem R,
-      D2a = (((((D2a1 * D2a2) rem R) * D2a3) rem R) * Alpha) rem R,
-      D2b = (L1 * Alpha2) rem R,
-      Sz = (D2a + D2b + U) rem R,
-      D2 = g1_scalar_mul(Sz, Z, Curve),
+          BetaXi = (Beta * Xi) rem R,
+          D2a1 = (EvalA + BetaXi + Gamma) rem R,
+          D2a2 = (EvalB + BetaXi * K1 + Gamma) rem R,
+          D2a3 = (EvalC + BetaXi * K2 + Gamma) rem R,
+          D2a = (((((D2a1 * D2a2) rem R) * D2a3) rem R) * Alpha) rem R,
+          D2b = (L1 * Alpha2) rem R,
+          Sz = (D2a + D2b + U) rem R,
+          D2 = g1_scalar_mul(Sz, Z, Curve),
 
-      D3a = (EvalA + Beta * EvalS1 + Gamma) rem R,
-      D3b = (EvalB + Beta * EvalS2 + Gamma) rem R,
-      D3c = (((Alpha * Beta) rem R) * EvalZw) rem R,
-      Ss3 = (((D3a * D3b) rem R) * D3c) rem R,
-      D3 = g1_scalar_mul(Ss3, S3, Curve),
+          D3a = (EvalA + Beta * EvalS1 + Gamma) rem R,
+          D3b = (EvalB + Beta * EvalS2 + Gamma) rem R,
+          D3c = (((Alpha * Beta) rem R) * EvalZw) rem R,
+          Ss3 = (((D3a * D3b) rem R) * D3c) rem R,
+          D3 = g1_scalar_mul(Ss3, S3, Curve),
 
-      D4mid = g1_scalar_mul(Xin, T2, Curve),
-      D4high = g1_scalar_mul((Xin * Xin) rem R, T3, Curve),
-      D4sum = g1_add(T1, g1_add(D4mid, D4high, Curve), Curve),
-      D4 = g1_scalar_mul(Zh, D4sum, Curve),
+          D4mid = g1_scalar_mul(Xin, T2, Curve),
+          D4high = g1_scalar_mul((Xin * Xin) rem R, T3, Curve),
+          D4sum = g1_add(T1, g1_add(D4mid, D4high, Curve), Curve),
+          D4 = g1_scalar_mul(Zh, D4sum, Curve),
 
-      D = g1_sub(g1_sub(g1_add(D1, D2, Curve), D3, Curve), D4, Curve),
+          D = g1_sub(g1_sub(g1_add(D1, D2, Curve), D3, Curve), D4, Curve),
 
-      %% Commitment F
-      F = lists:foldl(
-        fun({Coeff, P}, Acc) -> g1_add(Acc, g1_scalar_mul(Coeff, P, Curve), Curve) end,
-        D,
-        [{V1, A}, {V2, B}, {V3, C}, {V4, S1}, {V5, S2}]
-      ),
+          %% Commitment F
+          F = lists:foldl(
+            fun({Coeff, P}, Acc) -> g1_add(Acc, g1_scalar_mul(Coeff, P, Curve), Curve) end,
+            D,
+            [{V1, A}, {V2, B}, {V3, C}, {V4, S1}, {V5, S2}]
+          ),
 
-      %% Commitment E
-      ESum =
-        (R - R0) +
-          V1 * EvalA +
-          V2 * EvalB +
-          V3 * EvalC +
-          V4 * EvalS1 +
-          V5 * EvalS2 +
-          U * EvalZw,
-      EScalar = ((ESum rem R) + R) rem R,
-      G1Gen = curve_g1_generator(Curve),
-      E = g1_scalar_mul(EScalar, G1Gen, Curve),
+          %% Commitment E
+          ESum =
+            (R - R0) +
+              V1 * EvalA +
+              V2 * EvalB +
+              V3 * EvalC +
+              V4 * EvalS1 +
+              V5 * EvalS2 +
+              U * EvalZw,
+          EScalar = ((ESum rem R) + R) rem R,
+          G1Gen = curve_g1_generator(Curve),
+          E = g1_scalar_mul(EScalar, G1Gen, Curve),
 
-      %% Batch opening proof commitments A1 and B1
-      A1 = g1_add(Wxi, g1_scalar_mul(U, Wxiw, Curve), Curve),
-      B1_1 = g1_scalar_mul(Xi, Wxi, Curve),
-      SParam = ((((U * Xi) rem R) * W_omega) rem R),
-      B1_2 = g1_scalar_mul(SParam, Wxiw, Curve),
-      B1 = g1_sub(g1_add(g1_add(B1_1, B1_2, Curve), F, Curve), E, Curve),
+          %% Batch opening proof commitments A1 and B1
+          A1 = g1_add(Wxi, g1_scalar_mul(U, Wxiw, Curve), Curve),
+          B1_1 = g1_scalar_mul(Xi, Wxi, Curve),
+          SParam = ((((U * Xi) rem R) * W_omega) rem R),
+          B1_2 = g1_scalar_mul(SParam, Wxiw, Curve),
+          B1 = g1_sub(g1_add(g1_add(B1_1, B1_2, Curve), F, Curve), E, Curve),
 
-      %% Single 2-pairing check: e(-A1, X_2) * e(B1, G2_generator) == 1
-      NegA1 = g1_neg(A1, Curve),
-      G2Gen = curve_g2_generator(Curve),
-      pairing_check([{NegA1, X_2}, {B1, G2Gen}], Curve)
+          %% Single 2-pairing check: e(-A1, X_2) * e(B1, G2_generator) == 1
+          NegA1 = g1_neg(A1, Curve),
+          G2Gen = curve_g2_generator(Curve),
+          pairing_check([{NegA1, X_2}, {B1, G2Gen}], Curve)
+      end
   end.
 
 %%%===================================================================
@@ -451,39 +442,52 @@ detect_curve(_) ->
 -spec parse_vk_map(map(), curve()) -> {ok, #plonk_vk{}} | error.
 parse_vk_map(Map, Curve) ->
   try
+    R = curve_r(Curve),
     Power = get_int_field([<<"power">>, power], Map),
     NPub = get_int_field([<<"nPublic">>, <<"n_public">>, nPublic, n_public], Map),
     K1 = get_int_field([<<"k1">>, k1], Map, 2),
     K2 = get_int_field([<<"k2">>, k2], Map, 3),
     W = get_int_field([<<"w">>, w], Map),
 
-    {ok, Qm} = normalize_g1(get_field([<<"Qm">>, qm], Map), Curve),
-    {ok, Ql} = normalize_g1(get_field([<<"Ql">>, ql], Map), Curve),
-    {ok, Qr} = normalize_g1(get_field([<<"Qr">>, qr], Map), Curve),
-    {ok, Qo} = normalize_g1(get_field([<<"Qo">>, qo], Map), Curve),
-    {ok, Qc} = normalize_g1(get_field([<<"Qc">>, qc], Map), Curve),
-    {ok, S1} = normalize_g1(get_field([<<"S1">>, s1], Map), Curve),
-    {ok, S2} = normalize_g1(get_field([<<"S2">>, s2], Map), Curve),
-    {ok, S3} = normalize_g1(get_field([<<"S3">>, s3], Map), Curve),
-    {ok, X_2} = normalize_g2(get_field([<<"X_2">>, <<"x_2">>, x_2, x2], Map), Curve),
+    case
+      Power >= 1 andalso Power =< 28 andalso
+        NPub >= 0 andalso
+        K1 > 0 andalso K1 < R andalso
+        K2 > 0 andalso K2 < R andalso
+        W > 0 andalso W < R andalso
+        pow_mod(W, 1 bsl Power, R) =:= 1
+    of
+      false ->
+        error;
+      true ->
+        {ok, Qm} = normalize_g1(get_field([<<"Qm">>, qm], Map), Curve),
+        {ok, Ql} = normalize_g1(get_field([<<"Ql">>, ql], Map), Curve),
+        {ok, Qr} = normalize_g1(get_field([<<"Qr">>, qr], Map), Curve),
+        {ok, Qo} = normalize_g1(get_field([<<"Qo">>, qo], Map), Curve),
+        {ok, Qc} = normalize_g1(get_field([<<"Qc">>, qc], Map), Curve),
+        {ok, S1} = normalize_g1(get_field([<<"S1">>, s1], Map), Curve),
+        {ok, S2} = normalize_g1(get_field([<<"S2">>, s2], Map), Curve),
+        {ok, S3} = normalize_g1(get_field([<<"S3">>, s3], Map), Curve),
+        {ok, X_2} = normalize_g2(get_field([<<"X_2">>, <<"x_2">>, x_2, x2], Map), Curve),
 
-    {ok, #plonk_vk{
-      curve = Curve,
-      power = Power,
-      n_public = NPub,
-      k1 = K1,
-      k2 = K2,
-      w = W,
-      qm = Qm,
-      ql = Ql,
-      qr = Qr,
-      qo = Qo,
-      qc = Qc,
-      s1 = S1,
-      s2 = S2,
-      s3 = S3,
-      x_2 = X_2
-    }}
+        {ok, #plonk_vk{
+          curve = Curve,
+          power = Power,
+          n_public = NPub,
+          k1 = K1,
+          k2 = K2,
+          w = W,
+          qm = Qm,
+          ql = Ql,
+          qr = Qr,
+          qo = Qo,
+          qc = Qc,
+          s1 = S1,
+          s2 = S2,
+          s3 = S3,
+          x_2 = X_2
+        }}
+    end
   catch
     _:_ -> error
   end.
@@ -530,53 +534,120 @@ parse_proof_map(Map, Curve) ->
     _:_ -> error
   end.
 
--spec validate_vk_record(#plonk_vk{}, curve()) -> boolean().
-validate_vk_record(#plonk_vk{} = VK, Curve) ->
-  case
-    {
-      normalize_g1(VK#plonk_vk.qm, Curve),
-      normalize_g1(VK#plonk_vk.ql, Curve),
-      normalize_g1(VK#plonk_vk.qr, Curve),
-      normalize_g1(VK#plonk_vk.qo, Curve),
-      normalize_g1(VK#plonk_vk.qc, Curve),
-      normalize_g1(VK#plonk_vk.s1, Curve),
-      normalize_g1(VK#plonk_vk.s2, Curve),
-      normalize_g1(VK#plonk_vk.s3, Curve),
-      normalize_g2(VK#plonk_vk.x_2, Curve)
-    }
-  of
-    {{ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}} ->
-      true;
-    _ ->
-      false
-  end.
-
--spec validate_proof_record(#plonk_proof{}, curve()) -> boolean().
-validate_proof_record(#plonk_proof{} = Proof, Curve) ->
+-spec normalize_vk_record(#plonk_vk{}, curve()) -> {ok, #plonk_vk{}} | error.
+normalize_vk_record(
+  #plonk_vk{power = Power, n_public = NPub, k1 = K1, k2 = K2, w = W} = VK,
+  Curve
+) ->
   R = curve_r(Curve),
   case
-    {
-      normalize_g1(Proof#plonk_proof.a, Curve),
-      normalize_g1(Proof#plonk_proof.b, Curve),
-      normalize_g1(Proof#plonk_proof.c, Curve),
-      normalize_g1(Proof#plonk_proof.z, Curve),
-      normalize_g1(Proof#plonk_proof.t1, Curve),
-      normalize_g1(Proof#plonk_proof.t2, Curve),
-      normalize_g1(Proof#plonk_proof.t3, Curve),
-      normalize_g1(Proof#plonk_proof.wxi, Curve),
-      normalize_g1(Proof#plonk_proof.wxiw, Curve)
-    }
+    is_integer(Power) andalso Power >= 1 andalso Power =< 28 andalso
+      is_integer(NPub) andalso NPub >= 0 andalso
+      is_integer(K1) andalso K1 > 0 andalso K1 < R andalso
+      is_integer(K2) andalso K2 > 0 andalso K2 < R andalso
+      is_integer(W) andalso W > 0 andalso W < R andalso
+      pow_mod(W, 1 bsl Power, R) =:= 1
   of
-    {{ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}} ->
-      Proof#plonk_proof.eval_a < R andalso
-        Proof#plonk_proof.eval_b < R andalso
-        Proof#plonk_proof.eval_c < R andalso
-        Proof#plonk_proof.eval_s1 < R andalso
-        Proof#plonk_proof.eval_s2 < R andalso
-        Proof#plonk_proof.eval_zw < R;
-    _ ->
-      false
+    false ->
+      error;
+    true ->
+      case
+        {
+          normalize_g1(VK#plonk_vk.qm, Curve),
+          normalize_g1(VK#plonk_vk.ql, Curve),
+          normalize_g1(VK#plonk_vk.qr, Curve),
+          normalize_g1(VK#plonk_vk.qo, Curve),
+          normalize_g1(VK#plonk_vk.qc, Curve),
+          normalize_g1(VK#plonk_vk.s1, Curve),
+          normalize_g1(VK#plonk_vk.s2, Curve),
+          normalize_g1(VK#plonk_vk.s3, Curve),
+          normalize_g2(VK#plonk_vk.x_2, Curve)
+        }
+      of
+        {
+          {ok, Qm},
+          {ok, Ql},
+          {ok, Qr},
+          {ok, Qo},
+          {ok, Qc},
+          {ok, S1},
+          {ok, S2},
+          {ok, S3},
+          {ok, X2}
+        } ->
+          {ok, VK#plonk_vk{
+            qm = Qm,
+            ql = Ql,
+            qr = Qr,
+            qo = Qo,
+            qc = Qc,
+            s1 = S1,
+            s2 = S2,
+            s3 = S3,
+            x_2 = X2
+          }};
+        _ ->
+          error
+      end
   end.
+
+-spec normalize_proof_record(#plonk_proof{}, curve()) -> {ok, #plonk_proof{}} | error.
+normalize_proof_record(#plonk_proof{} = Proof, Curve) ->
+  R = curve_r(Curve),
+  ValidEvals =
+    is_valid_fr(Proof#plonk_proof.eval_a, R) andalso
+      is_valid_fr(Proof#plonk_proof.eval_b, R) andalso
+      is_valid_fr(Proof#plonk_proof.eval_c, R) andalso
+      is_valid_fr(Proof#plonk_proof.eval_s1, R) andalso
+      is_valid_fr(Proof#plonk_proof.eval_s2, R) andalso
+      is_valid_fr(Proof#plonk_proof.eval_zw, R),
+  case ValidEvals of
+    false ->
+      error;
+    true ->
+      case
+        {
+          normalize_g1(Proof#plonk_proof.a, Curve),
+          normalize_g1(Proof#plonk_proof.b, Curve),
+          normalize_g1(Proof#plonk_proof.c, Curve),
+          normalize_g1(Proof#plonk_proof.z, Curve),
+          normalize_g1(Proof#plonk_proof.t1, Curve),
+          normalize_g1(Proof#plonk_proof.t2, Curve),
+          normalize_g1(Proof#plonk_proof.t3, Curve),
+          normalize_g1(Proof#plonk_proof.wxi, Curve),
+          normalize_g1(Proof#plonk_proof.wxiw, Curve)
+        }
+      of
+        {
+          {ok, A},
+          {ok, B},
+          {ok, C},
+          {ok, Z},
+          {ok, T1},
+          {ok, T2},
+          {ok, T3},
+          {ok, Wxi},
+          {ok, Wxiw}
+        } ->
+          {ok, Proof#plonk_proof{
+            a = A,
+            b = B,
+            c = C,
+            z = Z,
+            t1 = T1,
+            t2 = T2,
+            t3 = T3,
+            wxi = Wxi,
+            wxiw = Wxiw
+          }};
+        _ ->
+          error
+      end
+  end.
+
+-spec is_valid_fr(term(), non_neg_integer()) -> boolean().
+is_valid_fr(V, R) ->
+  is_integer(V) andalso V >= 0 andalso V < R.
 
 -spec normalize_g1(term(), curve()) -> {ok, plonk_g1()} | error.
 normalize_g1(infinity, _Curve) ->
@@ -679,11 +750,36 @@ normalize_g2(_, _) ->
 parse_scalars_loop([], _R, Acc) ->
   {ok, lists:reverse(Acc)};
 parse_scalars_loop([H | T], R, Acc) ->
-  try to_int(H) of
-    Val when is_integer(Val), Val >= 0, Val < R ->
+  case parse_one_scalar(H, R) of
+    {ok, Val} ->
       parse_scalars_loop(T, R, [Val | Acc]);
-    _ ->
+    error ->
       error
+  end.
+
+-spec parse_one_scalar(term(), non_neg_integer()) -> {ok, non_neg_integer()} | error.
+parse_one_scalar(Val, R) when is_integer(Val), Val >= 0, Val < R ->
+  {ok, Val};
+parse_one_scalar(Bin, R) when is_binary(Bin), byte_size(Bin) =:= 32 ->
+  case is_ascii_digits(Bin) of
+    true ->
+      try binary_to_integer(Bin, 10) of
+        Val when Val >= 0, Val < R -> {ok, Val};
+        _ -> error
+      catch
+        _:_ -> error
+      end;
+    false ->
+      Val = binary:decode_unsigned(Bin),
+      case Val < R of
+        true -> {ok, Val};
+        false -> error
+      end
+  end;
+parse_one_scalar(Other, R) ->
+  try to_int(Other) of
+    Val when is_integer(Val), Val >= 0, Val < R -> {ok, Val};
+    _ -> error
   catch
     _:_ -> error
   end.
@@ -718,25 +814,76 @@ get_fr_field(Keys, Map, R) ->
   end.
 
 -spec to_int(term()) -> non_neg_integer().
-to_int(Val) when is_integer(Val) ->
+to_int(Val) when is_integer(Val), Val >= 0 ->
   Val;
-to_int(Bin) when is_binary(Bin) ->
-  case Bin of
-    <<"0x", Hex/binary>> ->
-      binary:decode_unsigned(binary:decode_hex(Hex));
-    _ ->
-      try
-        binary_to_integer(Bin)
-      catch
-        _:_ -> binary:decode_unsigned(Bin)
-      end
+to_int(<<"0x", Hex/binary>>) when byte_size(Hex) > 0 ->
+  binary_to_integer(Hex, 16);
+to_int(<<"0X", Hex/binary>>) when byte_size(Hex) > 0 ->
+  binary_to_integer(Hex, 16);
+to_int(Bin) when is_binary(Bin), byte_size(Bin) > 0 ->
+  case is_ascii_digits(Bin) of
+    true -> binary_to_integer(Bin, 10);
+    false -> error(badarg)
   end;
 to_int([H | _] = Str) when is_integer(H) ->
   Bytes = [X || X <- Str, is_integer(X), X >= 0, X =< 255],
-  try
-    list_to_integer(Bytes)
-  catch
-    _:_ -> binary:decode_unsigned(list_to_binary(Bytes))
+  case lists:all(fun(C) -> C >= $0 andalso C =< $9 end, Bytes) of
+    true -> list_to_integer(Bytes);
+    false -> error(badarg)
   end;
 to_int(_) ->
   error(badarg).
+
+-spec compute_lagrange_evals(
+  pos_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  pos_integer(),
+  non_neg_integer(),
+  pos_integer()
+) -> {ok, [non_neg_integer()]} | error.
+compute_lagrange_evals(NumL, Xi, Zh, DomainSize, W_omega, R) ->
+  compute_lagrange_loop(1, NumL, 1, Xi, Zh, DomainSize, W_omega, R, []).
+
+-spec compute_lagrange_loop(
+  pos_integer(),
+  pos_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  non_neg_integer(),
+  pos_integer(),
+  non_neg_integer(),
+  pos_integer(),
+  [non_neg_integer()]
+) -> {ok, [non_neg_integer()]} | error.
+compute_lagrange_loop(I, NumL, _Wi, _Xi, _Zh, _DomainSize, _W_omega, _R, Acc) when I > NumL ->
+  {ok, lists:reverse(Acc)};
+compute_lagrange_loop(I, NumL, Wi, Xi, Zh, DomainSize, W_omega, R, Acc) ->
+  Den = (DomainSize * ((Xi - Wi + R) rem R)) rem R,
+  case Den of
+    0 ->
+      error;
+    _ ->
+      Num = (Wi * Zh) rem R,
+      Li = (Num * mod_inv(Den, R)) rem R,
+      NextWi = (Wi * W_omega) rem R,
+      compute_lagrange_loop(I + 1, NumL, NextWi, Xi, Zh, DomainSize, W_omega, R, [Li | Acc])
+  end.
+
+-spec pow_mod(non_neg_integer(), non_neg_integer(), pos_integer()) -> non_neg_integer().
+pow_mod(Base, Exp, Mod) ->
+  case ecu_compat:mod_pow(Base rem Mod, Exp, Mod) of
+    Bin when is_binary(Bin) -> binary:decode_unsigned(Bin)
+  end.
+
+-spec is_ascii_digits(binary()) -> boolean().
+is_ascii_digits(<<>>) -> false;
+is_ascii_digits(Bin) -> is_ascii_digits_loop(Bin).
+
+-spec is_ascii_digits_loop(binary()) -> boolean().
+is_ascii_digits_loop(<<>>) ->
+  true;
+is_ascii_digits_loop(<<B, Rest/binary>>) when B >= $0, B =< $9 ->
+  is_ascii_digits_loop(Rest);
+is_ascii_digits_loop(_) ->
+  false.
