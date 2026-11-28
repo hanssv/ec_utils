@@ -334,9 +334,16 @@ prop_kzg_adversarial_rejections() ->
           _:_ -> false
         end,
 
+      %% 6. Rejection of torsion point in commitment / proof / batch
+      TorsionPt = {0, 2},
+      TorsionCRejected = not ecu_kzg:verify(SRS, TorsionPt, Z, Y, Proof),
+      TorsionProofRejected = not ecu_kzg:verify(SRS, C, Z, Y, TorsionPt),
+      TorsionBatchRejected = not ecu_kzg:verify_batch(SRS, [{TorsionPt, Z, Y, Proof}]),
+
       EmptyBatchRejected andalso OutOfRangeZ1 andalso OutOfRangeZ2 andalso
         OutOfRangeY1 andalso OutOfRangeY2 andalso BadBatchZ andalso BadBatchY andalso
         InvalidTauZero andalso InvalidTauOne andalso InvalidTauR andalso InvalidTauNeg andalso
-        InvalidDegree
+        InvalidDegree andalso TorsionCRejected andalso TorsionProofRejected andalso
+        TorsionBatchRejected
     end
   ).

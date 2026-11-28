@@ -103,6 +103,51 @@ prop_verify_tampered_pubkey() ->
     end
   ).
 
+prop_schnorr_adversarial_rejections() ->
+  ?FORALL(
+    {Priv, Msg, Aux},
+    {gen_privkey(), binary(), binary(32)},
+    begin
+      #{public := Pub, secret := Sec} = ecu_schnorr:sign_keypair_from_secret(Priv),
+      Sig = ecu_schnorr:sign(Msg, Sec, Aux),
+      <<Rx:256, S:256>> = Sig,
+
+      %% 1. Non-canonical Rx >= P
+      BadRxSig = <<(?P + 1):256, S:256>>,
+      V1 = (not ecu_schnorr:verify(BadRxSig, Msg, Pub)),
+
+      %% 2. Non-canonical S >= N
+      BadSSig = <<Rx:256, (?N + 1):256>>,
+      V2 = (not ecu_schnorr:verify(BadSSig, Msg, Pub)),
+
+      %% 3. Non-canonical Px >= P
+      BadPx = <<(?P + 1):256>>,
+      V3 = (not ecu_schnorr:verify(Sig, Msg, BadPx)),
+
+      %% 4. Malformed/truncated signatures and pubkeys
+      V4 = (not ecu_schnorr:verify(<<"truncated">>, Msg, Pub)),
+      V5 = (not ecu_schnorr:verify(Sig, Msg, <<"bad_pub">>)),
+
+      %% 5. Boundary secret keys (0 and >= N) rejected by derivation and signing
+      V6 =
+        try
+          ecu_schnorr:sign_keypair_from_secret(<<0:256>>)
+        catch
+          error:badarg -> true;
+          _:_ -> false
+        end,
+      V7 =
+        try
+          ecu_schnorr:sign_keypair_from_secret(<<?N:256>>)
+        catch
+          error:badarg -> true;
+          _:_ -> false
+        end,
+
+      V1 andalso V2 andalso V3 andalso V4 andalso V5 andalso V6 andalso V7
+    end
+  ).
+
 %% Cross-validation against Rust k256 reference NIF (when available)
 prop_k256_reference_equivalence() ->
   case ecu_schnorr_nif:is_available() of

@@ -241,6 +241,9 @@ fn get_base_point(idx: usize) -> Result<Point, Atom> {
 }
 
 fn pedersen_hash_internal(data: &[u8]) -> Result<Point, Atom> {
+    if data.len() > 250 {
+        return Err(atoms::badarg());
+    }
     let mut bits = Vec::with_capacity(data.len() * 8);
     for &byte in data {
         for b in 0..8 {
@@ -320,6 +323,9 @@ fn pedersen_commit_nif<'a>(
     data_bin: Binary,
     blinding_bin: Binary,
 ) -> Result<Binary<'a>, Atom> {
+    if blinding_bin.len() > 32 || data_bin.len() > 225 {
+        return Err(atoms::badarg());
+    }
     let hash_pt = pedersen_hash_internal(data_bin.as_slice())?;
     let blinding = BigInt::from_bytes_le(Sign::Plus, blinding_bin.as_slice());
     let curve_order = BigInt::parse_bytes(

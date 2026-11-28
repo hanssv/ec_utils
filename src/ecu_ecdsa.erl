@@ -49,7 +49,7 @@ verify(secp256k1, MsgHash = <<_:32/bytes>>, PubKey = <<_:33/bytes>>, Sig = <<_:6
   try ecu_secp256k1:decompress(PubKey) of
     Affine -> verify(secp256k1, MsgHash, Affine, Sig)
   catch
-    error:badarg -> false
+    error:_ -> false
   end;
 verify(secp256k1, <<_:32/bytes>>, {_, _}, <<R:256, S:256>>) when
   R < 1; R >= ?N; S < 1; S >= ?N

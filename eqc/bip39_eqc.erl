@@ -104,3 +104,34 @@ prop_mnemonic_to_master_key() ->
       end
     end
   ).
+
+prop_invalid_checksum_rejected() ->
+  ?FORALL(
+    Entropy,
+    gen_entropy(),
+    begin
+      {ok, Mnemonic} = ecu_bip39:entropy_to_mnemonic(Entropy),
+      Words = binary:split(Mnemonic, <<" ">>, [global]),
+      LastWord = lists:last(Words),
+      %% Flip bit 0 of the last word index (which is in the checksum bits)
+      Idx = ecu_bip39_words:index(LastWord),
+      NewIdx = Idx bxor 1,
+      NewWord = ecu_bip39_words:word(NewIdx),
+      CorruptedWords = lists:sublist(Words, length(Words) - 1) ++ [NewWord],
+      CorruptedMnemonic = iolist_to_binary(lists:join(<<" ">>, CorruptedWords)),
+      ecu_bip39:validate_mnemonic(CorruptedMnemonic) =:= {error, invalid_checksum}
+    end
+  ).
+
+prop_invalid_entropy_size_rejected() ->
+  ?FORALL(
+    InvalidSize,
+    elements([0, 1, 15, 17, 31, 33, 64]),
+    begin
+      InvalidEntropy = crypto:strong_rand_bytes(InvalidSize),
+      case ecu_bip39:entropy_to_mnemonic(InvalidEntropy) of
+        {error, invalid_entropy_length} -> true;
+        _ -> false
+      end
+    end
+  ).

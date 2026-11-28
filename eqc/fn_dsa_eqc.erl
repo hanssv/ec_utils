@@ -120,3 +120,27 @@ prop_context_separation() ->
       end
     )
   ).
+
+prop_fn_dsa_adversarial_rejections() ->
+  ?FORALL(
+    {Seed, Msg},
+    {gen_seed(), gen_msg()},
+    begin
+      #{public := PK, secret := SK} = ecu_fn_dsa:keypair_from_seed(fn_dsa_512, Seed),
+      {ok, Sig} = ecu_fn_dsa:sign(Msg, SK),
+
+      %% 1. Truncated public key rejected
+      V1 = not ecu_fn_dsa:verify(Msg, Sig, <<"truncated_pk">>),
+
+      %% 2. Truncated signature rejected
+      V2 = not ecu_fn_dsa:verify(Msg, <<"truncated_sig">>, PK),
+
+      %% 3. Oversized public key rejected
+      V3 = not ecu_fn_dsa:verify(Msg, Sig, <<PK/binary, 0>>),
+
+      %% 4. Oversized signature rejected
+      V4 = not ecu_fn_dsa:verify(Msg, <<Sig/binary, 0>>, PK),
+
+      V1 andalso V2 andalso V3 andalso V4
+    end
+  ).

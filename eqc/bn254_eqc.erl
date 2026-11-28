@@ -349,17 +349,21 @@ prop_differential_pairing_check() ->
     end
   ).
 
-prop_differential_groth16() ->
-  ?FORALL(
-    Inputs,
-    gen_public_inputs(),
+gen_groth16_bn254_instance() ->
+  ?LET(
+    {Inputs, AlphaVal, BetaVal, GammaVal, DeltaVal, AVal, BVal, Seed},
+    {
+      gen_public_inputs(),
+      gen_scalar(),
+      gen_scalar(),
+      gen_scalar(),
+      gen_scalar(),
+      gen_scalar(),
+      gen_scalar(),
+      choose(1, 1000000)
+    },
     begin
       R = ?BN254_R,
-      AlphaVal = 123456789123456789 rem R,
-      BetaVal = 987654321987654321 rem R,
-      GammaVal = 112233445566778899 rem R,
-      DeltaVal = 998877665544332211 rem R,
-
       G1 = ?BN:g1_generator(),
       G2 = ?BN:g2_generator(),
 
@@ -369,7 +373,7 @@ prop_differential_groth16() ->
       DeltaG2 = ?BN:g2_scalar_mul(G2, DeltaVal),
 
       NumInputs = length(Inputs),
-      ICCoeffs = [(314159265 + I * 10007) rem R || I <- lists:seq(0, NumInputs)],
+      ICCoeffs = [(314159265 + I * 10007 + Seed) rem R || I <- lists:seq(0, NumInputs)],
       IC = [?BN:g1_scalar_mul(G1, Coeff) || Coeff <- ICCoeffs],
 
       VK = #groth16_vk{
@@ -379,9 +383,6 @@ prop_differential_groth16() ->
         delta_g2 = DeltaG2,
         ic = IC
       },
-
-      AVal = 777777777 rem R,
-      BVal = 888888888 rem R,
 
       A = ?BN:g1_scalar_mul(G1, AVal),
       B = ?BN:g2_scalar_mul(G2, BVal),
@@ -405,19 +406,27 @@ prop_differential_groth16() ->
       CVal = (NumPos * DeltaInv) rem R,
       C = ?BN:g1_scalar_mul(G1, CVal),
       Proof = #groth16_proof{a = A, b = B, c = C},
+      {VK, Inputs, Proof}
+    end
+  ).
 
+prop_differential_groth16() ->
+  ?FORALL(
+    {VK, Inputs, Proof},
+    gen_groth16_bn254_instance(),
+    begin
       ErlVerify = ecu_groth16:verify(bn254, VK, Inputs, Proof),
       case ?NIF:is_loaded() of
         true ->
-          AlphaBin = ?BN:g1_to_uncompressed(AlphaG1),
-          BetaBin = ?BN:g2_to_uncompressed(BetaG2),
-          GammaBin = ?BN:g2_to_uncompressed(GammaG2),
-          DeltaBin = ?BN:g2_to_uncompressed(DeltaG2),
-          ICBins = [?BN:g1_to_uncompressed(Pt) || Pt <- IC],
+          AlphaBin = ?BN:g1_to_uncompressed(VK#groth16_vk.alpha_g1),
+          BetaBin = ?BN:g2_to_uncompressed(VK#groth16_vk.beta_g2),
+          GammaBin = ?BN:g2_to_uncompressed(VK#groth16_vk.gamma_g2),
+          DeltaBin = ?BN:g2_to_uncompressed(VK#groth16_vk.delta_g2),
+          ICBins = [?BN:g1_to_uncompressed(Pt) || Pt <- VK#groth16_vk.ic],
           InputBins = [<<X:256/big>> || X <- Inputs],
-          ABin = ?BN:g1_to_uncompressed(A),
-          BBin = ?BN:g2_to_uncompressed(B),
-          CBin = ?BN:g1_to_uncompressed(C),
+          ABin = ?BN:g1_to_uncompressed(Proof#groth16_proof.a),
+          BBin = ?BN:g2_to_uncompressed(Proof#groth16_proof.b),
+          CBin = ?BN:g1_to_uncompressed(Proof#groth16_proof.c),
           NifVerify = ?NIF:groth16_verify(
             AlphaBin, BetaBin, GammaBin, DeltaBin, ICBins, InputBins, ABin, BBin, CBin
           ),
@@ -425,5 +434,38 @@ prop_differential_groth16() ->
         false ->
           ErlVerify =:= true
       end
+    end
+  ).
+
+prop_bn254_groth16_adversarial_rejections() ->
+  ?FORALL(
+    {VK, PublicInputs, Proof},
+    gen_groth16_bn254_instance(),
+    begin
+      EmptyBatchRejected = ecu_groth16:verify_batch(bn254, VK, []) =:= false,
+      StrInputs = [integer_to_binary(X) || X <- PublicInputs],
+      StrVerified = ecu_groth16:verify(bn254, VK, StrInputs, Proof) =:= true,
+      EmptyBinRejected = ecu_groth16:verify(bn254, VK, [<<>> | PublicInputs], Proof) =:= false,
+      MalformedStrRejected =
+        ecu_groth16:verify(bn254, VK, [<<"not_a_number">> | PublicInputs], Proof) =:= false,
+      NegativeRejected = ecu_groth16:verify(bn254, VK, [-1 | PublicInputs], Proof) =:= false,
+      OutOfRangeRejected = ecu_groth16:verify(bn254, VK, [?BN254_R | PublicInputs], Proof) =:= false,
+      InfinityARejected =
+        ecu_groth16:verify(bn254, VK, PublicInputs, Proof#groth16_proof{a = infinity}) =:= false,
+      InfinityBRejected =
+        ecu_groth16:verify(bn254, VK, PublicInputs, Proof#groth16_proof{b = infinity}) =:= false,
+      InfinityVKRejected =
+        ecu_groth16:verify(bn254, VK#groth16_vk{alpha_g1 = infinity}, PublicInputs, Proof) =:= false,
+      conjunction([
+        {empty_batch_rejected, EmptyBatchRejected},
+        {str_verified, StrVerified},
+        {empty_bin_rejected, EmptyBinRejected},
+        {malformed_str_rejected, MalformedStrRejected},
+        {negative_rejected, NegativeRejected},
+        {out_of_range_rejected, OutOfRangeRejected},
+        {infinity_a_rejected, InfinityARejected},
+        {infinity_b_rejected, InfinityBRejected},
+        {infinity_vk_rejected, InfinityVKRejected}
+      ])
     end
   ).

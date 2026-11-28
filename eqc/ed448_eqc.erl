@@ -170,3 +170,29 @@ prop_batch_verify() ->
       ecu_eddsa448:sign_verify_batch(Batch)
     end
   ).
+
+prop_ed448_adversarial_rejections() ->
+  ?FORALL(
+    {Seed, Msg, Ctx},
+    {binary(57), binary(), gen_context()},
+    begin
+      #{public := Pub, secret := SK} = ecu_eddsa448:sign_seed_keypair(Seed),
+      Sig = ecu_eddsa448:sign_detached(Msg, SK, Ctx),
+
+      %% 1. Empty batch verify returns true (vacuous truth convention in EdDSA)
+      V1 = ecu_eddsa448:sign_verify_batch([]) =:= true,
+
+      %% 2. Truncated / malformed signature
+      V2 = (not ecu_eddsa448:sign_verify_detached(<<"truncated_sig">>, Msg, Pub, Ctx)),
+
+      %% 3. Truncated / malformed public key
+      V3 = (not ecu_eddsa448:sign_verify_detached(Sig, Msg, <<"bad_pk">>, Ctx)),
+
+      %% 4. Non-canonical scalar S >= N in signature
+      <<R:57/binary, _S:456/little>> = Sig,
+      BadSSig = <<R/binary, (?N + 1):456/little>>,
+      V4 = (not ecu_eddsa448:sign_verify_detached(BadSSig, Msg, Pub, Ctx)),
+
+      V1 andalso V2 andalso V3 andalso V4
+    end
+  ).

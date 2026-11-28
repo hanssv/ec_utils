@@ -37,7 +37,15 @@ fn parse_fr(bytes: &[u8]) -> Result<Fr, String> {
     if bytes.len() != 32 {
         return Err(format!("Expected 32 bytes for Fr, got {}", bytes.len()));
     }
-    Ok(Fr::from_be_bytes_mod_order(bytes))
+    let elem = Fr::from_be_bytes_mod_order(bytes);
+    let mut check_bytes = [0u8; 32];
+    let bi = elem.into_bigint();
+    let be_bytes = bi.to_bytes_be();
+    check_bytes.copy_from_slice(&be_bytes);
+    if check_bytes != bytes {
+        return Err("Fr element exceeds modulus or not canonically encoded".to_string());
+    }
+    Ok(elem)
 }
 
 fn parse_g1(bytes: &[u8]) -> Result<G1Affine, String> {
@@ -294,6 +302,17 @@ fn groth16_verify(
         Ok(p) => p,
         Err(_) => return false,
     };
+
+    if alpha.is_zero()
+        || beta.is_zero()
+        || gamma.is_zero()
+        || delta.is_zero()
+        || a.is_zero()
+        || b.is_zero()
+        || c.is_zero()
+    {
+        return false;
+    }
 
     // e(-A, B) * e(alpha, beta) * e(K_pub, gamma) * e(C, delta) == 1
     let g1_list = vec![-a, alpha, k_pub.into_affine(), c];

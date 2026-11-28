@@ -163,3 +163,53 @@ prop_oversize_dst() ->
         ecu_ed448:on_curve(PtEd448)
     end
   ).
+
+prop_adversarial_rejections() ->
+  ?FORALL(
+    Msg,
+    gen_msg(),
+    begin
+      %% 1. Empty DST rejection
+      EmptyDstRo =
+        try
+          ecu_h2c:hash_to_curve(secp256k1_xmd_sha256_sswu_ro, Msg, <<>>)
+        catch
+          error:badarg -> true;
+          _:_ -> false
+        end,
+      EmptyDstNu =
+        try
+          ecu_h2c:encode_to_curve(secp256k1_xmd_sha256_sswu_nu, Msg, <<>>)
+        catch
+          error:badarg -> true;
+          _:_ -> false
+        end,
+
+      %% 2. Suite mismatch (calling hash_to_curve with NU suite or encode_to_curve with RO suite)
+      MismatchRo =
+        try
+          ecu_h2c:hash_to_curve(secp256k1_xmd_sha256_sswu_nu, Msg, <<"DST">>)
+        catch
+          error:badarg -> true;
+          _:_ -> false
+        end,
+      MismatchNu =
+        try
+          ecu_h2c:encode_to_curve(secp256k1_xmd_sha256_sswu_ro, Msg, <<"DST">>)
+        catch
+          error:badarg -> true;
+          _:_ -> false
+        end,
+
+      %% 3. Unknown suite rejection
+      UnknownSuite =
+        try
+          ecu_h2c:hash_to_curve(unknown_suite, Msg, <<"DST">>)
+        catch
+          error:badarg -> true;
+          _:_ -> false
+        end,
+
+      EmptyDstRo andalso EmptyDstNu andalso MismatchRo andalso MismatchNu andalso UnknownSuite
+    end
+  ).
