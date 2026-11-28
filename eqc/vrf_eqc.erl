@@ -193,5 +193,42 @@ prop_nif_differential() ->
       )
   end.
 
+prop_adversarial_rejections() ->
+  ?FORALL(
+    Suite,
+    gen_suite(),
+    ?FORALL(
+      {{PK, SK}, Alpha},
+      {gen_keypair(Suite), gen_alpha()},
+      begin
+        {ok, Pi} = ecu_vrf:prove(Suite, SK, Alpha),
+
+        %% 1. Truncated public key rejected
+        V1 =
+          case ecu_vrf:verify(Suite, <<"truncated_pk">>, Pi, Alpha) of
+            {error, _} -> true;
+            _ -> false
+          end,
+
+        %% 2. Truncated proof rejected
+        V2 =
+          case ecu_vrf:verify(Suite, PK, <<"truncated_pi">>, Alpha) of
+            {error, _} -> true;
+            _ -> false
+          end,
+
+        %% 3. All-zero / identity public key rejected
+        AllZeroPK = binary:copy(<<0>>, byte_size(PK)),
+        V3 =
+          case ecu_vrf:verify(Suite, AllZeroPK, Pi, Alpha) of
+            {error, _} -> true;
+            _ -> false
+          end,
+
+        V1 andalso V2 andalso V3
+      end
+    )
+  ).
+
 choose_int(Min, Max) when Min =:= Max -> Min;
 choose_int(Min, Max) -> Min + (erlang:phash2({os:timestamp(), Min, Max}, Max - Min + 1)).

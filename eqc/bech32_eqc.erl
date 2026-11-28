@@ -142,6 +142,49 @@ prop_tamper_detection() ->
     end
   ).
 
+prop_bech32_adversarial_rejections() ->
+  ?FORALL(
+    {Hrp, Data},
+    {gen_hrp(), gen_data5bit()},
+    begin
+      {ok, Encoded} = ecu_bech32:encode(Hrp, Data, bech32),
+
+      %% 1. Mixed case rejected
+      Mixed =
+        case Encoded of
+          <<C:8, Rest/binary>> when C >= $a, C =< $z ->
+            <<(C - 32):8, Rest/binary>>;
+          <<C:8, Rest/binary>> ->
+            <<(C + 32):8, Rest/binary>>
+        end,
+      V1 = (ecu_bech32:decode(Mixed) =:= {error, mixed_case}),
+
+      %% 2. Invalid SegWit version (> 16) rejected
+      V2 =
+        case ecu_bech32:encode_segwit_address(Hrp, 17, crypto:strong_rand_bytes(20)) of
+          {error, _} -> true;
+          _ -> false
+        end,
+
+      %% 3. Invalid SegWit v0 program length (must be 20 or 32) rejected
+      V3 =
+        case ecu_bech32:encode_segwit_address(Hrp, 0, crypto:strong_rand_bytes(21)) of
+          {error, _} -> true;
+          _ -> false
+        end,
+
+      %% 4. Non-alphabetic character in encoded string rejected
+      BadCharStr = <<Encoded/binary, "!">>,
+      V4 =
+        case ecu_bech32:decode(BadCharStr) of
+          {error, _} -> true;
+          _ -> false
+        end,
+
+      V1 andalso V2 andalso V3 andalso V4
+    end
+  ).
+
 replace_char(List, Idx, NewChar) ->
   {Before, [_ | After]} = lists:split(Idx - 1, List),
   Before ++ [NewChar | After].

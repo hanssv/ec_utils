@@ -278,3 +278,54 @@ prop_frost_reference_equivalence() ->
         end
       )
   end.
+
+prop_frost_adversarial_rejections() ->
+  ?FORALL(
+    {CS, {T, N}},
+    {gen_ciphersuite(), gen_params()},
+    begin
+      {Shares, GroupPubKey, VSSCommitment} = ecu_frost:trusted_dealer_keygen(CS, T, N),
+      {Id1, Share1} = hd(Shares),
+
+      %% 1. vss_verify fails on corrupted share or invalid Id
+      Bits = byte_size(Share1) * 8,
+      TamperedShare =
+        case CS of
+          CS when CS =:= ed25519 orelse CS =:= ed448 ->
+            <<S:Bits/little>> = Share1,
+            <<(S + 1):Bits/little>>;
+          _ ->
+            <<S:Bits/big>> = Share1,
+            <<(S + 1):Bits/big>>
+        end,
+      V1 = not ecu_frost:vss_verify(CS, Id1, TamperedShare, VSSCommitment),
+      V2 = not ecu_frost:vss_verify(CS, 0, Share1, VSSCommitment),
+
+      %% 2. trusted_dealer_keygen fails if T > N or T = 0
+      V3 =
+        try
+          ecu_frost:trusted_dealer_keygen(CS, N + 1, N),
+          false
+        catch
+          error:_ -> true
+        end,
+      V4 =
+        try
+          ecu_frost:trusted_dealer_keygen(CS, 0, N),
+          false
+        catch
+          error:_ -> true
+        end,
+
+      %% 3. aggregate fails if shares and commitments mismatch
+      V5 =
+        try
+          ecu_frost:aggregate(CS, [], <<"msg">>, GroupPubKey, [Share1]),
+          false
+        catch
+          error:_ -> true
+        end,
+
+      V1 andalso V2 andalso V3 andalso V4 andalso V5
+    end
+  ).

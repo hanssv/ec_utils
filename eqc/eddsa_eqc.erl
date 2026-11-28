@@ -244,3 +244,6 @@ prop_batch_verify_tampered() ->
       end
     end
   ).
+
+prop_batch_verify_empty() ->
+  ecu_eddsa:sign_verify_batch([]) =:= true.

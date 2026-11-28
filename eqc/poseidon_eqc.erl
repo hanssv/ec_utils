@@ -168,7 +168,56 @@ prop_reject_out_of_range() ->
             catch
               error:badarg -> badarg
             end,
-          Res1 =:= badarg andalso Res2 =:= badarg andalso Res3 =:= badarg
+
+          %% Negative scalar rejection
+          ResNeg =
+            try
+              ecu_poseidon:hash3(Curve, -1 - Offset, 1)
+            catch
+              error:badarg -> badarg
+            end,
+
+          %% Empty input list rejection
+          ResEmpty =
+            try
+              ecu_poseidon:hash(Curve, [])
+            catch
+              error:badarg -> badarg
+            end,
+
+          %% Oversized input list rejection (> 8 inputs)
+          ResOversized =
+            try
+              ecu_poseidon:hash(Curve, lists:duplicate(15, 1))
+            catch
+              error:badarg -> badarg
+            end,
+
+          %% Truncated binary input rejection
+          ResTrunc =
+            try
+              ecu_poseidon:hash_binary(Curve, [<<"truncated">>])
+            catch
+              error:badarg -> badarg
+            end,
+
+          %% Differential rejection against NIF oracle
+          NifCheck =
+            case ?NIF:is_available() of
+              true ->
+                Nif1 = ?NIF:hash3(Curve, <<BadScalar:256/big>>, <<1:256/big>>),
+                Nif2 = ?NIF:hash(Curve, [<<BadScalar:256/big>>]),
+                Nif3 = ?NIF:hash(Curve, []),
+                Nif4 = ?NIF:hash(Curve, [<<"truncated">>]),
+                Nif1 =:= {error, badarg} andalso Nif2 =:= {error, badarg} andalso
+                  Nif3 =:= {error, badarg} andalso Nif4 =:= {error, badarg};
+              false ->
+                true
+            end,
+
+          Res1 =:= badarg andalso Res2 =:= badarg andalso Res3 =:= badarg andalso
+            ResNeg =:= badarg andalso ResEmpty =:= badarg andalso
+            ResOversized =:= badarg andalso ResTrunc =:= badarg andalso NifCheck
         end
       )
     end

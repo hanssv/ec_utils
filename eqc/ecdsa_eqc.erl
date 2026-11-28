@@ -166,3 +166,28 @@ prop_secp256k1_scalar_mul_dual() ->
       equals(Expected, Actual)
     end
   ).
+
+prop_ecdsa_adversarial_rejections() ->
+  ?FORALL(
+    {Priv, Msg},
+    {gen_privkey(), gen_msg()},
+    begin
+      Pub = ecu_ecdsa:private_to_public(secp256k1, Priv),
+      Sig = ecu_ecdsa:sign(secp256k1, Msg, Priv),
+
+      %% 1. Truncated / malformed signature
+      V1 = (not ecu_ecdsa:verify(secp256k1, Msg, Pub, <<"truncated_sig">>)),
+
+      %% 2. Truncated / malformed public key
+      V2 = (not ecu_ecdsa:verify(secp256k1, Msg, <<"bad_pk">>, Sig)),
+
+      %% 3. Identity point as public key
+      V3 = (not ecu_ecdsa:verify(secp256k1, Msg, {0, 0}, Sig)),
+      V4 = (not ecu_ecdsa:verify(secp256k1, Msg, <<0:264>>, Sig)),
+
+      %% 4. Off-curve point as public key
+      V5 = (not ecu_ecdsa:verify(secp256k1, Msg, {1, 2}, Sig)),
+
+      V1 andalso V2 andalso V3 andalso V4 andalso V5
+    end
+  ).

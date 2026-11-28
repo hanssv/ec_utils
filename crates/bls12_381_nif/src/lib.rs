@@ -275,6 +275,17 @@ fn groth16_verify(
     {
         return false;
     }
+    if unsafe {
+        blst::blst_p1_affine_is_inf(&alpha)
+            || blst::blst_p2_affine_is_inf(&beta)
+            || blst::blst_p2_affine_is_inf(&gamma)
+            || blst::blst_p2_affine_is_inf(&delta)
+            || blst::blst_p1_affine_is_inf(&a_aff)
+            || blst::blst_p2_affine_is_inf(&b)
+            || blst::blst_p1_affine_is_inf(&c)
+    } {
+        return false;
+    }
 
     let mut neg_a = blst::blst_p1::default();
     unsafe { blst::blst_p1_from_affine(&mut neg_a, &a_aff) };

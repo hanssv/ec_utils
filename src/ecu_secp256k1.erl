@@ -240,7 +240,9 @@ decompress(<<N:8, X:256>>) when (N == 2 orelse N == 3), X < ?P ->
       end;
     false ->
       error(badarg)
-  end.
+  end;
+decompress(_) ->
+  error(badarg).
 
 -spec p_neg(pt_affine()) -> pt_affine().
 p_neg({X, Y}) when is_integer(X), is_integer(Y) ->

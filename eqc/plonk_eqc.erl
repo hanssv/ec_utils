@@ -438,7 +438,15 @@ prop_plonk_adversarial_rejections() ->
       InvalidRootRejected =
         ecu_plonk:parse_vk(BadVKRoot, bn254) =:= error,
 
-      %% 5. Record normalization: compressed G1 point in VK record normalizes to affine
+      %% 5. Identity point injection in proof and VK rejected
+      InfinityARejected =
+        ecu_plonk:verify(VK, Inputs, Proof#plonk_proof{a = infinity}) =:= false,
+      InfinityVKQmRejected =
+        ecu_plonk:verify(VK#plonk_vk{qm = infinity}, Inputs, Proof) =:= false,
+      InfinityVKX2Rejected =
+        ecu_plonk:verify(VK#plonk_vk{x_2 = infinity}, Inputs, Proof) =:= false,
+
+      %% 6. Record normalization: compressed G1 point in VK record normalizes to affine
       CompQm = ?BN:g1_compress(VK#plonk_vk.qm),
       VKWithComp = VK#plonk_vk{qm = CompQm},
       NormVKResult =
@@ -458,6 +466,9 @@ prop_plonk_adversarial_rejections() ->
         {negative_eval_rejected, NegativeEvalRejected},
         {unbounded_power_rejected, UnboundedPowerRejected},
         {invalid_root_rejected, InvalidRootRejected},
+        {infinity_a_rejected, InfinityARejected},
+        {infinity_vk_qm_rejected, InfinityVKQmRejected},
+        {infinity_vk_x2_rejected, InfinityVKX2Rejected},
         {norm_vk_result, NormVKResult}
       ])
     end

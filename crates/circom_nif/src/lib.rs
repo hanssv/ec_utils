@@ -132,19 +132,23 @@ fn check_constraints(r1cs_bin: Binary, wtns_bin: Binary) -> Result<bool, String>
     }
 
     for constraint in &r1cs.constraints.0 {
-        let eval_lc = |lc: &Vec<(r1cs_file::FieldElement<32>, u32)>| -> BigUint {
+        let eval_lc = |lc: &Vec<(r1cs_file::FieldElement<32>, u32)>| -> Result<BigUint, String> {
             let mut sum = BigUint::zero();
             for (coeff, idx) in lc {
+                let idx_usize = *idx as usize;
+                if idx_usize >= witness.len() {
+                    return Err(format!("Wire index {} out of bounds", idx));
+                }
                 let c = BigUint::from_bytes_le(&**coeff);
-                let w = &witness[*idx as usize];
+                let w = &witness[idx_usize];
                 sum = (sum + (c * w)) % &prime;
             }
-            sum
+            Ok(sum)
         };
 
-        let a = eval_lc(&constraint.0);
-        let b = eval_lc(&constraint.1);
-        let c = eval_lc(&constraint.2);
+        let a = eval_lc(&constraint.0)?;
+        let b = eval_lc(&constraint.1)?;
+        let c = eval_lc(&constraint.2)?;
 
         if (a * b) % &prime != c {
             return Ok(false);

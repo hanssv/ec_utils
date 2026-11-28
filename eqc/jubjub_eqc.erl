@@ -190,7 +190,11 @@ prop_redjubjub_adversarial_rejections() ->
       BadSSig = <<RComp:32/binary, (Suborder + 1):256/little>>,
       V5 = (not ecu_jubjub:redjubjub_verify(PK, Msg, BadSSig, SigType)),
 
-      V1 andalso V2 andalso V3 andalso V4 andalso V5
+      %% 3. Rejection of malformed / truncated inputs
+      V6 = (not ecu_jubjub:redjubjub_verify(<<"bad_pk">>, Msg, Sig, SigType)),
+      V7 = (not ecu_jubjub:redjubjub_verify(PK, Msg, <<"bad_sig">>, SigType)),
+
+      V1 andalso V2 andalso V3 andalso V4 andalso V5 andalso V6 andalso V7
     end
   ).
 
@@ -212,6 +216,92 @@ prop_redjubjub_nif_differential() ->
           NifVerifiesErl = ecu_jubjub_nif:redjubjub_verify(NifPK, Msg, ErlSig, SigType),
 
           PKMatch andalso ErlVerifiesNif andalso NifVerifiesErl
+        end
+      );
+    false ->
+      true
+  end.
+
+prop_point_arithmetic_differential() ->
+  case ecu_jubjub_nif:is_available() of
+    true ->
+      ?FORALL(
+        {K1, K2, S},
+        {gen_small_scalar(), gen_small_scalar(), gen_scalar()},
+        begin
+          P1 = ecu_jubjub:mul(ecu_jubjub:generator(), K1),
+          P2 = ecu_jubjub:mul(ecu_jubjub:generator(), K2),
+          P1Comp = ecu_jubjub:compress(P1),
+          P2Comp = ecu_jubjub:compress(P2),
+
+          %% Point addition
+          ErlAdd = ecu_jubjub:compress(ecu_jubjub:add(P1, P2)),
+          {ok, NifAdd} = ecu_jubjub_nif:point_add(P1Comp, P2Comp),
+          AddMatch = (ErlAdd =:= NifAdd),
+
+          %% Point doubling
+          ErlDbl = ecu_jubjub:compress(ecu_jubjub:double(P1)),
+          {ok, NifDbl} = ecu_jubjub_nif:point_double(P1Comp),
+          DblMatch = (ErlDbl =:= NifDbl),
+
+          %% Scalar multiplication
+          ErlMul = ecu_jubjub:compress(ecu_jubjub:mul(P1, S)),
+          ScalarLE = <<S:256/little>>,
+          {ok, NifMul} = ecu_jubjub_nif:point_mul(P1Comp, ScalarLE),
+          MulMatch = (ErlMul =:= NifMul),
+
+          AddMatch andalso DblMatch andalso MulMatch
+        end
+      );
+    false ->
+      true
+  end.
+
+prop_montgomery_differential() ->
+  case ecu_jubjub_nif:is_available() of
+    true ->
+      Gen = ecu_jubjub:generator(),
+      {UGen, _} = ecu_jubjub:edwards_to_montgomery(Gen),
+      ?FORALL(
+        K,
+        gen_large_scalar(),
+        begin
+          K_bin = <<K:256/little>>,
+          U_bin = <<UGen:256/little>>,
+          ErlRes = ecu_jubjub:montgomery_ladder(K_bin, U_bin),
+          {ok, NifRes} = ecu_jubjub_nif:montgomery_ladder(K_bin, U_bin),
+          ErlRes =:= NifRes
+        end
+      );
+    false ->
+      true
+  end.
+
+prop_subgroup_differential() ->
+  case ecu_jubjub_nif:is_available() of
+    true ->
+      ?FORALL(
+        K,
+        gen_small_scalar(),
+        begin
+          P = ecu_jubjub:mul(ecu_jubjub:generator(), K),
+          PComp = ecu_jubjub:compress(P),
+          ErlOnCurve = ecu_jubjub:is_on_curve(P),
+          NifOnCurve = ecu_jubjub_nif:is_on_curve(PComp),
+          ErlSubgroup = ecu_jubjub:is_in_subgroup(P),
+          NifSubgroup = ecu_jubjub_nif:is_in_subgroup(PComp),
+
+          %% Also check order-2 point
+          Order2Pt = {0, ecu_jubjub:q() - 1},
+          Order2Comp = ecu_jubjub:compress(Order2Pt),
+          ErlOrder2OnCurve = ecu_jubjub:is_on_curve(Order2Pt),
+          NifOrder2OnCurve = ecu_jubjub_nif:is_on_curve(Order2Comp),
+          ErlOrder2Subgroup = ecu_jubjub:is_in_subgroup(Order2Pt),
+          NifOrder2Subgroup = ecu_jubjub_nif:is_in_subgroup(Order2Comp),
+
+          (ErlOnCurve =:= NifOnCurve) andalso (ErlSubgroup =:= NifSubgroup) andalso
+            (ErlOrder2OnCurve =:= NifOrder2OnCurve) andalso
+            (ErlOrder2Subgroup =:= false) andalso (NifOrder2Subgroup =:= false)
         end
       );
     false ->

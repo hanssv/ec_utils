@@ -149,3 +149,43 @@ prop_aex10_derivation() ->
       K1 == K2
     end
   ).
+
+prop_bip32_adversarial_rejections() ->
+  ?FORALL(
+    Seed,
+    gen_seed(),
+    begin
+      {ok, MasterPriv} = ecu_hd:master_key(secp256k1, Seed),
+      MasterPub = ecu_hd:to_public(MasterPriv),
+
+      %% 1. Hardened derivation from public key fails
+      V1 =
+        (ecu_hd:ckd_pub(MasterPub, 16#80000000) =:=
+          {error, cannot_derive_hardened_from_public_key}),
+
+      %% 2. Public derivation on ed25519 fails
+      {ok, EdMaster} = ecu_hd:master_key(ed25519, Seed),
+      V2 =
+        (ecu_hd:ckd_pub(EdMaster, 0) =:=
+          {error, public_derivation_not_supported_for_ed25519}),
+
+      %% 3. Deserialization of Depth 0 key with non-zero parent fingerprint or child index fails
+      B58Priv = ecu_hd:to_base58(private, MasterPriv),
+      {ok, RawPrivBin} = ecu_base58:decode_check(B58Priv),
+      <<Vsn:4/binary, _Depth:8, _FP:4/binary, _Child:32, Rest/binary>> = RawPrivBin,
+      BadFPBin = <<Vsn:4/binary, 0:8, 1:32, 0:32, Rest/binary>>,
+      BadFPB58 = ecu_base58:encode_check(BadFPBin),
+      V3 = (ecu_hd:from_base58(BadFPB58) =:= {error, invalid_master_key_metadata}),
+
+      BadChildBin = <<Vsn:4/binary, 0:8, 0:32, 1:32, Rest/binary>>,
+      BadChildB58 = ecu_base58:encode_check(BadChildBin),
+      V4 = (ecu_hd:from_base58(BadChildB58) =:= {error, invalid_master_key_metadata}),
+
+      %% 4. Deserialization of invalid private key 0 or >= N fails
+      BadPriv0Bin = <<Vsn:4/binary, 1:8, 0:32, 0:32, 0:256, 0:8, 0:256>>,
+      BadPriv0B58 = ecu_base58:encode_check(BadPriv0Bin),
+      V5 = (ecu_hd:from_base58(BadPriv0B58) =:= {error, invalid_private_key}),
+
+      V1 andalso V2 andalso V3 andalso V4 andalso V5
+    end
+  ).

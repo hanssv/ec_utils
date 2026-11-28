@@ -135,6 +135,9 @@ fn verify_bn254<'a>(
     wxiw_bytes: Binary<'a>,
 ) -> bool {
     let _ = env;
+    if power == 0 || power > 28 {
+        return false;
+    }
     let k1 = match parse_fr(k1_bytes.as_slice()) {
         Ok(v) => v,
         Err(_) => return false,
@@ -255,6 +258,28 @@ fn verify_bn254<'a>(
         Ok(p) => p,
         Err(_) => return false,
     };
+
+    if qm.is_zero()
+        || ql.is_zero()
+        || qr.is_zero()
+        || qo.is_zero()
+        || qc.is_zero()
+        || s1.is_zero()
+        || s2.is_zero()
+        || s3.is_zero()
+        || x2.is_zero()
+        || a.is_zero()
+        || b.is_zero()
+        || c.is_zero()
+        || z.is_zero()
+        || t1.is_zero()
+        || t2.is_zero()
+        || t3.is_zero()
+        || wxi.is_zero()
+        || wxiw.is_zero()
+    {
+        return false;
+    }
 
     // 1. Beta transcript
     let mut beta_hasher = Keccak256::new();

@@ -299,6 +299,16 @@ prop_groth16_adversarial_rejections() ->
       TorsionRejected =
         ecu_groth16:verify(VK, PublicInputs, BadProofTorsion) =:= false,
 
+      %% 5. Identity point injection in proof and verification key
+      InfinityARejected =
+        ecu_groth16:verify(VK, PublicInputs, Proof#groth16_proof{a = infinity}) =:= false,
+      InfinityBRejected =
+        ecu_groth16:verify(VK, PublicInputs, Proof#groth16_proof{b = infinity}) =:= false,
+      InfinityCRejected =
+        ecu_groth16:verify(VK, PublicInputs, Proof#groth16_proof{c = infinity}) =:= false,
+      InfinityVKRejected =
+        ecu_groth16:verify(VK#groth16_vk{alpha_g1 = infinity}, PublicInputs, Proof) =:= false,
+
       conjunction([
         {empty_batch_rejected, EmptyBatchRejected},
         {str_verified, StrVerified},
@@ -306,7 +316,11 @@ prop_groth16_adversarial_rejections() ->
         {malformed_str_rejected, MalformedStrRejected},
         {negative_rejected, NegativeRejected},
         {out_of_range_rejected, OutOfRangeRejected},
-        {torsion_rejected, TorsionRejected}
+        {torsion_rejected, TorsionRejected},
+        {infinity_a_rejected, InfinityARejected},
+        {infinity_b_rejected, InfinityBRejected},
+        {infinity_c_rejected, InfinityCRejected},
+        {infinity_vk_rejected, InfinityVKRejected}
       ])
     end
   ).

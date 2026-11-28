@@ -135,3 +135,53 @@ prop_ed25519_birational() ->
       equals(SecA, SecB)
     end
   ).
+
+prop_ecdh_adversarial_rejections() ->
+  ?FORALL(
+    {Seed25519, Seed448, PrivSecp},
+    {gen_x25519_seed(), gen_x448_seed(), gen_secp256k1_privkey()},
+    begin
+      {_Pub25519, Priv25519} = ecu_ecdh:keypair_from_seed(x25519, Seed25519),
+      {_Pub448, Priv448} = ecu_ecdh:keypair_from_seed(x448, Seed448),
+
+      %% 1. Contributory ECDH: all-zero low-order point in X25519 must be rejected
+      V1 =
+        try
+          ecu_ecdh:compute_key(x25519, <<0:256>>, Priv25519)
+        catch
+          error:small_order_point -> true;
+          _:_ -> false
+        end,
+
+      %% 2. Contributory ECDH: all-zero low-order point in X448 must be rejected
+      V2 =
+        try
+          ecu_ecdh:compute_key(x448, <<0:448>>, Priv448)
+        catch
+          error:small_order_point -> true;
+          _:_ -> false
+        end,
+
+      %% 3. secp256k1: identity point and off-curve point must be rejected
+      V3 =
+        try
+          ecu_ecdh:compute_key(secp256k1, <<0:264>>, PrivSecp)
+        catch
+          error:_ -> true
+        end,
+      V4 =
+        try
+          ecu_ecdh:compute_key(secp256k1, {0, 0}, PrivSecp)
+        catch
+          error:_ -> true
+        end,
+      V5 =
+        try
+          ecu_ecdh:compute_key(secp256k1, {1, 2}, PrivSecp)
+        catch
+          error:_ -> true
+        end,
+
+      V1 andalso V2 andalso V3 andalso V4 andalso V5
+    end
+  ).
