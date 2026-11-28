@@ -226,7 +226,10 @@ compress({X, Y}) when is_integer(X), is_integer(Y), Y rem 2 == 0 ->
 compress({X, Y}) when is_integer(X), is_integer(Y) ->
   <<3:8, (X rem ?P):256>>;
 compress(<<4:8, X:256, Y:256>>) ->
-  compress({X, Y}).
+  case on_curve({X, Y}) of
+    true -> compress({X, Y});
+    false -> error(badarg)
+  end.
 
 -spec decompress(pt_compressed()) -> pt_affine().
 decompress(<<N:8, X:256>>) when (N == 2 orelse N == 3), X < ?P ->

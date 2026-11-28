@@ -352,11 +352,13 @@ compute_private_sign_share(Shares) ->
   Shares :: [{participant_id(), scalar()}]
 ) -> scalar().
 compute_private_sign_share(ed25519, Shares) when length(Shares) >= 1 ->
+  ok = validate_shares(ed25519, Shares),
   case lists:foldl(fun({_, S}, Acc) -> ecu_ed25519:s_add(Acc, S) end, <<0:256>>, Shares) of
     <<0:256>> -> error(invalid_share);
     Sum -> Sum
   end;
 compute_private_sign_share(ed448, Shares) when length(Shares) >= 1 ->
+  ok = validate_shares(ed448, Shares),
   case lists:foldl(fun({_, S}, Acc) -> ecu_ed448:s_add(Acc, S) end, <<0:456>>, Shares) of
     <<0:456>> -> error(invalid_share);
     Sum -> Sum
@@ -364,9 +366,25 @@ compute_private_sign_share(ed448, Shares) when length(Shares) >= 1 ->
 compute_private_sign_share(bip340, Shares) when length(Shares) >= 1 ->
   compute_private_sign_share(secp256k1, Shares);
 compute_private_sign_share(secp256k1, Shares) when length(Shares) >= 1 ->
+  ok = validate_shares(secp256k1, Shares),
   case lists:foldl(fun({_, <<S:256>>}, Acc) -> (Acc + S) rem ?SECP256K1_N end, 0, Shares) of
     0 -> error(invalid_share);
     Sum -> <<Sum:256/big>>
+  end.
+
+-spec validate_shares(ciphersuite(), [{participant_id(), scalar()}]) -> ok.
+validate_shares(Suite, Shares) ->
+  Order = ecu_frost:suite_order(Suite),
+  ValidElems = lists:all(
+    fun({Id, S}) ->
+      is_integer(Id) andalso Id > 0 andalso Id < Order andalso
+        ecu_frost:is_canonical_nonzero_scalar(Suite, S)
+    end,
+    Shares
+  ),
+  case ValidElems of
+    true -> ok;
+    false -> error(invalid_share)
   end.
 
 -spec compute_private_sign_share(
@@ -425,7 +443,13 @@ compute_public_verification_share(ed25519, Id, [PubC1 | _] = PubCs) when is_inte
     true ->
       Exponents = pows_ed25519(<<Id:256/little>>, length(PubC1)),
       Pts = [
-        ecu_ed25519:scalar_mul_noclamp(E, ecu_ed25519:decompress(C))
+        begin
+          C_pt = ecu_ed25519:decompress(C),
+          case ecu_frost:is_valid_point(ed25519, C_pt) of
+            true -> ecu_ed25519:scalar_mul_noclamp(E, C_pt);
+            false -> error(invalid_public_key)
+          end
+        end
        || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC)
       ],
       Pt = fold_pts_ed25519(Pts),
@@ -443,7 +467,13 @@ compute_public_verification_share(ed448, Id, [PubC1 | _] = PubCs) when is_intege
     true ->
       Exponents = pows_ed448(<<Id:456/little>>, length(PubC1)),
       Pts = [
-        ecu_ed448:scalar_mul_noclamp(E, ecu_ed448:decompress(C))
+        begin
+          C_pt = ecu_ed448:decompress(C),
+          case ecu_frost:is_valid_point(ed448, C_pt) of
+            true -> ecu_ed448:scalar_mul_noclamp(E, C_pt);
+            false -> error(invalid_public_key)
+          end
+        end
        || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC)
       ],
       Pt = fold_pts_ed448(Pts),
@@ -471,7 +501,13 @@ compute_public_verification_share(secp256k1, Id, [PubC1 | _] = PubCs) when is_in
     true ->
       Exponents = pows_secp256k1(Id, length(PubC1)),
       Pts = [
-        ecu_secp256k1:scalar_mul(E, ecu_secp256k1:decompress(C))
+        begin
+          C_pt = ecu_secp256k1:decompress(C),
+          case ecu_frost:is_valid_point(secp256k1, C_pt) of
+            true -> ecu_secp256k1:scalar_mul(E, C_pt);
+            false -> error(invalid_public_key)
+          end
+        end
        || PubC <- PubCs, {E, C} <- lists:zip(Exponents, PubC)
       ],
       Pt = fold_pts_secp256k1(Pts),
@@ -493,7 +529,16 @@ compute_public_key(PubCs) ->
 ) -> compressed_pt().
 compute_public_key(ed25519, PubCs) when length(PubCs) >= 1 ->
   ok = validate_pubcs(PubCs),
-  Pts = [ecu_ed25519:decompress(C0) || [C0 | _] <- PubCs],
+  Pts = [
+    begin
+      Pt = ecu_ed25519:decompress(C0),
+      case ecu_frost:is_valid_point(ed25519, Pt) of
+        true -> Pt;
+        false -> error(badarg)
+      end
+    end
+   || [C0 | _] <- PubCs
+  ],
   Folded = fold_pts_ed25519(Pts),
   case ecu_frost:is_valid_point(ed25519, Folded) of
     true -> ecu_ed25519:compress(Folded);
@@ -501,7 +546,16 @@ compute_public_key(ed25519, PubCs) when length(PubCs) >= 1 ->
   end;
 compute_public_key(ed448, PubCs) when length(PubCs) >= 1 ->
   ok = validate_pubcs(PubCs),
-  Pts = [ecu_ed448:decompress(C0) || [C0 | _] <- PubCs],
+  Pts = [
+    begin
+      Pt = ecu_ed448:decompress(C0),
+      case ecu_frost:is_valid_point(ed448, Pt) of
+        true -> Pt;
+        false -> error(badarg)
+      end
+    end
+   || [C0 | _] <- PubCs
+  ],
   Folded = fold_pts_ed448(Pts),
   case ecu_frost:is_valid_point(ed448, Folded) of
     true -> ecu_ed448:compress(Folded);
@@ -509,7 +563,16 @@ compute_public_key(ed448, PubCs) when length(PubCs) >= 1 ->
   end;
 compute_public_key(bip340, PubCs) when length(PubCs) >= 1 ->
   ok = validate_pubcs(PubCs),
-  Pts = [ecu_secp256k1:decompress(C0) || [C0 | _] <- PubCs],
+  Pts = [
+    begin
+      Pt = ecu_secp256k1:decompress(C0),
+      case ecu_frost:is_valid_point(secp256k1, Pt) of
+        true -> Pt;
+        false -> error(badarg)
+      end
+    end
+   || [C0 | _] <- PubCs
+  ],
   Folded = fold_pts_secp256k1(Pts),
   case ecu_frost:is_valid_point(secp256k1, Folded) of
     true ->
@@ -520,7 +583,16 @@ compute_public_key(bip340, PubCs) when length(PubCs) >= 1 ->
   end;
 compute_public_key(secp256k1, PubCs) when length(PubCs) >= 1 ->
   ok = validate_pubcs(PubCs),
-  Pts = [ecu_secp256k1:decompress(C0) || [C0 | _] <- PubCs],
+  Pts = [
+    begin
+      Pt = ecu_secp256k1:decompress(C0),
+      case ecu_frost:is_valid_point(secp256k1, Pt) of
+        true -> Pt;
+        false -> error(badarg)
+      end
+    end
+   || [C0 | _] <- PubCs
+  ],
   Folded = fold_pts_secp256k1(Pts),
   case ecu_frost:is_valid_point(secp256k1, Folded) of
     true -> ecu_secp256k1:compress(Folded);

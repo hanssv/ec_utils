@@ -166,9 +166,9 @@ sign(Suite, Id, SecretShare, GroupPublicKey, {HidingNonce, BindingNonce}, Msg, C
   Order = suite_order(Suite),
   case
     Id > 0 andalso Id < Order andalso
-      is_canonical_scalar(Suite, SecretShare) andalso
-      is_canonical_scalar(Suite, HidingNonce) andalso
-      is_canonical_scalar(Suite, BindingNonce) andalso
+      is_canonical_nonzero_scalar(Suite, SecretShare) andalso
+      is_canonical_nonzero_scalar(Suite, HidingNonce) andalso
+      is_canonical_nonzero_scalar(Suite, BindingNonce) andalso
       lists:keymember(Id, 1, CommitmentList)
   of
     false ->
@@ -1253,30 +1253,48 @@ secret_share_combine(Shares) ->
   Shares :: [{participant_id(), scalar()}]
 ) -> scalar().
 secret_share_combine(ed25519, Shares) when length(Shares) >= 1 ->
-  Ids = [Id || {Id, _} <- Shares],
-  Terms = [
-    ecu_ed25519:s_mul(Share, derive_lagrange_coefficient(ed25519, Id, Ids))
-   || {Id, Share} <- Shares
-  ],
-  lists:foldl(fun(T, Acc) -> ecu_ed25519:s_add(Acc, T) end, <<0:256>>, Terms);
+  case lists:all(fun({_, S}) -> is_canonical_nonzero_scalar(ed25519, S) end, Shares) of
+    false ->
+      error(badarg);
+    true ->
+      Ids = [Id || {Id, _} <- Shares],
+      Terms = [
+        ecu_ed25519:s_mul(Share, derive_lagrange_coefficient(ed25519, Id, Ids))
+       || {Id, Share} <- Shares
+      ],
+      lists:foldl(fun(T, Acc) -> ecu_ed25519:s_add(Acc, T) end, <<0:256>>, Terms)
+  end;
 secret_share_combine(ed448, Shares) when length(Shares) >= 1 ->
-  Ids = [Id || {Id, _} <- Shares],
-  Terms = [ecu_ed448:s_mul(Share, derive_lagrange_coefficient(ed448, Id, Ids)) || {Id, Share} <- Shares],
-  lists:foldl(fun(T, Acc) -> ecu_ed448:s_add(Acc, T) end, <<0:456>>, Terms);
+  case lists:all(fun({_, S}) -> is_canonical_nonzero_scalar(ed448, S) end, Shares) of
+    false ->
+      error(badarg);
+    true ->
+      Ids = [Id || {Id, _} <- Shares],
+      Terms = [
+        ecu_ed448:s_mul(Share, derive_lagrange_coefficient(ed448, Id, Ids))
+       || {Id, Share} <- Shares
+      ],
+      lists:foldl(fun(T, Acc) -> ecu_ed448:s_add(Acc, T) end, <<0:456>>, Terms)
+  end;
 secret_share_combine(bip340, Shares) ->
   secret_share_combine(secp256k1, Shares);
 secret_share_combine(secp256k1, Shares) when length(Shares) >= 1 ->
-  Ids = [Id || {Id, _} <- Shares],
-  Terms = [
-    begin
-      <<S_int:256>> = Share,
-      <<L_int:256>> = derive_lagrange_coefficient(secp256k1, Id, Ids),
-      (S_int * L_int) rem ?SECP256K1_N
-    end
-   || {Id, Share} <- Shares
-  ],
-  Total = lists:foldl(fun(T, Acc) -> (Acc + T) rem ?SECP256K1_N end, 0, Terms),
-  <<Total:256/big>>.
+  case lists:all(fun({_, S}) -> is_canonical_nonzero_scalar(secp256k1, S) end, Shares) of
+    false ->
+      error(badarg);
+    true ->
+      Ids = [Id || {Id, _} <- Shares],
+      Terms = [
+        begin
+          <<S_int:256>> = Share,
+          <<L_int:256>> = derive_lagrange_coefficient(secp256k1, Id, Ids),
+          (S_int * L_int) rem ?SECP256K1_N
+        end
+       || {Id, Share} <- Shares
+      ],
+      Total = lists:foldl(fun(T, Acc) -> (Acc + T) rem ?SECP256K1_N end, 0, Terms),
+      <<Total:256/big>>
+  end.
 
 -spec polynomial_evaluate(X :: participant_id() | scalar(), Coeffs :: [scalar()]) -> scalar().
 polynomial_evaluate(X, Coeffs) ->

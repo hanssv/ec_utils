@@ -473,18 +473,25 @@ verify(ParamSet, Sig, Msg, PK) ->
 verify(ParamSet, Sig, Msg, PK, Ctx) when
   is_atom(ParamSet), is_binary(Sig), is_binary(Msg), is_binary(PK), is_binary(Ctx)
 ->
-  #slh_params{sig_bytes = SigLen, pk_bytes = PKLen} = Params = parameter_set(ParamSet),
-  if
-    byte_size(Ctx) > 255 ->
-      false;
-    byte_size(PK) =/= PKLen ->
-      false;
-    byte_size(Sig) =/= SigLen ->
-      false;
-    true ->
-      Mprime = <<0:8, (byte_size(Ctx)):8, Ctx/binary, Msg/binary>>,
-      slh_verify_internal(Mprime, Sig, PK, Params)
-  end.
+  try parameter_set(ParamSet) of
+    #slh_params{sig_bytes = SigLen, pk_bytes = PKLen} = Params ->
+      if
+        byte_size(Ctx) > 255 ->
+          false;
+        byte_size(PK) =/= PKLen ->
+          false;
+        byte_size(Sig) =/= SigLen ->
+          false;
+        true ->
+          Mprime = <<0:8, (byte_size(Ctx)):8, Ctx/binary, Msg/binary>>,
+          slh_verify_internal(Mprime, Sig, PK, Params)
+      end
+  catch
+    _:_ ->
+      false
+  end;
+verify(_, _, _, _, _) ->
+  false.
 
 -spec slh_verify_internal(binary(), binary(), binary(), slh_params()) -> boolean().
 slh_verify_internal(
