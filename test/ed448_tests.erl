@@ -336,7 +336,12 @@ argon04_scalar_window_truncation_ed448_test() ->
   Pt = ecu_ed448:scalar_mul_base(1),
   ResLarge = ecu_ed448:scalar_mul_noclamp(LargeK, Pt),
   ResExpected = ecu_ed448:scalar_mul_noclamp(LargeK rem ?N, Pt),
-  ?assert(ecu_ed448:pt_eq(ResLarge, ResExpected)).
+  ?assert(ecu_ed448:pt_eq(ResLarge, ResExpected)),
+  %% Torsion point T2 = (0, -1) of order 2: clamped scalar_mul clears T2, unreduced noclamp(N, Pt + T2) = T2
+  T2 = {0, ecu_ed448:p() - 1},
+  PtWithTorsion = ecu_ed448:p_add(Pt, T2),
+  ?assert(ecu_ed448:pt_eq(ecu_ed448:scalar_mul(1, Pt), ecu_ed448:scalar_mul(1, PtWithTorsion))),
+  ?assert(ecu_ed448:pt_eq(T2, ecu_ed448:scalar_mul_noclamp(?N, PtWithTorsion))).
 
 on_curve_bounds_test() ->
   ?assertEqual(false, ecu_ed448:on_curve({ecu_ed448:p() + 1, 0})),

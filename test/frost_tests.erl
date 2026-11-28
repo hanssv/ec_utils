@@ -1081,6 +1081,29 @@ frost_commitment_consistency_test() ->
   ?assertError(
     badarg,
     ecu_frost:sign(ed25519, 2, <<1:256>>, <<0:256>>, {<<1:256>>, <<1:256>>}, <<"msg">>, CommitmentList)
+  ),
+  %% sign with zero secret share or zero nonces rejected
+  ?assertError(
+    badarg,
+    ecu_frost:sign(
+      ed25519, 1, <<0:256>>, <<0:256>>, {<<1:256/little>>, <<1:256/little>>}, <<"msg">>, CommitmentList
+    )
+  ),
+  ?assertError(
+    badarg,
+    ecu_frost:sign(
+      ed25519, 1, <<1:256/little>>, <<0:256>>, {<<0:256>>, <<1:256/little>>}, <<"msg">>, CommitmentList
+    )
+  ),
+  %% secret_share_combine with zero or non-canonical share rejected
+  ?assertError(badarg, ecu_frost:secret_share_combine(ed25519, [{1, <<0:256>>}])),
+  %% DKG compute_public_key and compute_public_verification_share reject small-order commitments
+  ValidPt = ecu_ed25519:compress(ecu_ed25519:scalar_mul_base_noclamp(<<1:256/little>>)),
+  SmallOrderPt = <<1:8, 0:248>>,
+  ?assertError(badarg, ecu_frost_dkg:compute_public_key(ed25519, [[ValidPt], [SmallOrderPt]])),
+  ?assertError(
+    invalid_public_key,
+    ecu_frost_dkg:compute_public_verification_share(ed25519, 1, [[ValidPt], [SmallOrderPt]])
   ).
 
 %% ===================================================================

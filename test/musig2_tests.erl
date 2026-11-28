@@ -281,4 +281,16 @@ musig2_validation_test() ->
     ecu_musig2:verify_partial(
       Ctx, <<(ecu_ed25519:n()):256/little>>, [PK1, PK2], PK1, [PK1, PK2], <<"msg">>
     )
+  ),
+  %% Non-canonical partial signatures rejected in aggregate_partial
+  ?assertEqual(
+    {error, invalid_partial_sig},
+    ecu_musig2:aggregate_partial(Ctx, [PK1, PK2], <<"msg">>, [<<(ecu_ed25519:n()):256/little>>])
+  ),
+  %% Zero secret nonce in ed25519 sign_partial rejected
+  ?assertEqual(
+    {error, invalid_scalar},
+    ecu_musig2:sign_partial(
+      Ctx, crypto:strong_rand_bytes(32), [<<0:256>>, <<1:256/little>>], [PK1, PK2], <<"msg">>
+    )
   ).

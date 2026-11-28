@@ -396,16 +396,11 @@ scalar_mul_(K, P) ->
 -spec scalar_mul_window(non_neg_integer(), pt_projective()) -> pt_projective().
 scalar_mul_window(0, _P) ->
   {0, 1, 1};
-scalar_mul_window(K, P) ->
-  case K rem ?N of
-    0 ->
-      {0, 1, 1};
-    RedK ->
-      Table = precompute_window_table(P),
-      <<W0:4, Rest/bitstring>> = <<RedK:456>>,
-      InitialAcc = element(W0 + 1, Table),
-      window_loop(Rest, Table, InitialAcc)
-  end.
+scalar_mul_window(K, P) when is_integer(K), K > 0 ->
+  Table = precompute_window_table(P),
+  <<W0:4, Rest/bitstring>> = binary:encode_unsigned(K, big),
+  InitialAcc = element(W0 + 1, Table),
+  window_loop(Rest, Table, InitialAcc).
 
 -spec window_loop(bitstring(), dynamic(), dynamic()) -> pt_projective().
 window_loop(<<>>, _Table, Acc) ->

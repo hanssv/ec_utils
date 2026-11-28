@@ -178,3 +178,16 @@ prop_ed25519_scalar_mul_dual() ->
       equal_pts(Expected, Actual)
     end
   ).
+
+prop_scalar_mul_torsion_clearing() ->
+  ?FORALL(
+    {S, P0},
+    {gen_scalar(), gen_point()},
+    begin
+      T2 = {0, ecu_ed25519:p() - 1},
+      PTorsion = ecu_ed25519:compress(ecu_ed25519:p_add(P0, T2)),
+      E = enacl:crypto_ed25519_scalarmult(S, PTorsion),
+      P = ecu_ed25519:scalar_mul(S, PTorsion),
+      equals(E, ecu_ed25519:compress(P))
+    end
+  ).

@@ -391,6 +391,27 @@ sign_partial(
       {ok, ExpectedPK} when ExpectedPK =/= MyPK ->
         {error, public_key_mismatch};
       _ ->
+        case ecu_ed25519:is_small_order(AccN1) orelse ecu_ed25519:is_small_order(AccN2) of
+          true -> error(small_order_nonce);
+          false -> ok
+        end,
+        N1Bin =
+          case N1s of
+            <<_:256>> -> N1s;
+            _ when is_integer(N1s), N1s > 0 -> <<N1s:256/little>>
+          end,
+        N2Bin =
+          case N2s of
+            <<_:256>> -> N2s;
+            _ when is_integer(N2s), N2s > 0 -> <<N2s:256/little>>
+          end,
+        case
+          binary:decode_unsigned(N1Bin, little) > 0 andalso
+            binary:decode_unsigned(N2Bin, little) > 0
+        of
+          true -> ok;
+          false -> error(invalid_scalar)
+        end,
         {ok, MyExpBin} = key_agg_coeff(Ctx, MyPK, Occurrence),
         AggPK = Ctx#key_agg_ctx.agg_pk_bin,
 
@@ -409,16 +430,6 @@ sign_partial(
         Challenge = ecu_ed25519:scalar_reduce(
           ecu_compat:hash(sha512, <<AggN/binary, AggPK/binary, Msg/binary>>)
         ),
-        N1Bin =
-          case N1s of
-            <<_:256>> -> N1s;
-            _ when is_integer(N1s) -> <<N1s:256/little>>
-          end,
-        N2Bin =
-          case N2s of
-            <<_:256>> -> N2s;
-            _ when is_integer(N2s) -> <<N2s:256/little>>
-          end,
         Ns = ecu_ed25519:s_add(ecu_ed25519:s_mul(Exp1, N1Bin), ecu_ed25519:s_mul(Exp2, N2Bin)),
         S = ecu_ed25519:s_add(
           ecu_ed25519:s_mul(Challenge, ecu_ed25519:s_mul(<<MyExpBin:256/little>>, Seed)), Ns
@@ -581,7 +592,7 @@ aggregate_partial(
   #key_agg_ctx{ciphersuite = bip340, agg_pk_point = AggPt, agg_pk_bin = AggPkComp},
   <<AggR1Bin:33/binary, AggR2Bin:33/binary>>,
   Msg,
-  PartSigs,
+  [_ | _] = PartSigs,
   TweakAcc
 ) ->
   try
@@ -600,7 +611,16 @@ aggregate_partial(
     E = ecu_schnorr:tagged_hash(<<"BIP0340/challenge">>, <<RxOnly/binary, AggXonly/binary, Msg/binary>>),
     EInt = binary:decode_unsigned(E),
 
-    SumS0 = lists:foldl(fun(<<S:256>>, Acc) -> (Acc + S) rem N end, 0, PartSigs),
+    SumS0 = lists:foldl(
+      fun(<<S:256>>, Acc) ->
+        case S < N of
+          true -> (Acc + S) rem N;
+          false -> error(invalid_partial_sig)
+        end
+      end,
+      0,
+      PartSigs
+    ),
     {_, Qy} = AggPt,
     TweakTerm =
       case is_integer(Qy) andalso (Qy rem 2 =:= 0) of
@@ -618,9 +638,23 @@ aggregate_partial(
     _:Reason -> {error, Reason}
   end;
 aggregate_partial(
-  #key_agg_ctx{ciphersuite = ed25519, agg_pk_bin = AggPK}, [AccN1, AccN2], Msg, PartSigs, _TweakAcc
+  #key_agg_ctx{ciphersuite = ed25519, agg_pk_bin = AggPK},
+  [AccN1, AccN2],
+  Msg,
+  [_ | _] = PartSigs,
+  _TweakAcc
 ) ->
   try
+    L = ecu_ed25519:n(),
+    lists:foreach(
+      fun(<<SInt:256/little>>) ->
+        case SInt < L of
+          true -> ok;
+          false -> error(invalid_partial_sig)
+        end
+      end,
+      PartSigs
+    ),
     Exp1 = <<1:256/little>>,
     Exp2 = ecu_ed25519:scalar_reduce(
       ecu_compat:hash(sha512, <<AggPK/binary, AccN1/binary, AccN2/binary, Msg/binary>>)
